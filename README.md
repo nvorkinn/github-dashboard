@@ -47,12 +47,12 @@ no list of users: the site sits behind Tinyauth at the reverse proxy, which deci
 The relay reads four variables. With none set it runs without sign-in (the endpoints answer 503); with some
 missing or wrong it refuses to start.
 
-| Variable | Value |
-| --- | --- |
-| `GITHUB_APP_CLIENT_ID` | The app's client ID (not its app ID). |
-| `GITHUB_APP_CLIENT_SECRET` | A client secret generated on the app's page. |
-| `COOKIE_KEY` | 32 random bytes in base64: `openssl rand -base64 32`. Changing it signs everyone out. |
-| `PUBLIC_URL` | Where the browser reaches the relay, `https://github.vorkinn.org`. Cookies are Secure when it is https. |
+| Variable                   | Value                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `GITHUB_APP_CLIENT_ID`     | The app's client ID (not its app ID).                                                                   |
+| `GITHUB_APP_CLIENT_SECRET` | A client secret generated on the app's page.                                                            |
+| `COOKIE_KEY`               | 32 random bytes in base64: `openssl rand -base64 32`. Changing it signs everyone out.                   |
+| `PUBLIC_URL`               | Where the browser reaches the relay, `https://github.vorkinn.org`. Cookies are Secure when it is https. |
 
 The GitHub App (Settings, Developer settings, GitHub Apps):
 
