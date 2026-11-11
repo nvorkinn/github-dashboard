@@ -93,11 +93,19 @@ export type DashboardData = {
 
 /**
  * `loading`: nothing read yet. `ready`: `data` is what was last read; `refreshing` while a newer read is under way,
- * and `problem` says, in words for the user, why the last read failed (the older data stays up).
+ * and `problem` says, in words for the user, why the last read failed (the older data stays up). `live` while
+ * changes arrive as they happen; otherwise the data is only as fresh as the last read, and is read again every minute.
  */
 export type DashboardState =
   | { status: "loading" }
-  | { status: "ready"; data: DashboardData; readAt: number; refreshing: boolean; problem: string | undefined }
+  | {
+      status: "ready";
+      data: DashboardData;
+      readAt: number;
+      refreshing: boolean;
+      problem: string | undefined;
+      live: boolean;
+    }
   | { status: "failed"; problem: string };
 
 /** Where the page gets its data. `web/src/github/` makes the real one; tests and the demo can make their own. */

@@ -57,13 +57,17 @@ export function project(fields: Partial<Project> = {}): Project {
   };
 }
 
-export function ready(data: Partial<DashboardData> = {}, rest: { refreshing?: boolean; problem?: string } = {}) {
+export function ready(
+  data: Partial<DashboardData> = {},
+  rest: { refreshing?: boolean; problem?: string; live?: boolean } = {},
+) {
   return {
     status: "ready",
     data: { projects: [], pulls: [], releases: [], ...data },
     readAt: NOW - 12_000,
     refreshing: rest.refreshing ?? false,
     problem: rest.problem,
+    live: rest.live ?? true,
   } satisfies DashboardState;
 }
 

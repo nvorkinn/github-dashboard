@@ -1,7 +1,20 @@
 import { expect, test } from "vitest";
+import { project, pull } from "../components/testing.ts";
+import type { DashboardData } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
-import { checkState, checks, isReleaseName, mergeState, readDashboard, shownRuns } from "./read.ts";
-import { account, fakeGitHub, job, repo, withPull, withWorkflow } from "./testing.ts";
+import type { Change } from "./events.ts";
+import {
+  checkState,
+  checks,
+  isReleaseName,
+  mergeState,
+  type Plan,
+  planFor,
+  readChanged,
+  readDashboard,
+  shownRuns,
+} from "./read.ts";
+import { account, fakeGitHub, job, type Routes, repo, run, withPull, withWorkflow } from "./testing.ts";
 
 function read(routes: Record<string, unknown>, previous?: Parameters<typeof readDashboard>[1]) {
   const github = fakeGitHub(routes);
@@ -315,4 +328,345 @@ test("a network that fails in one project fails the whole read", async () => {
     throw new TypeError("Failed to fetch");
   };
   await expect(read(routes).result).rejects.toThrow("Failed to fetch");
+});
+
+// What is known when the changes below arrive: two projects, and two pull requests whose heads are the same commit.
+const known: DashboardData = {
+  projects: [project({ repo: "octo/app" }), project({ repo: "octo/lib" })],
+  pulls: [
+    pull({ repo: "octo/app", number: 1, sha: "sha1" }),
+    pull({ repo: "octo/app", number: 2, sha: "sha2" }),
+    pull({ repo: "octo/lib", number: 5, sha: "sha1" }),
+  ],
+  releases: [],
+};
+
+/** A plan, spelled with only what it reads. */
+function plan(repos: Record<string, { pulls?: "all" | number[]; releases?: true; latestRelease?: true }>): Plan {
+  return new Map(
+    Object.entries(repos).map(([name, wanted]) => [
+      name,
+      {
+        pulls: wanted.pulls === "all" ? "all" : new Set(wanted.pulls ?? []),
+        releases: wanted.releases ?? false,
+        latestRelease: wanted.latestRelease ?? false,
+      },
+    ]),
+  );
+}
+
+test.each<[string, Change[], Plan]>([
+  [
+    "a pull request, also one not known yet",
+    [{ kind: "pull_request", repo: "octo/app", action: "opened", pull: 7 }],
+    plan({ "octo/app": { pulls: [7] } }),
+  ],
+  [
+    "a review",
+    [{ kind: "pull_request_review", repo: "octo/app", pull: 1, sha: "sha1" }],
+    plan({ "octo/app": { pulls: [1] } }),
+  ],
+  [
+    "a check on a pull request's head",
+    [{ kind: "check_run", repo: "octo/app", sha: "sha2" }],
+    plan({ "octo/app": { pulls: [2] } }),
+  ],
+  [
+    "a status on a commit that is a head in another project too",
+    [{ kind: "status", repo: "octo/app", sha: "sha1" }],
+    plan({ "octo/app": { pulls: [1] } }),
+  ],
+  [
+    "a check on a commit no pull request has as its head",
+    [{ kind: "check_run", repo: "octo/app", sha: "main1" }],
+    plan({}),
+  ],
+  ["a check that names no commit", [{ kind: "check_suite", repo: "octo/app" }], plan({ "octo/app": { pulls: "all" } })],
+  [
+    "a workflow's job on the default branch",
+    [{ kind: "workflow_job", repo: "octo/app", sha: "main1", run: 9 }],
+    plan({ "octo/app": { releases: true } }),
+  ],
+  [
+    "a workflow run on a pull request",
+    [{ kind: "workflow_run", repo: "octo/lib", sha: "sha1", run: 9 }],
+    plan({ "octo/lib": { releases: true, pulls: [5] } }),
+  ],
+  [
+    "an approval of a deployment",
+    [{ kind: "deployment_review", repo: "octo/app", run: 9 }],
+    plan({ "octo/app": { releases: true, pulls: "all" } }),
+  ],
+  ["a push", [{ kind: "push", repo: "octo/app", sha: "main2" }], plan({ "octo/app": { pulls: "all" } })],
+  ["a release", [{ kind: "release", repo: "octo/lib" }], plan({ "octo/lib": { latestRelease: true } })],
+  [
+    "a burst",
+    [
+      { kind: "check_run", repo: "octo/app", sha: "sha1" },
+      { kind: "check_run", repo: "octo/app", sha: "sha2" },
+      { kind: "check_run", repo: "octo/app", sha: "sha2" },
+      { kind: "release", repo: "octo/app" },
+      { kind: "workflow_job", repo: "octo/lib", sha: "sha1" },
+      { kind: "check_run", repo: "octo/lib", sha: "main1" },
+    ],
+    plan({ "octo/app": { pulls: [1, 2], latestRelease: true }, "octo/lib": { releases: true, pulls: [5] } }),
+  ],
+  [
+    "a push among checks",
+    [
+      { kind: "check_run", repo: "octo/app", sha: "sha1" },
+      { kind: "push", repo: "octo/app" },
+      { kind: "check_run", repo: "octo/app", pull: 2 },
+    ],
+    plan({ "octo/app": { pulls: "all" } }),
+  ],
+  ["a repository that changed", [{ kind: "repository", repo: "octo/app", action: "archived" }], "everything"],
+  ["an installation", [{ kind: "installation", action: "created" }], "everything"],
+  ["repositories added", [{ kind: "installation_repositories", action: "added" }], "everything"],
+  ["a kind that isn't known", [{ kind: "star", repo: "octo/app" }], "everything"],
+  ["a change without a repository", [{ kind: "check_run", sha: "sha1" }], "everything"],
+  ["a repository that isn't known", [{ kind: "pull_request", repo: "octo/new", pull: 1 }], "everything"],
+  [
+    "one such among others",
+    [
+      { kind: "check_run", repo: "octo/app", sha: "sha1" },
+      { kind: "repository", repo: "octo/lib" },
+    ],
+    "everything",
+  ],
+  ["nothing", [], plan({})],
+])("the plan for %s", (_, changes, expected) => {
+  expect(planFor(changes, known)).toEqual(expected);
+});
+
+/** An account with something of everything, and what a read of all of it gives. */
+async function everything() {
+  const routes = account("octo/app", "octo/lib");
+  withPull(routes, "octo/app", 1);
+  withPull(routes, "octo/app", 2);
+  withPull(routes, "octo/lib", 5);
+  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [{ id: 4, jobs: [job(41)] }]);
+  routes["repos/octo/app/releases/latest"] = {
+    tag_name: "v1.0.0",
+    html_url: "https://github.com/octo/app/releases/tag/v1.0.0",
+    created_at: "2026-11-01T00:00:00Z",
+    published_at: "2026-11-01T10:00:00Z",
+  };
+  return { routes, before: (await read(routes).result).data };
+}
+
+/** Reads what `changes` name. `calls` are the requests that took, sorted. */
+async function changed(routes: Routes, changes: Change[], before: DashboardData) {
+  const wanted = planFor(changes, before);
+  if (wanted === "everything") {
+    throw new Error("These changes read everything");
+  }
+  const github = fakeGitHub(routes);
+  const result = await readChanged(createApi(github.auth), wanted, before);
+  return { ...result, calls: github.calls.sort() };
+}
+
+const pullCalls = (repo: string, number: number) => [
+  `repos/${repo}/commits/sha${number}/check-runs?filter=latest&per_page=100`,
+  `repos/${repo}/commits/sha${number}/statuses?per_page=100`,
+  `repos/${repo}/pulls/${number}`,
+];
+
+test("a check on a pull request reads that pull request and nothing else", async () => {
+  const { routes, before } = await everything();
+  routes["repos/octo/app/commits/sha2/check-runs"] = {
+    total_count: 1,
+    check_runs: [{ name: "test", status: "in_progress", conclusion: null, html_url: null }],
+  };
+  const { data, problem, calls } = await changed(
+    routes,
+    [{ kind: "check_run", repo: "octo/app", sha: "sha2" }],
+    before,
+  );
+  expect(calls).toEqual(pullCalls("octo/app", 2));
+  expect(problem).toBeUndefined();
+  expect(data.pulls.map((one) => one.number)).toEqual([1, 2, 5]);
+  expect(data.pulls[1]).toEqual({ ...before.pulls[1], checks: [{ name: "test", state: "running", url: undefined }] });
+  // The rest is what it was, to the object.
+  expect(data.pulls[0]).toBe(before.pulls[0]);
+  expect(data.pulls[2]).toBe(before.pulls[2]);
+  expect(data.projects).toEqual(before.projects);
+  expect(data.releases).toEqual(before.releases);
+});
+
+test("a check on a commit that is no pull request's head reads nothing", async () => {
+  const { routes, before } = await everything();
+  const { data, calls } = await changed(routes, [{ kind: "check_run", repo: "octo/app", sha: "main1" }], before);
+  expect(calls).toEqual([]);
+  expect(data).toEqual(before);
+});
+
+test("pull requests read by number are changed, added at the front, or gone", async () => {
+  const { routes, before } = await everything();
+  withPull(routes, "octo/app", 8);
+  withPull(routes, "octo/app", 9);
+  routes["repos/octo/app/pulls/1"] = { ...(routes["repos/octo/app/pulls/1"] as object), state: "closed" };
+  routes["repos/octo/app/pulls/2"] = { ...(routes["repos/octo/app/pulls/2"] as object), title: "Renamed" };
+  const { data, calls } = await changed(
+    routes,
+    [
+      { kind: "pull_request", repo: "octo/app", action: "closed", pull: 1 },
+      { kind: "pull_request", repo: "octo/app", action: "edited", pull: 2 },
+      { kind: "pull_request", repo: "octo/app", action: "opened", pull: 8 },
+      { kind: "pull_request", repo: "octo/app", action: "opened", pull: 9 },
+      // Gone by the time it is read.
+      { kind: "pull_request", repo: "octo/app", action: "opened", pull: 10 },
+    ],
+    before,
+  );
+  expect(data.pulls.map((one) => [one.repo, one.number])).toEqual([
+    ["octo/app", 9],
+    ["octo/app", 8],
+    ["octo/app", 2],
+    ["octo/lib", 5],
+  ]);
+  expect(data.pulls[2]?.title).toBe("Renamed");
+  // A closed one's checks aren't asked for, and the list of open ones isn't either.
+  expect(calls).toEqual(
+    [
+      "repos/octo/app/pulls/1",
+      "repos/octo/app/pulls/10",
+      ...pullCalls("octo/app", 2),
+      ...pullCalls("octo/app", 8),
+      ...pullCalls("octo/app", 9),
+    ].sort(),
+  );
+});
+
+test("a workflow's run or job reads the repository's release runs", async () => {
+  const { routes, before } = await everything();
+  expect(before.releases).toMatchObject([{ id: 4, state: "passed" }]);
+  withWorkflow(routes, "octo/app", { id: 6, name: "CI" }, [{ id: 7 }]);
+  (routes["repos/octo/app/actions/workflows/3/runs"] as { workflow_runs: unknown[] }).workflow_runs.unshift(
+    run("octo/app", 5, { status: "in_progress", conclusion: null }),
+  );
+  routes["repos/octo/app/actions/runs/5/jobs"] = {
+    total_count: 1,
+    jobs: [job(51, { status: "in_progress", conclusion: null, completed_at: null })],
+  };
+  const { data, calls } = await changed(
+    routes,
+    [
+      { kind: "workflow_run", repo: "octo/app", action: "in_progress", sha: "main1", run: 5 },
+      { kind: "workflow_job", repo: "octo/app", action: "in_progress", sha: "main1", run: 5 },
+    ],
+    before,
+  );
+  expect(calls).toEqual([
+    "repos/octo/app/actions/runs/4/jobs?per_page=100",
+    "repos/octo/app/actions/runs/5/jobs?per_page=100",
+    "repos/octo/app/actions/workflows/3/runs?per_page=5",
+    "repos/octo/app/actions/workflows?per_page=100",
+  ]);
+  expect(data.releases).toMatchObject([
+    { id: 5, state: "running", jobs: [{ id: 51, state: "running" }] },
+    { id: 4, state: "passed" },
+  ]);
+  expect(data.pulls).toEqual(before.pulls);
+});
+
+test("a workflow's run on a pull request reads that pull request too", async () => {
+  const { routes, before } = await everything();
+  const { calls } = await changed(routes, [{ kind: "workflow_run", repo: "octo/lib", sha: "sha5" }], before);
+  expect(calls).toEqual(["repos/octo/lib/actions/workflows?per_page=100", ...pullCalls("octo/lib", 5)]);
+});
+
+test("a release reads the repository's latest release", async () => {
+  const { routes, before } = await everything();
+  routes["repos/octo/app/releases/latest"] = {
+    tag_name: "v1.1.0",
+    html_url: "https://github.com/octo/app/releases/tag/v1.1.0",
+    created_at: "2026-11-05T00:00:00Z",
+    published_at: null,
+  };
+  const { data, calls } = await changed(
+    routes,
+    [
+      { kind: "release", repo: "octo/app", action: "published" },
+      { kind: "release", repo: "octo/lib", action: "deleted" },
+    ],
+    before,
+  );
+  expect(calls).toEqual(["repos/octo/app/releases/latest", "repos/octo/lib/releases/latest"]);
+  expect(data.projects).toEqual([
+    {
+      ...before.projects[0],
+      latestRelease: {
+        tag: "v1.1.0",
+        url: "https://github.com/octo/app/releases/tag/v1.1.0",
+        publishedAt: "2026-11-05T00:00:00Z",
+      },
+    },
+    before.projects[1],
+  ]);
+  expect(data.pulls).toEqual(before.pulls);
+});
+
+test("a push reads every pull request of the repository, as their base may have moved", async () => {
+  const { routes, before } = await everything();
+  routes["repos/octo/app/pulls/1"] = { ...(routes["repos/octo/app/pulls/1"] as object), mergeable_state: "behind" };
+  withPull(routes, "octo/app", 3);
+  const { data, calls } = await changed(routes, [{ kind: "push", repo: "octo/app", sha: "main2" }], before);
+  expect(calls).toEqual(
+    [
+      "repos/octo/app/pulls?state=open&per_page=100",
+      ...pullCalls("octo/app", 1),
+      ...pullCalls("octo/app", 2),
+      ...pullCalls("octo/app", 3),
+    ].sort(),
+  );
+  expect(data.pulls.map((one) => [one.number, one.mergeState])).toEqual([
+    [1, "behind"],
+    [2, "clean"],
+    [3, "clean"],
+    [5, "clean"],
+  ]);
+});
+
+test("a part that can't be read again stays as it was, and is a problem", async () => {
+  const { routes, before } = await everything();
+  routes["repos/octo/app/pulls/1"] = () => new Response(null, { status: 502 });
+  routes["repos/octo/lib/releases/latest"] = () => Response.json({ message: "no" }, { status: 403 });
+  routes["repos/octo/app/actions/runs/4/jobs"] = { total_count: 0, jobs: [] };
+  const first = await changed(
+    routes,
+    [
+      { kind: "workflow_run", repo: "octo/app", sha: "sha1" },
+      { kind: "check_run", repo: "octo/app", sha: "sha2" },
+    ],
+    before,
+  );
+  expect(first.problem).toBe("Couldn't read everything from octo/app.");
+  // Neither pull request is taken from a read that got only one of them; the release runs were read.
+  expect(first.data.pulls).toEqual(before.pulls);
+  expect(first.data.releases).toMatchObject([{ id: 4, jobs: [] }]);
+
+  const second = await changed(
+    routes,
+    [
+      { kind: "check_run", repo: "octo/app", sha: "sha1" },
+      { kind: "release", repo: "octo/lib" },
+    ],
+    before,
+  );
+  expect(second.problem).toBe("Couldn't read everything from 2 projects.");
+  expect(second.data).toEqual(before);
+});
+
+test.each([
+  ["a rate limit", () => Response.json({}, { status: 403, headers: { "retry-after": "60" } }), 403],
+  ["a sign-in GitHub no longer accepts", () => new Response(null, { status: 401 }), 401],
+])("%s fails a read of changes as it does a read of everything", async (_, answer, status) => {
+  const { routes, before } = await everything();
+  routes["repos/octo/app/pulls/1"] = answer;
+  const error = await changed(routes, [{ kind: "check_run", repo: "octo/app", sha: "sha1" }], before).catch(
+    (thrown: unknown) => thrown,
+  );
+  expect(error).toBeInstanceOf(GitHubError);
+  expect(error).toMatchObject({ status });
 });
