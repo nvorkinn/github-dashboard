@@ -86,7 +86,7 @@ async function openPreview(config = service()) {
 test("shows current toggle values, excludes target from sources and saves then refreshes", async () => {
   const config = service();
   render(<RepositorySettings repo={target} service={config} />);
-  const toggle = await screen.findByRole("checkbox", { name: "Delete branches after merging" });
+  const toggle = await screen.findByRole("switch", { name: "Delete branches after merging" });
   expect((toggle as HTMLInputElement).checked).toBe(true);
   expect(screen.queryByRole("option", { name: target })).toBeNull();
   fireEvent.click(toggle);
@@ -129,7 +129,7 @@ test("read-only users can preview but cannot select or save", async () => {
   await openPreview(config);
   expect(screen.getByText(/Read only/)).toBeTruthy();
   expect((screen.getByRole("checkbox", { name: /Add Classic/ }) as HTMLInputElement).disabled).toBe(true);
-  const toggle = screen.getByRole("checkbox", { name: "Allow auto-merge" }) as HTMLInputElement;
+  const toggle = screen.getByRole("switch", { name: "Allow auto-merge" }) as HTMLInputElement;
   expect(toggle.closest("fieldset")?.disabled).toBe(true);
 });
 
@@ -165,9 +165,9 @@ test("save refusals retain server values and expose the error", async () => {
   const config = service();
   config.save.mockRejectedValue(new Error("Administration permission is required."));
   render(<RepositorySettings repo={target} service={config} />);
-  fireEvent.click(await screen.findByRole("checkbox", { name: "Allow auto-merge" }));
+  fireEvent.click(await screen.findByRole("switch", { name: "Allow auto-merge" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Administration permission");
-  expect((screen.getByRole("checkbox", { name: "Allow auto-merge" }) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole("switch", { name: "Allow auto-merge" }) as HTMLInputElement).checked).toBe(false);
 });
 
 test("workspace integrates settings only for the selected repository, separately from pull review", async () => {
@@ -184,15 +184,55 @@ test("workspace integrates settings only for the selected repository, separately
       />
     </ActionsContext.Provider>,
   );
-  expect(screen.queryByRole("button", { name: "Repository settings" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
   fireEvent.click(
     within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", { name: "target" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Repository settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByRole("heading", { name: "Repository settings" });
+  const sections = screen.getByRole("navigation", { name: "Workspace sections" });
+  expect(within(sections).getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("region", { name: "Dashboard summary" })).toBeNull();
+  fireEvent.click(within(sections).getByRole("button", { name: "Pull requests" }));
+  expect(screen.queryByRole("heading", { name: "Repository settings" })).toBeNull();
+  fireEvent.click(within(sections).getByRole("button", { name: "Settings" }));
   await screen.findByRole("heading", { name: "Repository settings" });
   expect(config.read).toHaveBeenCalledWith(target);
   fireEvent.click(
     within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", { name: "source" }),
   );
   expect(screen.queryByRole("heading", { name: "Repository settings" })).toBeNull();
+});
+
+test("leaving the Settings tab discards a pending copy confirmation", async () => {
+  const config = service();
+  render(
+    <ActionsContext.Provider value={{ repositories: config }}>
+      <Workspace
+        projects={[project({ repo: target, name: "target" })]}
+        pulls={[]}
+        runs={[]}
+        now={NOW}
+        hidden={new Set()}
+        onToggle={() => {}}
+      />
+    </ActionsContext.Provider>,
+  );
+  fireEvent.click(
+    within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", { name: "target" }),
+  );
+  const sections = screen.getByRole("navigation", { name: "Workspace sections" });
+  fireEvent.click(within(sections).getByRole("button", { name: "Settings" }));
+  await screen.findByRole("option", { name: source });
+  fireEvent.change(screen.getByRole("combobox", { name: "Source repository" }), { target: { value: source } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview rules" }));
+  await screen.findByText("Classic protection: main");
+  fireEvent.click(screen.getByRole("checkbox", { name: /Add Classic protection/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply 1 selected changes" }));
+  expect(screen.getByRole("button", { name: `Confirm copy to ${target}` })).toBeTruthy();
+  fireEvent.click(within(sections).getByRole("button", { name: "Overview" }));
+  fireEvent.click(within(sections).getByRole("button", { name: "Settings" }));
+  await screen.findByRole("combobox", { name: "Source repository" });
+  expect(screen.queryByRole("button", { name: `Confirm copy to ${target}` })).toBeNull();
+  expect(config.apply).not.toHaveBeenCalled();
 });
