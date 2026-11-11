@@ -3,7 +3,7 @@ import type { Dashboard, DashboardData, DashboardState, Notice, PullRequest } fr
 import { createApi, GitHubError } from "./api.ts";
 import { type Change, type Connect, createEvents } from "./events.ts";
 import { readEverything, type Shape } from "./graphql.ts";
-import { type Plan, planFor, type ReadResult, readChanged } from "./read.ts";
+import { type Plan, planFor, type ReadResult, type ReleasePaths, readChanged } from "./read.ts";
 import { forgetWorkflowFiles } from "./workflow_graph.ts";
 
 // How often everything is read again while the relay's events don't arrive: as often as before there were any.
@@ -64,6 +64,8 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   const unsettled = new Map<string, number>();
   // Which workflows a read of everything asks about: what the last one found, or what the last visit kept.
   let shape: Shape | undefined;
+  // Each project's release workflows, as the last read of everything found them: a change is told by them.
+  let releasePaths: ReleasePaths = {};
   const hiddenProjects = (): ReadonlySet<string> => options.hidden?.() ?? new Set();
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
@@ -152,7 +154,9 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       return;
     }
     const plan =
-      missed || hidden() || state.status !== "ready" ? "everything" : planFor(changes, state.data, hiddenProjects());
+      missed || hidden() || state.status !== "ready"
+        ? "everything"
+        : planFor(changes, state.data, hiddenProjects(), releasePaths);
     changes = [];
     if (plan === "everything") {
       missed = true;
@@ -229,6 +233,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
               }),
               plan,
               previous,
+              releasePaths,
             );
       // Stopped while reading: this is no longer wanted, and may be another user's by now.
       if (controller.signal.aborted) {
@@ -269,6 +274,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     });
     if (!signal.aborted) {
       shape = result.shape;
+      releasePaths = result.releasePaths;
       try {
         options.shape?.save(result.shape);
       } catch {
@@ -361,6 +367,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       changes = [];
       unsettled.clear();
       shape = undefined;
+      releasePaths = {};
       if (state.status !== "loading") {
         setState({ status: "loading" });
       }

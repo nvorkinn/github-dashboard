@@ -17,6 +17,8 @@ export type Change = {
   sha?: string;
   /** A workflow run's id. */
   run?: number;
+  /** The workflow file of the run, such as `.github/workflows/release.yml`, where the event says. */
+  path?: string;
 };
 
 import { NOTICE_TYPES, type Notice, type NoticeType } from "../model.ts";
@@ -213,7 +215,7 @@ function parse(event: Event): Change | undefined {
   if (!data) {
     return undefined;
   }
-  const { kind, repo, action, pull, sha, run } = data;
+  const { kind, repo, action, pull, sha, run, path } = data;
   if (typeof kind !== "string" || kind === "") {
     return undefined;
   }
@@ -224,5 +226,6 @@ function parse(event: Event): Change | undefined {
     ...(typeof pull === "number" && Number.isInteger(pull) ? { pull } : {}),
     ...(typeof sha === "string" ? { sha } : {}),
     ...(typeof run === "number" && Number.isInteger(run) ? { run } : {}),
+    ...(typeof path === "string" ? { path } : {}),
   };
 }

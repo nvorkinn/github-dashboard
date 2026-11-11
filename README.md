@@ -149,7 +149,8 @@ data: {"kind":"pull_request","repo":"nvorkinn/github-dashboard","action":"synchr
 - `hello` comes once, on connecting. A page that sees it after a break knows it may have missed changes.
 - `change` comes once per webhook. `kind` is the webhook's event name (`X-GitHub-Event`) and is always there. The
   rest is there when the webhook has it: `repo` (the repository's full name), `action`, `pull` (the pull request's
-  number), `sha` (the head commit) and `run` (the workflow run's id). Nothing else from the webhook is passed on in a `change`.
+  number), `sha` (the head commit), `run` (the workflow run's id) and `path` (that run's workflow file, which a
+  `workflow_run` carries). Nothing else from the webhook is passed on in a `change`.
 - `notice` comes after the `change` of a webhook that needs attention, the same ones Telegram is told about (see
   "Telegram"), for the page's desktop notifications (see "Desktop notifications"):
   `{"type":"merged","key":"merged:owner/name#7","repo":"owner/name","headline":"Merged owner/name#7: its title","url":"https://github.com/owner/name/pull/7"}`.
@@ -189,15 +190,18 @@ is never shown.
 Everything on the page is read through GitHub's GraphQL API (`web/src/github/graphql.ts`), in a handful of requests
 sent side by side: at the start, on **Refresh**, every minute while the relay's events don't arrive, and every five
 minutes while they do. In between,
-an event from the relay reads only what it names, through the REST API (`web/src/github/read.ts`). Both end in the
+an event from the relay reads only what it names, through the REST API (`web/src/github/read.ts`): the pull request,
+or the workflow run, and of a run only if its workflow file is one of the project's release workflows. Both end in the
 same code, so a pull request reads the same either way.
 
 A read asks for every repository the signed-in user reaches (what its row shows), and for the pull requests, checks,
 workflow files and release runs of the projects that aren't hidden. GitHub answers the parts of one query one after
 another, so the read is one request for the list and one for every seven projects and every seven release
 workflows, all at once: about five requests and a second and a half for a dozen projects, where a single request
-took six seconds. Of a release workflow only the latest run is read in full; another run that the page shows (one
-still going behind it, or the last finished one while the latest is going) is asked for by itself after. Of a hidden project nothing
+took six seconds. A release run is on the page while it is going and for five minutes after, so that is all that is read
+of it: of each release workflow whether its latest runs finished and the latest as its card shows it, and of a run
+that is going, asked for by itself after, its jobs, pending approvals and workflow file. A finished run shows
+without its jobs, with a link to it on GitHub. Of a hidden project nothing
 but its row is read; showing it again reads it. A new repository is in the list of the next read, and so shows on
 the page by itself, within those one to five minutes or at once when GitHub's `repository` event arrives.
 

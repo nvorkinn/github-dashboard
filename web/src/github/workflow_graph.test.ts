@@ -213,12 +213,17 @@ test("a release run gets its graph from the workflow file at its commit, or none
   withWorkflow(routes, "octo/app", { id: 3, name: "Release", path: ".github/workflows/release.yml" }, [
     {
       id: 2,
+      // Going: a finished run's jobs aren't read.
+      status: "in_progress",
+      conclusion: null,
       head_sha: "abc",
       path: ".github/workflows/release.yml",
       jobs: [job(10, { name: "tag" }), job(11, { name: "image" }), job(12, { name: "lost" })],
     },
   ]);
-  withWorkflow(routes, "octo/app", { id: 4, name: "Deploy" }, [{ id: 3, head_sha: "def", jobs: [job(20)] }]);
+  withWorkflow(routes, "octo/app", { id: 4, name: "Deploy" }, [
+    { id: 3, status: "in_progress", conclusion: null, head_sha: "def", jobs: [job(20)] },
+  ]);
   withFile(routes, "octo/app", ".github/workflows/release.yml", "abc", OWN_RELEASE);
   const { auth } = fakeGitHub(routes);
   const { data } = await readEverything(auth);
