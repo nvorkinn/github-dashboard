@@ -114,7 +114,7 @@ test("keeps a token that still works while the relay is having trouble, and trie
 test("a 401 from api.github.com gets a new token and one more try", async () => {
   let issued = 0;
   const calls = stubBackend((call) => {
-    if (call.url === "/api/auth/token") {
+    if (call.url.startsWith("/api/auth/token")) {
       return tokenAnswer(`ghu_${++issued}`);
     }
     return call.headers.get("authorization") === "Bearer ghu_1"
@@ -126,10 +126,11 @@ test("a 401 from api.github.com gets a new token and one more try", async () => 
 
   const response = await auth.github("user");
   expect(response.status).toBe(200);
+  // The relay would hand out the token it gave last again, so it is asked for a fresh one.
   expect(calls.map((call) => call.url)).toEqual([
     "/api/auth/token",
     "https://api.github.com/user",
-    "/api/auth/token",
+    "/api/auth/token?fresh=1",
     "https://api.github.com/user",
   ]);
 });

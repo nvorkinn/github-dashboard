@@ -36,7 +36,7 @@ export function createAuth(): Auth {
   let token: { value: string; expiresAt: number } | undefined;
   let state: AuthState = { status: "loading" };
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let refreshing: Promise<boolean> | undefined;
+  let refreshing: { fresh: boolean; done: Promise<boolean> } | undefined;
   const listeners = new Set<() => void>();
 
   function setState(next: AuthState): void {
@@ -56,19 +56,31 @@ export function createAuth(): Auth {
     clearTimeout(timer);
   }
 
-  /** Gets a new access token from the relay. Whether there is a usable token afterwards. */
-  function refresh(): Promise<boolean> {
-    // One at a time: callers that arrive during a refresh share it.
-    refreshing ??= acrossTabs(requestToken).finally(() => {
-      refreshing = undefined;
-    });
-    return refreshing;
+  /**
+   * Gets an access token from the relay: the one it gave last while that lasts, or with `fresh` a new one from
+   * GitHub whatever it gave last. Whether there is a usable token afterwards.
+   */
+  function refresh(fresh = false): Promise<boolean> {
+    // One at a time: callers that arrive during a refresh share it, unless it can't give them the fresh one they need.
+    if (refreshing && (refreshing.fresh || !fresh)) {
+      return refreshing.done;
+    }
+    const before = refreshing?.done.catch(() => false) ?? Promise.resolve(false);
+    const done = before
+      .then(() => acrossTabs(() => requestToken(fresh)))
+      .finally(() => {
+        if (refreshing?.done === done) {
+          refreshing = undefined;
+        }
+      });
+    refreshing = { fresh, done };
+    return done;
   }
 
-  async function requestToken(): Promise<boolean> {
+  async function requestToken(fresh: boolean): Promise<boolean> {
     let response: Response | undefined;
     try {
-      response = await fetch("api/auth/token", { method: "POST" });
+      response = await fetch(fresh ? "api/auth/token?fresh=1" : "api/auth/token", { method: "POST" });
     } catch {
       // Handled below, like an answer that isn't a token.
     }
@@ -136,8 +148,9 @@ export function createAuth(): Auth {
         throw new Error("Not signed in");
       }
       const response = await send(path, init, token.value);
-      // GitHub can drop a token early (the user revoked it, say): get a new one and try once more.
-      if (response.status === 401 && (await refresh()) && token) {
+      // GitHub can drop a token early (the user revoked it, say): get a new one and try once more. The relay would
+      // hand out the same one again while it thinks it lasts, so it is told to ask GitHub.
+      if (response.status === 401 && (await refresh(true)) && token) {
         return send(path, init, token.value);
       }
       return response;

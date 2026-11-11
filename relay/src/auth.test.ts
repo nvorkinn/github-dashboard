@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { createApp } from "./app.ts";
+import { FRESH_ENOUGH_MS } from "./auth.ts";
 import type { AuthConfig } from "./config.ts";
 import { codeChallenge, open, seal } from "./crypto.ts";
 
@@ -116,8 +117,67 @@ test("the callback trades the code for tokens, keeps the refresh token in its co
   expect(cookie).toContain("HttpOnly");
   expect(cookie).toContain("Secure");
   expect(cookie).toContain("SameSite=Strict");
+  // The access token waits in a cookie of its own for the page to ask for it, for as long as it lasts.
+  const access = setCookie(response, "access") ?? "";
+  expect(access).not.toContain("ghu_first");
+  expect(
+    JSON.parse(open(config.cookieKey, "access", access.slice("access=".length, access.indexOf(";"))) ?? ""),
+  ).toEqual({ token: "ghu_first", expiresAt: expect.any(Number) });
+  expect(access).toMatch(/Max-Age=28(800|799)/);
+  expect(access).toContain("Path=/api/auth");
+  expect(access).toContain("HttpOnly");
+  expect(access).toContain("Secure");
+  expect(access).toContain("SameSite=Strict");
   // The state is used up.
   expect(setCookie(response, "signin_state")).toContain("Max-Age=0");
+});
+
+function accessCookie(token: string, expiresAt: number, key = config.cookieKey): string {
+  return `access=${seal(key, "access", JSON.stringify({ token, expiresAt }))}`;
+}
+
+test("token hands out the access token in its cookie again while it lasts, without asking GitHub", async () => {
+  const github = vi.fn();
+  const expiresAt = Date.now() + 3 * 3600_000;
+  const response = await appWith(github).request("/api/auth/token", {
+    method: "POST",
+    headers: { ...sameOrigin, Cookie: `${refreshCookie("ghr_first")}; ${accessCookie("ghu_kept", expiresAt)}` },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ access_token: "ghu_kept", expires_at: expiresAt });
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(github).not.toHaveBeenCalled();
+  // The cookies stay as they are.
+  expect(response.headers.getSetCookie()).toEqual([]);
+});
+
+test.each([
+  ["has little time left", () => accessCookie("ghu_kept", Date.now() + FRESH_ENOUGH_MS - 1000), ""],
+  ["was sealed with another key", () => accessCookie("ghu_kept", Date.now() + 3600_000, randomBytes(32)), ""],
+  ["isn't one of ours", () => "access=bm90IG91cnM", ""],
+  ["is the refresh token's, moved", () => `access=${seal(config.cookieKey, "refresh", "ghr_first")}`, ""],
+  ["is fine, but the page asks for a fresh one", () => accessCookie("ghu_kept", Date.now() + 3600_000), "?fresh=1"],
+])("token refreshes at GitHub when the access token in the cookie %s", async (_, cookie, query) => {
+  const github = vi.fn().mockResolvedValue(grant("second"));
+  const response = await appWith(github).request(`/api/auth/token${query}`, {
+    method: "POST",
+    headers: { ...sameOrigin, Cookie: `${refreshCookie("ghr_first")}; ${cookie()}` },
+  });
+  expect(((await response.json()) as { access_token: string }).access_token).toBe("ghu_second");
+  expect(github).toHaveBeenCalledOnce();
+  const access = setCookie(response, "access") ?? "";
+  expect(open(config.cookieKey, "access", access.slice("access=".length, access.indexOf(";")))).toContain("ghu_second");
+});
+
+test("an access token in its cookie is no sign-in without the refresh token's", async () => {
+  const github = vi.fn();
+  const response = await appWith(github).request("/api/auth/token", {
+    method: "POST",
+    headers: { ...sameOrigin, Cookie: accessCookie("ghu_kept", Date.now() + 3600_000) },
+  });
+  expect(response.status).toBe(401);
+  expect(setCookie(response, "access")).toContain("Max-Age=0");
+  expect(github).not.toHaveBeenCalled();
 });
 
 test("cookies aren't marked Secure when the public address is plain http", async () => {
@@ -255,7 +315,7 @@ test("refreshes arriving together with the same cookie make one call to GitHub",
   expect(github).toHaveBeenCalledTimes(2);
 });
 
-test("logout clears the cookie", async () => {
+test("logout clears the cookies", async () => {
   const response = await appWith(vi.fn()).request("/api/auth/logout", {
     method: "POST",
     headers: { ...sameOrigin, Cookie: refreshCookie("ghr_first") },
@@ -265,6 +325,10 @@ test("logout clears the cookie", async () => {
   expect(cookie).toContain("refresh=;");
   expect(cookie).toContain("Max-Age=0");
   expect(cookie).toContain("Path=/api/auth");
+  const access = setCookie(response, "access") ?? "";
+  expect(access).toContain("access=;");
+  expect(access).toContain("Max-Age=0");
+  expect(access).toContain("Path=/api/auth");
 });
 
 test.each([

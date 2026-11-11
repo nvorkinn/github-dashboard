@@ -39,11 +39,15 @@ only in memory. The relay does the two steps a browser can't, because they need 
    `/api/auth/callback` with a code; the relay trades the code for tokens, puts the refresh token in a cookie and
    goes to the page.
 2. The page asks `POST /api/auth/token` for an access token when it loads, and again a few minutes before the token
-   runs out (it lasts 8 hours). Each time the relay refreshes at GitHub, which replaces the refresh token too, so
-   the cookie is set anew.
+   runs out (it lasts 8 hours). The relay refreshes at GitHub, which replaces the refresh token too, so the cookies
+   are set anew. It doesn't for a page that only loaded again: the access token is in a cookie of its own, and while
+   it has more than ten minutes left the relay hands that one out, with no call to GitHub. A page whose token GitHub
+   refuses asks with `?fresh=1`, which always refreshes.
 
-The cookie is encrypted (AES-256-GCM), HttpOnly, SameSite=Strict and sent only to `/api/auth`; it lasts as long as
-the refresh token, 6 months from the last use. `POST /api/auth/logout` removes it. The relay stores nothing and has
+Both cookies are encrypted (AES-256-GCM), HttpOnly, SameSite=Strict and sent only to `/api/auth`. The refresh
+token's lasts as long as the token, 6 months from the last use; the access token's as long as its token, 8 hours.
+The page's scripts can read neither, and the page keeps the access token only in memory.
+`POST /api/auth/logout` removes both. The relay stores nothing and has
 no list of users: the site sits behind Tinyauth at the reverse proxy, which decides who gets as far as signing in.
 
 The relay reads four variables for the sign-in. With none set it runs without sign-in (the endpoints answer 503);
