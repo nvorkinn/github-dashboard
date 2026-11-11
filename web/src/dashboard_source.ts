@@ -2,6 +2,7 @@ import type { Auth } from "./auth.ts";
 import type { Actions } from "./components/actions.tsx";
 import { createDashboard } from "./github/dashboard.ts";
 import { createPullActions } from "./github/pull_actions.ts";
+import { createRunActions } from "./github/run_actions.ts";
 import type { Dashboard } from "./model.ts";
 
 /**
@@ -19,14 +20,15 @@ export async function makeDashboard(auth: Auth, demo: boolean): Promise<Dashboar
 }
 
 /**
- * What the page can do to what `dashboard` shows: on GitHub, or, in the demo, to the demo's sample data, which only
- * the demo's own dashboard knows how to change.
+ * What the page can do to what `dashboard` shows: on GitHub as the signed-in user, or, in the demo, to the demo's
+ * sample data, which only the demo's own dashboard knows how to change.
  */
 export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolean): Promise<Actions> {
   if (demo && import.meta.env.MODE === "demo") {
-    const { demoPullActions } = await import("./demo/dashboard.ts");
+    const { demoPullActions, demoRunActions } = await import("./demo/dashboard.ts");
     const pulls = demoPullActions(dashboard);
-    return pulls ? { pulls } : {};
+    const runs = demoRunActions(dashboard);
+    return { ...(pulls ? { pulls } : {}), ...(runs ? { runs } : {}) };
   }
-  return { pulls: createPullActions(auth, dashboard) };
+  return { pulls: createPullActions(auth, dashboard), runs: createRunActions(auth, dashboard) };
 }

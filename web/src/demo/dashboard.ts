@@ -1,6 +1,7 @@
 import { AUTO_MERGE_OFF, DRAFT_REFUSED } from "../github/pull_actions.ts";
-import type { Dashboard, DashboardData, DashboardState, PullActions, PullRequest } from "../model.ts";
-import { FIRST_FRAME, FRAMES, NOTHING, sampleData } from "./data.ts";
+import type { Dashboard, DashboardData, DashboardState, PullActions, PullRequest, RunActions } from "../model.ts";
+import { applyEdits, clearEdits, createDemoRunActions, forgetRun, noEdits } from "./actions.ts";
+import { FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
 
 export type DemoOptions = {
   /** How long each frame of the script stays up. */
@@ -22,21 +23,28 @@ export const MERGED_MS = 1500;
 /** How long the checks run after the demo updated a branch. */
 export const UPDATE_CHECKS_MS = 6000;
 
-// The demo's actions, for `demoPullActions` to find. Kept beside the dashboard, not in its type, so that the rest of
-// the page only ever sees a `Dashboard`.
-const ACTIONS = new WeakMap<Dashboard, PullActions>();
+// The demo's actions, for `demoPullActions` and `demoRunActions` to find. Kept beside the dashboard, not in its
+// type, so that the rest of the page only ever sees a `Dashboard`.
+const ACTIONS = new WeakMap<Dashboard, { pulls: PullActions; runs: RunActions }>();
 
 /** The demo's pull request actions, if `dashboard` is the demo's. They change its sample data. */
 export function demoPullActions(dashboard: Dashboard): PullActions | undefined {
-  return ACTIONS.get(dashboard);
+  return ACTIONS.get(dashboard)?.pulls;
+}
+
+/** The demo's actions on release runs and projects, if `dashboard` is the demo's. They change its sample data. */
+export function demoRunActions(dashboard: Dashboard): RunActions | undefined {
+  return ACTIONS.get(dashboard)?.runs;
 }
 
 /**
  * The demo's dashboard: the sample data, with a script that moves one pull request's checks and one release run
  * along every few seconds and then starts over, the way webhook events move the real page. Its actions (see
  * `demoPullActions`) work on the sample data too, after a moment: auto-merge goes on and off, a merged pull request
- * leaves the list, and an updated branch runs its checks again. Turning auto-merge on in recipe-box is refused, as
- * that repository doesn't allow it, so the page's way of saying an action failed can be seen.
+ * leaves the list, and an updated branch runs its checks again. So do those of `demoRunActions`: an approval moves
+ * its run on, a re-run puts the failed jobs back in the queue, and a release or promotion starts a run. Turning
+ * auto-merge on in recipe-box is refused, as that repository doesn't allow it, and so is releasing garden-sensors,
+ * so the page's way of saying an action failed can be seen.
  */
 export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   const stepMs = options.stepMs ?? 3000;
@@ -51,6 +59,8 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   let frameAt = 0;
   // What the actions did to each pull request, applied over the sample data each time it is drawn. Undefined: gone.
   const tweaks = new Map<string, (pull: PullRequest) => PullRequest | undefined>();
+  // What the actions did to release runs and projects, applied the same way.
+  const edits = noEdits();
 
   function setState(next: DashboardState): void {
     state = next;
@@ -82,7 +92,7 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   function ready(refreshing: boolean, readAt: number): DashboardState {
     return {
       status: "ready",
-      data: show === "empty" ? NOTHING : tweaked(sampleData({ base, frame, frameAt })),
+      data: show === "empty" ? NOTHING : applyEdits(tweaked(sampleData({ base, frame, frameAt })), edits),
       readAt,
       refreshing,
       problem: show === "problem" ? "GitHub didn't answer (503). Showing what was read 5 minutes ago." : undefined,
@@ -156,6 +166,10 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   function advance(): void {
     frame = (frame + 1) % FRAMES;
     frameAt = Date.now();
+    if (frame === 0) {
+      // The scripted run starts over, and waits for its approval again.
+      forgetRun(edits, SCRIPTED_RUN);
+    }
     setState(ready(state.status === "ready" && state.refreshing, frameAt));
   }
 
@@ -168,7 +182,15 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
     }
     timers.clear();
     tweaks.clear();
+    clearEdits(edits);
     setState({ status: "loading" });
+  }
+
+  /** Draws the data again, with what the actions did, as a re-read after an action would. */
+  function redraw(): void {
+    if (state.status === "ready") {
+      setState(ready(state.refreshing, state.readAt));
+    }
   }
 
   const dashboard: Dashboard = {
@@ -224,7 +246,7 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
 
     stop,
   };
-  ACTIONS.set(dashboard, actions);
+  ACTIONS.set(dashboard, { pulls: actions, runs: createDemoRunActions(edits, later, redraw, ACTION_MS) });
   return dashboard;
 }
 

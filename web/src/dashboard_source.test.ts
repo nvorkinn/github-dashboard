@@ -17,5 +17,13 @@ test("outside the demo the actions are GitHub's, whatever the demo flag says", a
     const auth = createAuth();
     const actions = await makeActions(auth, await makeDashboard(auth, demo), demo);
     expect(Object.keys(actions.pulls ?? {}).sort()).toEqual(["merge", "setAutoMerge", "updateBranch"]);
+    expect(Object.keys(actions.runs ?? {}).sort()).toEqual([
+      "nextRelease",
+      "promote",
+      "release",
+      "rerunFailed",
+      "rerunJob",
+      "review",
+    ]);
   }
 });
