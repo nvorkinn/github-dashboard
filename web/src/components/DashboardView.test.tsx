@@ -183,3 +183,19 @@ test("a refresh is pending until the dashboard is done with it, also when it fai
   fail();
   expect(await screen.findByRole("button", { name: "idle" })).toBeTruthy();
 });
+
+test("opens every link in a new tab, so the dashboard stays open", () => {
+  render(
+    <DashboardView
+      state={ready({ pulls: [pull()], releases: [run()], projects: [project()] })}
+      now={NOW}
+      refresh={() => {}}
+    />,
+  );
+  const links = screen.getAllByRole("link");
+  expect(links.length).toBeGreaterThan(2);
+  for (const link of links) {
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  }
+});

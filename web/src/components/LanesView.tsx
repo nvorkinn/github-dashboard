@@ -1,6 +1,7 @@
 import type { Project, PullRequest, ReleaseRun } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
+import { ExternalLink } from "./ExternalLink.tsx";
 import { ProjectActions } from "./ProjectList.tsx";
 import { PullRow, sortPulls } from "./PullList.tsx";
 import { ReleaseCard, shownRuns, sortRuns } from "./ReleaseList.tsx";
@@ -98,9 +99,9 @@ function Lane({
     <section class={quiet ? "lane lane-quiet" : "lane"} aria-labelledby={id}>
       <div class="lane-head">
         <h2 id={id}>
-          <a href={project.url} title={project.repo}>
+          <ExternalLink href={project.url} title={project.repo}>
             {project.name}
-          </a>
+          </ExternalLink>
         </h2>
         <p class="lane-release">
           {project.latestRelease ? (
