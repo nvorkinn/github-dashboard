@@ -352,9 +352,9 @@ afterward, including partial failures; make a fresh selection to continue. All t
 
 ### GitHub service status
 
-The header status pill and dashboard summary open public GitHub service details: component statuses, active
+The header status pill opens public GitHub service details: component statuses, active
 incidents with update history, and scheduled or active maintenance. The page polls `GET /api/github/status` every
-minute while signed in, using one shared request and timer for both surfaces. The relay reads GitHub's public
+minute while signed in, using one request and timer. The relay reads GitHub's public
 [summary API](https://www.githubstatus.com/api) with a ten-second timeout and shares a minute-long, on-demand
 cache across pages. It sends no account credentials. Failed upstream reads also back off for a minute.
 

@@ -2165,21 +2165,6 @@ h1 .home {
   font-size: 0.8rem;
   flex-wrap: wrap;
 }
-.service-summary {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  padding: 0.7rem 1rem;
-  margin-bottom: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
-  font-size: 0.8rem;
-}
-.service-summary > button {
-  margin-left: auto;
-}
 @media (max-width: 700px) {
   .top:has(.service-popover) {
     backdrop-filter: none;
@@ -2192,8 +2177,5 @@ h1 .home {
     inset: 0.75rem 0.75rem auto;
     width: auto;
     max-height: calc(100dvh - 1.5rem);
-  }
-  .service-summary {
-    gap: 0.5rem;
   }
 }
