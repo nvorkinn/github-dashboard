@@ -3,6 +3,7 @@ import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
+import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Settings } from "./components/Settings.tsx";
 import { useView, ViewSwitch } from "./components/ViewSwitch.tsx";
@@ -59,9 +60,9 @@ export function App({
           {pull ? (
             <>
               Demo of{" "}
-              <a href={pull.url}>
+              <ExternalLink href={pull.url}>
                 #{pull.number} {pull.title}
-              </a>
+              </ExternalLink>
               : sample data, nothing here is real.
             </>
           ) : (
