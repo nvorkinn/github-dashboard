@@ -93,7 +93,7 @@ test("a job of the file not started yet is drawn as not started while the run go
   expect(chip.classList.contains("tone-queued")).toBe(true);
 });
 
-test("a big matrix is one card that opens into its jobs", () => {
+test("a big matrix is one box with a grid of its jobs, and the graph runs top to bottom", () => {
   const jobs = Array.from({ length: 8 }, (_, n) =>
     job({ id: n + 1, name: `test (${n})`, state: n < 3 ? "passed" : n === 3 ? "failed" : "queued" }),
   );
@@ -105,12 +105,49 @@ test("a big matrix is one card that opens into its jobs", () => {
       graph: { nodes: [{ key: "test", name: "test", needs: [], several: true, jobs }], unplaced: [] },
     }),
   ]);
-  const group = container.querySelector(".job-group") as HTMLElement;
+  expect(container.querySelector(".graph")?.classList.contains("graph-stack")).toBe(true);
+  const group = container.querySelector(".job-matrix") as HTMLElement;
   expect(group.classList.contains("tone-failed")).toBe(true);
-  expect(group.querySelector("summary")?.textContent).toBe("test: Failed,4/8 finished");
-  expect(group.querySelectorAll("details .job")).toHaveLength(8);
+  expect(group.querySelector(".job-matrix-head")?.textContent).toBe("test: Failed,4 of 8 done");
+  const cells = [...group.querySelectorAll<HTMLElement>(".job-grid .job")];
+  expect(cells).toHaveLength(8);
+  // Only what tells the cells apart shows; screen readers still get the whole name.
+  expect(cells[0]?.textContent).toBe("test (0): Done");
+  expect(cells[0]?.querySelector(".visually-hidden")?.textContent).toBe("test (");
   // Still going, so nothing to re-run.
   expect(screen.queryByRole("button")).toBeNull();
+});
+
+test("finished jobs shrink to ticks and the running one says what it is doing", () => {
+  const done = job({ id: 1, name: "build", startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:01:00Z" });
+  const live = job({ id: 2, name: "deploy", state: "running", startedAt: new Date(NOW - 21_000).toISOString() });
+  const waiting = job({ id: 3, name: "approve", state: "waiting" });
+  const { container } = render(
+    <ReleaseList
+      now={NOW}
+      runs={[
+        run({
+          state: "running",
+          finishedAt: undefined,
+          jobs: [done, live, waiting],
+          graph: {
+            nodes: [
+              { key: "build", name: "build", needs: [], several: false, jobs: [done] },
+              { key: "deploy", name: "deploy", needs: ["build"], several: false, jobs: [live] },
+              { key: "approve", name: "approve", needs: ["deploy"], several: false, jobs: [waiting] },
+            ],
+            unplaced: [],
+          },
+        }),
+      ]}
+    />,
+  );
+  const [first, second, third] = [...container.querySelectorAll<HTMLElement>(".graph .job")];
+  expect(first?.classList.contains("job-tick")).toBe(true);
+  expect(second?.classList.contains("job-live")).toBe(true);
+  expect(second?.querySelector(".job-state")?.textContent).toBe(": Running · 21s");
+  expect(third?.classList.contains("job-live")).toBe(true);
+  expect(third?.textContent).toBe("approve: Waiting for approval");
 });
 
 test("draws a line from each job to those that wait for it, where they turned out to be", () => {

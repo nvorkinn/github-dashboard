@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { Job, JobGraph, ReleaseRun, RunActions } from "../model.ts";
-import { type Card, layoutGraph } from "./graph_layout.ts";
+import { type Card, isLive, isTick, layoutGraph, pickShape } from "./graph_layout.ts";
 import { type Notice, RunAction } from "./RunAction.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
 import { duration } from "./time.ts";
@@ -14,8 +14,9 @@ export type JobsProps = {
 };
 
 /**
- * A run's jobs: on its workflow's graph, in columns left to right by what waits for what, when the workflow file
- * could be read; otherwise in a row, as GitHub lists them.
+ * A run's jobs: on its workflow's graph by what waits for what, when the workflow file could be read; otherwise in a
+ * row, as GitHub lists them. The graph takes the shape that suits it and its room (see `pickShape`): across, a
+ * timeline, or top to bottom. Jobs that finished well shrink to ticks, so the running or waiting ones stand out.
  */
 export function Jobs(props: JobsProps) {
   const { run, now, rerunOf, onNotice } = props;
@@ -35,15 +36,19 @@ export function Jobs(props: JobsProps) {
 }
 
 function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobGraph }) {
-  const { stages, edges } = layoutGraph(graph);
+  const layout = layoutGraph(graph);
+  const { stages, edges } = layout;
+  const outer = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number | undefined>(undefined);
+  const shape = pickShape(layout, width);
   const [lines, setLines] = useState<{ width: number; height: number; paths: string[] }>({
     width: 0,
     height: 0,
     paths: [],
   });
 
-  // The lines are drawn where the cards turned out to be, and again whenever that changes.
+  // The lines are drawn where the cards turned out to be, and again whenever that changes. A timeline draws its own.
   const edgeKey = edges.map((edge) => `${edge.from}>${edge.to}`).join(" ");
   const measure = useRef<() => void>(() => {});
   measure.current = () => {
@@ -57,18 +62,13 @@ function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobG
       rects.set(card.dataset.card ?? "", card.getBoundingClientRect());
     }
     const paths: string[] = [];
-    for (const { from, to } of edges) {
+    for (const { from, to } of shape === "timeline" ? [] : edges) {
       const a = rects.get(from);
       const b = rects.get(to);
       if (!a || !b || a.width === 0 || b.width === 0) {
         continue;
       }
-      const x1 = a.right - origin.left;
-      const y1 = a.top + a.height / 2 - origin.top;
-      const x2 = b.left - origin.left;
-      const y2 = b.top + b.height / 2 - origin.top;
-      const bend = Math.max((x2 - x1) / 2, 8);
-      paths.push(`M${r(x1)},${r(y1)} C${r(x1 + bend)},${r(y1)} ${r(x2 - bend)},${r(y2)} ${r(x2)},${r(y2)}`);
+      paths.push(shape === "row" ? across(a, b, origin) : down(a, b, origin));
     }
     const next = { width: Math.ceil(box.scrollWidth), height: Math.ceil(box.scrollHeight), paths };
     setLines((was) =>
@@ -80,19 +80,25 @@ function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobG
     measure.current();
   });
 
+  // The space the graph has decides its shape; the cards moving, how its lines run.
   useLayoutEffect(() => {
+    const room = outer.current;
     const box = inner.current;
-    if (!box || typeof ResizeObserver === "undefined") {
+    if (!room || !box || typeof ResizeObserver === "undefined") {
       return;
     }
-    const observer = new ResizeObserver(() => measure.current());
+    const observer = new ResizeObserver(() => {
+      setWidth(room.clientWidth || undefined);
+      measure.current();
+    });
+    observer.observe(room);
     observer.observe(box);
     return () => observer.disconnect();
   }, [edgeKey]);
 
   const finished = run.finishedAt !== undefined;
   return (
-    <div class="graph">
+    <div class={`graph graph-${shape}`} ref={outer}>
       <div class="graph-inner" ref={inner}>
         <svg class="graph-lines" width={lines.width} height={lines.height} aria-hidden="true">
           {lines.paths.map((d) => (
@@ -112,7 +118,6 @@ function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobG
                     finished={finished}
                     rerunOf={rerunOf}
                     onNotice={onNotice}
-                    onToggle={() => measure.current()}
                   />
                 ))}
               </ul>
@@ -122,6 +127,26 @@ function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobG
       </div>
     </div>
   );
+}
+
+/** A line from the right of one card to the left of the next. */
+function across(a: DOMRect, b: DOMRect, origin: DOMRect): string {
+  const x1 = a.right - origin.left;
+  const y1 = a.top + a.height / 2 - origin.top;
+  const x2 = b.left - origin.left;
+  const y2 = b.top + b.height / 2 - origin.top;
+  const bend = Math.max((x2 - x1) / 2, 8);
+  return `M${r(x1)},${r(y1)} C${r(x1 + bend)},${r(y1)} ${r(x2 - bend)},${r(y2)} ${r(x2)},${r(y2)}`;
+}
+
+/** A line from the bottom of one card to the top of the next. */
+function down(a: DOMRect, b: DOMRect, origin: DOMRect): string {
+  const x1 = a.left + a.width / 2 - origin.left;
+  const y1 = a.bottom - origin.top;
+  const x2 = b.left + b.width / 2 - origin.left;
+  const y2 = b.top - origin.top;
+  const bend = Math.max((y2 - y1) / 2, 8);
+  return `M${r(x1)},${r(y1)} C${r(x1)},${r(y1 + bend)} ${r(x2)},${r(y2 - bend)} ${r(x2)},${r(y2)}`;
 }
 
 function r(n: number): number {
@@ -135,7 +160,6 @@ function GraphCard({
   finished,
   rerunOf,
   onNotice,
-  onToggle,
 }: {
   card: Card;
   run: ReleaseRun;
@@ -143,7 +167,6 @@ function GraphCard({
   finished: boolean;
   rerunOf: JobsProps["rerunOf"];
   onNotice: JobsProps["onNotice"];
-  onToggle: () => void;
 }) {
   switch (card.kind) {
     case "job":
@@ -155,7 +178,7 @@ function GraphCard({
       const state = finished ? "skipped" : "queued";
       const tone = toneOf(state);
       return (
-        <li class={`job tone-${tone}`} title={labelOf(state)} data-card={card.key}>
+        <li class={`job tone-${tone}${finished ? " job-tick" : ""}`} title={labelOf(state)} data-card={card.key}>
           <ToneIcon tone={tone} />
           <span>{card.name}</span>
           <span class="visually-hidden">: {labelOf(state)}</span>
@@ -165,27 +188,51 @@ function GraphCard({
     case "group": {
       const tone = toneOf(card.state);
       return (
-        <li class={`job job-group tone-${tone}`} data-card={card.key}>
-          <details onToggle={onToggle}>
-            <summary title={labelOf(card.state)}>
-              <ToneIcon tone={tone} />
-              <span>{card.name}</span>
-              <span class="visually-hidden">: {labelOf(card.state)},</span>
-              <span class="job-time">
-                {card.done}/{card.jobs.length}
-                <span class="visually-hidden"> finished</span>
-              </span>
-            </summary>
-            <ul class="jobs">
-              {card.jobs.map((job) => (
-                <JobChip key={job.id} job={job} now={now} run={run} rerun={rerunOf(job)} onNotice={onNotice} />
-              ))}
-            </ul>
-          </details>
+        <li class={`job-matrix tone-${tone}${isLive(card.state) ? " job-live" : ""}`} data-card={card.key}>
+          <p class="job-matrix-head" title={labelOf(card.state)}>
+            <ToneIcon tone={tone} />
+            <span class="job-matrix-name">{card.name}</span>
+            <span class="visually-hidden">: {labelOf(card.state)},</span>
+            <span class="job-matrix-count">
+              {card.done} of {card.jobs.length} done
+            </span>
+          </p>
+          <ul class="jobs job-grid">
+            {card.jobs.map((job) => (
+              <JobChip
+                key={job.id}
+                job={job}
+                now={now}
+                run={run}
+                rerun={rerunOf(job)}
+                onNotice={onNotice}
+                compact
+                matrix={card.name}
+              />
+            ))}
+          </ul>
         </li>
       );
     }
   }
+}
+
+/**
+ * A job's name, and in its matrix's grid only the part that differs: `esp32-c3` of `build (esp32-c3)` under `build`.
+ * The rest is still there for screen readers.
+ */
+function JobName({ name, matrix }: { name: string; matrix: string | undefined }) {
+  const prefix = `${matrix} (`;
+  if (matrix === undefined || !name.startsWith(prefix) || !name.endsWith(")")) {
+    return <>{name}</>;
+  }
+  return (
+    <>
+      <span class="visually-hidden">{prefix}</span>
+      {name.slice(prefix.length, -1)}
+      <span class="visually-hidden">)</span>
+    </>
+  );
 }
 
 /** How long a job took or has been going, when that is known. */
@@ -207,6 +254,8 @@ function JobChip({
   rerun,
   onNotice,
   card,
+  compact = false,
+  matrix,
 }: {
   job: Job;
   now: number;
@@ -216,16 +265,38 @@ function JobChip({
   onNotice: (notice: Notice | undefined) => void;
   /** Its key on the graph, for the lines to find it. */
   card?: string;
+  /** In a matrix's grid: one line, even while it runs. */
+  compact?: boolean;
+  /** In a matrix's grid: the matrix's name, which goes without saying there. */
+  matrix?: string | undefined;
 }) {
   const tone = toneOf(job.state);
   const time = jobTime(job, now);
+  const live = isLive(job.state);
+  const look = live ? " job-live" : isTick(job.state) ? " job-tick" : "";
+  const text = <JobName name={job.name} matrix={matrix} />;
+  const name = job.url ? <a href={job.url}>{text}</a> : <span>{text}</span>;
   return (
-    <li class={`job tone-${tone}`} title={labelOf(job.state)} {...(card ? { "data-card": card } : {})}>
+    <li class={`job tone-${tone}${look}`} title={labelOf(job.state)} {...(card ? { "data-card": card } : {})}>
       <ToneIcon tone={tone} />
-      {job.url ? <a href={job.url}>{job.name}</a> : <span>{job.name}</span>}
-      {/* The chip's colour and shape, in words, for who can't see them. */}
-      <span class="visually-hidden">: {labelOf(job.state)}</span>
-      {time && <span class="job-time">{time}</span>}
+      {live && !compact ? (
+        // The step to look at says what it is doing in words, not only in its colour.
+        <span class="job-text">
+          {name}
+          <span class="job-state">
+            <span class="visually-hidden">: </span>
+            {labelOf(job.state)}
+            {time && ` · ${time}`}
+          </span>
+        </span>
+      ) : (
+        <>
+          {name}
+          {/* The chip's colour and shape, in words, for who can't see them. */}
+          <span class="visually-hidden">: {labelOf(job.state)}</span>
+          {time && <span class="job-time">{time}</span>}
+        </>
+      )}
       {rerun && (
         <RunAction
           label="Re-run"
