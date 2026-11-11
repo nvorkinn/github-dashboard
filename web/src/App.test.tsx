@@ -208,6 +208,15 @@ test("the settings page is a link away, and back", async () => {
   history.replaceState(null, "", "/#dashboard");
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   expect(await screen.findByText("Somebody's work")).toBeTruthy();
+
+  // Picking a view from the settings page goes back to the dashboard.
+  history.replaceState(null, "", "/#settings");
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await screen.findByRole("heading", { name: "Notifications" });
+  fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: "Notifications" })).toBeNull());
+  localStorage.clear();
 });
 
 test("a notice from the dashboard goes to the notifier while signed in", async () => {

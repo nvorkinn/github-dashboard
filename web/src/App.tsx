@@ -133,7 +133,16 @@ function SignedIn({
           </a>
         </h1>
         <div class="top-controls">
-          <ViewSwitch view={view} onChange={setView} />
+          <ViewSwitch
+            view={view}
+            onChange={(next) => {
+              setView(next);
+              // Picking a view from the settings page goes to it.
+              if (page === "settings") {
+                location.hash = "#dashboard";
+              }
+            }}
+          />
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
           <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
             Settings
