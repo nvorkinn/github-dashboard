@@ -248,6 +248,41 @@ test("draws the board's three columns, each with its count, and says None in an 
   expect(screen.getByText("None")).toBeTruthy();
 });
 
+test("filters the compact queue by status and author without changing the board", () => {
+  const pulls = [
+    pull({ number: 1, title: "Ready by Alice", author: "alice", checks: checks("passed") }),
+    pull({ number: 2, title: "Running by Alice", author: "alice", checks: checks("running") }),
+    pull({ number: 3, title: "Broken by Bob", author: "bob", checks: checks("failed") }),
+  ];
+  const view = render(<PullList now={NOW} pulls={pulls} compact />);
+
+  const status = screen.getByLabelText("Status") as HTMLSelectElement;
+  const author = screen.getByLabelText("Author") as HTMLSelectElement;
+  expect([...status.options].map((option) => option.textContent)).toEqual([
+    "All statuses (3)",
+    "Ready to merge (1)",
+    "In progress (1)",
+    "Needs attention (1)",
+  ]);
+  expect([...author.options].map((option) => option.textContent)).toEqual(["All authors (3)", "alice (2)", "bob (1)"]);
+
+  fireEvent.change(status, { target: { value: "attention" } });
+  expect(screen.getByText("Broken by Bob")).toBeTruthy();
+  expect(screen.queryByText("Ready by Alice")).toBeNull();
+
+  fireEvent.change(author, { target: { value: "alice" } });
+  expect(screen.getByText("No pull requests match these filters")).toBeTruthy();
+
+  fireEvent.change(status, { target: { value: "all" } });
+  expect(screen.getByText("Ready by Alice")).toBeTruthy();
+  expect(screen.getByText("Running by Alice")).toBeTruthy();
+  expect(screen.queryByText("Broken by Bob")).toBeNull();
+
+  view.rerender(<PullList now={NOW} pulls={pulls} />);
+  expect(screen.queryByLabelText("Status")).toBeNull();
+  expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(3);
+});
+
 test("falls back to the newest first when what was remembered makes no sense", () => {
   localStorage.setItem("github-dashboard:pull-order", "sideways");
   render(<PullList now={NOW} pulls={MIXED} />);

@@ -118,13 +118,13 @@ export function ReleaseCard({ run, now, inspect = false }: { run: ReleaseRun; no
         ? jobs
         : run.jobs.length > 0 && (
             <details class="folded-jobs">
-              <summary>Jobs</summary>
+              <summary aria-label={`Jobs for ${run.title}`}>Jobs</summary>
               {jobs}
             </details>
           )}
       {inspect && (
         <details class="workspace-job-details">
-          <summary>Job details &amp; logs</summary>
+          <summary aria-label={`Job details and logs for ${run.title}`}>Job details &amp; logs</summary>
           <p class="quiet">Logs open on GitHub with your repository permissions.</p>
           {run.jobs.length === 0 ? (
             <p class="empty">No job details available.</p>

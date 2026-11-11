@@ -26,13 +26,13 @@ const released = (tag: string) => ({
 test("Release works out the tag, asks naming it, and releases it on Confirm", async () => {
   const one = project({ latestRelease: released("v1.2.3") });
   const actions = withActions([one]);
-  fireEvent.click(screen.getByRole("button", { name: "Release weather-station" }));
+  fireEvent.click(screen.getByRole("button", { name: "Release octocat/weather-station" }));
   expect(actions.nextRelease).toHaveBeenCalledWith(one);
-  expect(await screen.findByText("Release v1.3.0?")).toBeTruthy();
+  expect(await screen.findByText("Release octocat/weather-station as v1.3.0 from its default branch?")).toBeTruthy();
   expect(actions.release).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
   expect(actions.release).toHaveBeenCalledWith(one, "v1.3.0");
-  expect((await screen.findByRole("status")).textContent).toBe("Released v1.3.0.");
+  expect((await screen.findByRole("status")).textContent).toBe("Released octocat/weather-station as v1.3.0.");
 });
 
 test("Release says why it can't, next to the button", async () => {
@@ -41,7 +41,7 @@ test("Release says why it can't, next to the button", async () => {
     new Error("Tag v1.3.0 already exists. Resolve it on GitHub before releasing."),
   );
   withActions([project()], actions);
-  fireEvent.click(screen.getByRole("button", { name: "Release weather-station" }));
+  fireEvent.click(screen.getByRole("button", { name: "Release octocat/weather-station" }));
   expect((await screen.findByRole("alert")).textContent).toBe(
     "Tag v1.3.0 already exists. Resolve it on GitHub before releasing.",
   );
@@ -59,11 +59,13 @@ test("Promote is offered for the latest release of a project with a Promote work
   expect(screen.getAllByRole("button", { name: /^Promote/ }).map((button) => button.textContent)).toEqual([
     "Promote v1.2.3",
   ]);
-  fireEvent.click(screen.getByRole("button", { name: "Promote weather-station v1.2.3" }));
-  expect(screen.getByText("Promote v1.2.3?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Promote octocat/weather-station v1.2.3 to production" }));
+  expect(screen.getByText("Promote octocat/weather-station v1.2.3 to production?")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
   expect(actions.promote).toHaveBeenCalledWith(promotable, "v1.2.3");
-  expect((await screen.findByRole("status")).textContent).toBe("Promote of v1.2.3 started.");
+  expect((await screen.findByRole("status")).textContent).toBe(
+    "Promotion of octocat/weather-station v1.2.3 to production started.",
+  );
 });
 
 test("without actions the list only shows", () => {

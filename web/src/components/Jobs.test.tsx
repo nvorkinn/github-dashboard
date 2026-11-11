@@ -51,17 +51,16 @@ test("draws the jobs on the workflow's graph, in stages, keeping their re-runs",
         .getAllByRole("listitem")
         .map((item) => item.textContent),
     ),
-  ).toEqual([
-    ["tag: Done"],
-    ["build (amd64): Done", "build (arm64): FailedRe-run"],
-    ["image: Skipped"],
-    ["lost: CancelledRe-run"],
-  ]);
-  expect(
-    within(stages[0] as HTMLElement)
-      .getByRole("link", { name: "tag" })
-      .getAttribute("href"),
-  ).toBe("https://github.com/o/r/actions/runs/1/job/1");
+  ).toEqual([["tag: Done"], ["build (amd64): Done", "build (arm64): Failed"], ["image: Skipped"], ["lost: Cancelled"]]);
+  const inspectTag = within(stages[0] as HTMLElement).getByRole("button", { name: "Inspect tag" });
+  expect(inspectTag.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(inspectTag);
+  expect(inspectTag.getAttribute("aria-expanded")).toBe("true");
+  const details = screen.getByRole("region", { name: "Job details: tag" });
+  expect(within(details).getByText("Done")).toBeTruthy();
+  expect(within(details).getByRole("link", { name: "Open logs for tag on GitHub" }).getAttribute("href")).toBe(
+    "https://github.com/o/r/actions/runs/1/job/1",
+  );
   // A job the run never got to is drawn as skipped once the run has finished.
   expect(
     within(stages[2] as HTMLElement)
@@ -70,6 +69,7 @@ test("draws the jobs on the workflow's graph, in stages, keeping their re-runs",
   ).toBe(true);
   expect(container.querySelector(".graph-lines")?.getAttribute("aria-hidden")).toBe("true");
 
+  fireEvent.click(screen.getByRole("button", { name: "Inspect build (arm64)" }));
   fireEvent.click(screen.getByRole("button", { name: "Re-run build (arm64)" }));
   expect(actions.rerunJob).toHaveBeenCalledWith(failed, builds[1]);
   expect((await screen.findByRole("status")).textContent).toBe("Re-run of build (arm64) started.");
@@ -114,8 +114,9 @@ test("a big matrix is one box with a grid of its jobs, and the graph runs top to
   // Only what tells the cells apart shows; screen readers still get the whole name.
   expect(cells[0]?.textContent).toBe("test (0): Done");
   expect(cells[0]?.querySelector(".visually-hidden")?.textContent).toBe("test (");
-  // Still going, so nothing to re-run.
-  expect(screen.queryByRole("button")).toBeNull();
+  // Still going, so inspection is available but no re-run action is.
+  expect(screen.getAllByRole("button", { name: /^Inspect test/ })).toHaveLength(8);
+  expect(screen.queryByRole("button", { name: /^Re-run/ })).toBeNull();
 });
 
 test("finished jobs shrink to ticks and the running one says what it is doing", () => {
@@ -189,4 +190,25 @@ test("shows the jobs in a row when the workflow file couldn't be read", () => {
   render(<ReleaseList now={NOW} runs={[run({ jobs: [job({ id: 1, name: "build" })], graph: undefined })]} />);
   expect(screen.queryByRole("list", { name: /^Stage / })).toBeNull();
   expect(within(screen.getByRole("list", { name: "Jobs" })).getByRole("listitem").textContent).toBe("build: Done");
+});
+
+test("shows available timing and log metadata in the selected job detail pane", () => {
+  const build = job({
+    name: "build",
+    url: "https://github.com/o/r/actions/runs/1/job/1",
+    startedAt: "2026-03-01T11:58:00Z",
+    finishedAt: "2026-03-01T11:59:00Z",
+  });
+  render(<ReleaseList now={NOW} runs={[run({ jobs: [build], graph: undefined })]} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Inspect build" }));
+  const details = screen.getByRole("region", { name: "Job details: build" });
+  expect(within(details).getByText("1m 0s")).toBeTruthy();
+  expect(within(details).getByRole("link", { name: "Open logs for build on GitHub" }).getAttribute("target")).toBe(
+    "_blank",
+  );
+  expect(details.querySelector("time")?.getAttribute("datetime")).toBe(build.startedAt);
+
+  fireEvent.click(within(details).getByRole("button", { name: "Close details for build" }));
+  expect(screen.queryByRole("region", { name: "Job details: build" })).toBeNull();
 });

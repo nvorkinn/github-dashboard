@@ -48,6 +48,8 @@ export function RunAction<T = undefined>(props: RunActionProps<T>) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mounted = useRef(true);
   const confirm = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -61,6 +63,9 @@ export function RunAction<T = undefined>(props: RunActionProps<T>) {
   useEffect(() => {
     if (phase.name === "asking") {
       confirm.current?.focus();
+    } else if ((phase.name === "idle" || phase.name === "failed") && restoreFocus.current) {
+      trigger.current?.focus();
+      restoreFocus.current = false;
     }
   }, [phase.name]);
 
@@ -81,6 +86,7 @@ export function RunAction<T = undefined>(props: RunActionProps<T>) {
   }
 
   async function start(): Promise<void> {
+    restoreFocus.current = document.activeElement === trigger.current;
     let prepared = undefined as T;
     if (prepare) {
       enter({ name: "preparing" });
@@ -145,6 +151,7 @@ export function RunAction<T = undefined>(props: RunActionProps<T>) {
           <button
             type="button"
             class={kind}
+            ref={trigger}
             {...(name ? { "aria-label": name } : {})}
             {...(title ? { title } : {})}
             onClick={() => void start()}

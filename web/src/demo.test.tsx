@@ -150,8 +150,8 @@ test("the page on the demo has actions that work on the sample data, and one tha
   expect(screen.queryByText("Waiting for approval", { selector: ".chip" })).toBeNull();
 
   expect(screen.getByRole("button", { name: "Re-run failed jobs" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Promote home-ledger v1.12.3" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Release garden-sensors" }));
+  expect(screen.getByRole("button", { name: "Promote octocat/home-ledger v1.12.3 to production" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Release octocat/garden-sensors" }));
   expect((await screen.findByRole("alert", {}, { timeout: 3000 })).textContent).toBe(
     "Tag v3.1.0 already exists. Resolve it on GitHub before releasing.",
   );

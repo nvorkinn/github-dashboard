@@ -69,6 +69,7 @@ export function sortPulls(pulls: PullRequest[], order: PullOrder): PullRequest[]
  * fix it (a failed check, a conflict, a base that moved on), and `progress` is everything still under way.
  */
 export type PullColumn = "ready" | "progress" | "attention";
+type PullFilter = "all" | PullColumn;
 
 const COLUMNS: { value: PullColumn; label: string }[] = [
   { value: "ready", label: "Ready to merge" },
@@ -93,7 +94,24 @@ export function columnOf(pull: PullRequest): PullColumn {
  */
 export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]; now: number; compact?: boolean }) {
   const [order, setOrder] = useState(rememberedOrder);
+  const [status, setStatus] = useState<PullFilter>("all");
+  const [author, setAuthor] = useState("all");
   const sorted = sortPulls(pulls, order);
+  const authors = [...new Set(pulls.map((pull) => pull.author))].sort((a, b) => a.localeCompare(b));
+  const effectiveAuthor = author === "all" || authors.includes(author) ? author : "all";
+  const filtered = compact
+    ? sorted.filter(
+        (pull) =>
+          (status === "all" || columnOf(pull) === status) &&
+          (effectiveAuthor === "all" || pull.author === effectiveAuthor),
+      )
+    : sorted;
+
+  useEffect(() => {
+    if (author !== effectiveAuthor) {
+      setAuthor(effectiveAuthor);
+    }
+  }, [author, effectiveAuthor]);
 
   return (
     <section class={compact ? "panel pulls pulls-compact" : "panel pulls"} aria-labelledby="pulls-heading">
@@ -101,32 +119,64 @@ export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]
         <h2 id="pulls-heading">
           {compact ? "Open pull requests" : "Pull requests"} <span class="count">{pulls.length}</span>
         </h2>
-        <label class="order">
-          <span class="quiet">Order</span>
-          <select
-            value={order}
-            onChange={(event) => {
-              const chosen = event.currentTarget.value as PullOrder;
-              setOrder(chosen);
-              rememberOrder(chosen);
-            }}
-          >
-            {ORDERS.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div class="pull-controls">
+          {compact && (
+            <>
+              <label class="pull-filter">
+                <span class="quiet">Status</span>
+                <select value={status} onChange={(event) => setStatus(event.currentTarget.value as PullFilter)}>
+                  <option value="all">All statuses ({pulls.length})</option>
+                  {COLUMNS.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label} ({pulls.filter((pull) => columnOf(pull) === value).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label class="pull-filter">
+                <span class="quiet">Author</span>
+                <select value={effectiveAuthor} onChange={(event) => setAuthor(event.currentTarget.value)}>
+                  <option value="all">All authors ({pulls.length})</option>
+                  {authors.map((name) => (
+                    <option key={name} value={name}>
+                      {name} ({pulls.filter((pull) => pull.author === name).length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          <label class="order">
+            <span class="quiet">Order</span>
+            <select
+              value={order}
+              onChange={(event) => {
+                const chosen = event.currentTarget.value as PullOrder;
+                setOrder(chosen);
+                rememberOrder(chosen);
+              }}
+            >
+              {ORDERS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
       {pulls.length === 0 ? (
         <p class="empty">No open pull requests</p>
       ) : compact ? (
-        <ul class="cards pull-queue" aria-labelledby="pulls-heading">
-          {sorted.map((pull) => (
-            <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} foldable />
-          ))}
-        </ul>
+        filtered.length === 0 ? (
+          <p class="empty">No pull requests match these filters</p>
+        ) : (
+          <ul class="cards pull-queue" aria-labelledby="pulls-heading">
+            {filtered.map((pull) => (
+              <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} foldable />
+            ))}
+          </ul>
+        )
       ) : (
         <div class="board">
           {COLUMNS.map(({ value, label }) => {

@@ -86,6 +86,7 @@ test("Cancel takes the question back, and so does waiting", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Reject" }));
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.queryByText("Reject production?")).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reject" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Reject" }));
   await act(async () => {
@@ -96,7 +97,9 @@ test("Cancel takes the question back, and so does waiting", async () => {
     await vi.advanceTimersByTimeAsync(1);
   });
   expect(screen.queryByText("Reject production?")).toBeNull();
-  expect((screen.getByRole("button", { name: "Reject" }) as HTMLElement).className).toBe("action secondary");
+  const restored = screen.getByRole("button", { name: "Reject" }) as HTMLElement;
+  expect(restored.className).toBe("action secondary");
+  expect(document.activeElement).toBe(restored);
   expect(run).not.toHaveBeenCalled();
 });
 

@@ -83,8 +83,8 @@ test("keeps repository release confirmations connected to the selected project",
   select(/weather-station/);
   const header = screen.getByRole("link", { name: "Open on GitHub" }).parentElement;
   expect(header).toBeTruthy();
-  fireEvent.click(within(header as HTMLElement).getByRole("button", { name: "Release weather-station" }));
-  expect(await screen.findByText("Release v1.3.0?")).toBeTruthy();
+  fireEvent.click(within(header as HTMLElement).getByRole("button", { name: /Release .*weather-station/ }));
+  expect(await screen.findByText("Release octocat/weather-station as v1.3.0 from its default branch?")).toBeTruthy();
   expect(actions.release).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
   expect(actions.release).toHaveBeenCalledWith(project(), "v1.3.0");
@@ -140,6 +140,54 @@ test("focuses the attention view on blocked pull requests and workflows", () => 
   expect(screen.getByText("Approval deploy")).toBeTruthy();
   expect(screen.queryByText("Ready change")).toBeNull();
   expect(screen.queryByText("Previous deploy")).toBeNull();
+});
+
+test("uses summary metrics to open focused operational views", () => {
+  dashboard(
+    ready({
+      projects: [project()],
+      pulls: [
+        pull({ number: 1, title: "Ready change", checks: [{ name: "test", state: "passed", url: undefined }] }),
+        pull({ number: 2, title: "Broken change", mergeState: "conflicts" }),
+      ],
+      releases: [run({ title: "Active deploy", state: "running", finishedAt: undefined })],
+    }),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Show 1 pull requests ready to merge" }));
+  expect(screen.getByText("Ready change")).toBeTruthy();
+  expect(screen.queryByText("Broken change")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show 1 items needing attention" }));
+  expect(screen.getByText("Broken change")).toBeTruthy();
+  expect(screen.queryByText("Ready change")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show 1 active workflows" }));
+  expect(screen.getByText("Active deploy")).toBeTruthy();
+  expect(screen.queryByText("Broken change")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show 2 open pull requests" }));
+  expect(screen.getByText("Ready change")).toBeTruthy();
+  expect(screen.getByText("Broken change")).toBeTruthy();
+});
+
+test("keeps the overview concise and exposes the complete workflow view", () => {
+  dashboard(
+    ready({
+      projects: [project()],
+      releases: [
+        run({ id: 1, title: "First deploy", state: "running", finishedAt: undefined }),
+        run({ id: 2, title: "Second deploy", state: "waiting", finishedAt: undefined }),
+        run({ id: 3, title: "Third deploy", state: "queued", finishedAt: undefined }),
+      ],
+    }),
+  );
+
+  expect(screen.queryByText("First deploy")).toBeNull();
+  expect(screen.queryByText("Second deploy")).toBeNull();
+  expect(screen.getByText("Third deploy")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View all 3 workflows" }));
+  expect(screen.getByText("First deploy")).toBeTruthy();
 });
 
 test("handles no repositories and a removed selection without leaking stale context", () => {
