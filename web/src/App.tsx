@@ -7,7 +7,7 @@ import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Settings } from "./components/Settings.tsx";
 import { useLaneColumns, useView, ViewSwitch } from "./components/ViewSwitch.tsx";
-import type { Dashboard } from "./model.ts";
+import { type Dashboard, type DashboardState, summarize } from "./model.ts";
 import { createNotifier, type Notifier } from "./notifications.ts";
 
 /** The pull request a demo was built from, which its note links back to. */
@@ -126,14 +126,24 @@ function SignedIn({
 
   const [view, setView] = useView();
   const [laneColumns, setLaneColumns] = useLaneColumns();
+  const commandCentre = view === "workspace" && page === "dashboard";
   return (
     <>
-      <header class="top">
-        <h1>
-          <a class="home" href="#dashboard">
-            GitHub dashboard
-          </a>
-        </h1>
+      <header class={commandCentre ? "top command-top" : "top"}>
+        <div class={commandCentre ? "command-brand" : undefined}>
+          {commandCentre && (
+            <span class="command-mark" aria-hidden="true">
+              ⌘
+            </span>
+          )}
+          <h1>
+            <a class="home" href="#dashboard">
+              {commandCentre ? "GitHub Command Centre" : "GitHub dashboard"}
+            </a>
+          </h1>
+          {commandCentre && <p>Build · Review · Release · Operate</p>}
+        </div>
+        {commandCentre && <CommandSummary state={state} />}
         <div class="top-controls">
           <ViewSwitch
             view={view}
@@ -152,7 +162,7 @@ function SignedIn({
           <Account auth={auth} />
         </div>
       </header>
-      <main>
+      <main class={commandCentre ? "command-main" : undefined}>
         {page === "settings" ? (
           <Settings notifier={notifier} laneColumns={laneColumns} onLaneColumns={setLaneColumns} />
         ) : (
@@ -162,6 +172,51 @@ function SignedIn({
         )}
       </main>
     </>
+  );
+}
+
+function CommandSummary({ state }: { state: DashboardState }) {
+  if (state.status !== "ready") {
+    return (
+      <div class="command-summary command-summary-loading" role="status">
+        <span class="visually-hidden">Loading dashboard summary</span>
+      </div>
+    );
+  }
+  const active = state.data.releases.filter(
+    (run) => ["running", "waiting", "queued"].includes(run.state) && !run.finishedAt,
+  ).length;
+  const ready = state.data.pulls.filter((pull) => {
+    const checks = summarize(pull.checks);
+    return !pull.draft && pull.mergeState === "clean" && (checks === "passed" || checks === "none");
+  }).length;
+  const attention =
+    state.data.pulls.filter((pull) => {
+      const checks = summarize(pull.checks);
+      return checks === "failed" || pull.mergeState === "conflicts" || pull.mergeState === "behind";
+    }).length +
+    state.data.releases.filter(
+      (run) =>
+        run.state === "failed" || run.state === "cancelled" || run.state === "waiting" || run.approvals.length > 0,
+    ).length;
+  const metrics = [
+    { label: "Open PRs", value: state.data.pulls.length, icon: "⌁", tone: "done" },
+    { label: "Running", value: active, icon: "▶", tone: "running" },
+    { label: "Ready PRs", value: ready, icon: "✓", tone: "done" },
+    { label: "Attention", value: attention, icon: "!", tone: attention ? "waiting" : "done" },
+  ];
+  return (
+    <section class="command-summary" aria-label="Global dashboard summary">
+      {metrics.map((metric) => (
+        <div key={metric.label} class={`command-stat command-stat-${metric.tone}`}>
+          <span class="command-stat-icon" aria-hidden="true">
+            {metric.icon}
+          </span>
+          <strong>{metric.value}</strong>
+          <span>{metric.label}</span>
+        </div>
+      ))}
+    </section>
   );
 }
 

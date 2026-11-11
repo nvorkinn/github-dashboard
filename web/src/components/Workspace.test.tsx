@@ -40,7 +40,11 @@ test("scopes both lists to the repository, retains scope in focused views, and r
   expect(screen.queryByText("Weather change")).toBeNull();
   expect(screen.getByText("Weather deploy")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "weather-station" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /Overview/ }));
+  fireEvent.click(
+    within(screen.getByRole("complementary", { name: "Repository navigation" })).getByRole("button", {
+      name: /Overview/,
+    }),
+  );
   expect(screen.getByText("Ledger change")).toBeTruthy();
 });
 
@@ -77,7 +81,7 @@ test("keeps repository release confirmations connected to the selected project",
     </ActionsContext.Provider>,
   );
   select(/weather-station/);
-  const header = screen.getByRole("link", { name: "View on GitHub" }).parentElement;
+  const header = screen.getByRole("link", { name: "Open on GitHub" }).parentElement;
   expect(header).toBeTruthy();
   fireEvent.click(within(header as HTMLElement).getByRole("button", { name: "Release weather-station" }));
   expect(await screen.findByText("Release v1.3.0?")).toBeTruthy();
@@ -114,6 +118,28 @@ test("shows honest job inspection and log links, plus approval and failed workfl
   expect(screen.getByText("production waits for its required reviewers")).toBeTruthy();
   const summary = screen.getByRole("region", { name: "Dashboard summary" });
   expect(within(summary).getByText("NEEDS ATTENTION").nextElementSibling?.textContent).toBe("1");
+});
+
+test("focuses the attention view on blocked pull requests and workflows", () => {
+  dashboard(
+    ready({
+      projects: [project()],
+      pulls: [
+        pull({ number: 1, title: "Ready change", checks: [{ name: "test", state: "passed", url: undefined }] }),
+        pull({ number: 2, title: "Broken change", mergeState: "conflicts" }),
+      ],
+      releases: [
+        run({ id: 1, title: "Previous deploy" }),
+        run({ id: 2, title: "Approval deploy", state: "waiting", finishedAt: undefined }),
+      ],
+    }),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Needs attention" }));
+  expect(screen.getByText("Broken change")).toBeTruthy();
+  expect(screen.getByText("Approval deploy")).toBeTruthy();
+  expect(screen.queryByText("Ready change")).toBeNull();
+  expect(screen.queryByText("Previous deploy")).toBeNull();
 });
 
 test("handles no repositories and a removed selection without leaking stale context", () => {

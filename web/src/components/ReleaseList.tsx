@@ -47,7 +47,7 @@ export function ReleaseList({ runs, now, inspect = false }: { runs: ReleaseRun[]
     <section class="panel" aria-labelledby="releases-heading">
       <div class="panel-heading">
         <h2 id="releases-heading">
-          Running now <span class="count">{shown.length}</span>
+          {inspect ? "Workflow activity" : "Running now"} <span class="count">{shown.length}</span>
         </h2>
       </div>
       {shown.length === 0 ? (
