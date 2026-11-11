@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
+import { createDemoDashboard } from "./demo/dashboard.ts";
 import { installDemo } from "./demo.ts";
 
 const realFetch = globalThis.fetch;
@@ -59,11 +60,29 @@ test("the page on the demo shows the sample user and can sign out and in again",
   globalThis.fetch = network;
   const auth = createAuth();
   installDemo({ onSignIn: () => void auth.start() });
-  render(<App auth={auth} demo />);
+  const { unmount } = render(<App auth={auth} dashboard={createDemoDashboard()} demo />);
 
-  expect(await screen.findByText("octocat")).toBeTruthy();
+  // The sample user also wrote some of the sample pull requests; this is the one in the header.
+  const account = { selector: ".login" };
+  expect(await screen.findByText("octocat", account)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
   fireEvent.click(await screen.findByRole("link", { name: "Sign in with GitHub" }));
-  expect(await screen.findByText("octocat")).toBeTruthy();
+  expect(await screen.findByText("octocat", account)).toBeTruthy();
   expect(network).not.toHaveBeenCalled();
+  // Stops the demo's script.
+  unmount();
+});
+
+test("the page on the demo shows the sample dashboard", async () => {
+  globalThis.fetch = vi.fn();
+  const auth = createAuth();
+  installDemo({ onSignIn: () => void auth.start() });
+  const { unmount } = render(<App auth={auth} dashboard={createDemoDashboard()} demo />);
+
+  expect(await screen.findByText("Show wind gusts on the hourly chart")).toBeTruthy();
+  expect(screen.getByText("Bump vite from 8.3.6 to 8.3.7")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "v2.5.0" })).toBeTruthy();
+  expect(screen.getByText("no release yet")).toBeTruthy();
+  expect(screen.getByText("Private")).toBeTruthy();
+  unmount();
 });
