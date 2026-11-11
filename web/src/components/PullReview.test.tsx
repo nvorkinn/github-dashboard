@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/pr
 import { afterEach, expect, test, vi } from "vitest";
 import type { ChangedFile } from "../model.ts";
 import { ActionsContext } from "./actions.tsx";
-import { PullReview, usablePatch } from "./PullReview.tsx";
+import { PullReview, usablePatch, wrapsByDefault } from "./PullReview.tsx";
 import { pull } from "./testing.ts";
 
 afterEach(cleanup);
@@ -94,4 +94,51 @@ test("filters the compact file tree without changing the selected diff", async (
   expect(screen.queryByRole("navigation", { name: "Changed files" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show files" }));
   expect(screen.getByRole("searchbox")).toBeTruthy();
+});
+
+test("wraps prose by default and leaves source code scrollable", () => {
+  for (const path of ["README.md", "docs/guide.mdx", "docs/notes.txt", "docs/intro.rst", "LICENSE"])
+    expect(wrapsByDefault(path)).toBe(true);
+  for (const path of ["src/index.ts", "style.css", "config.yml", "README.test.ts"])
+    expect(wrapsByDefault(path)).toBe(false);
+});
+
+test("uses per-file counts, retains wrap choices, and keeps positions independent of search", async () => {
+  const initial = pull();
+  const prose = {
+    ...file,
+    path: "README.md",
+    additions: 2,
+    deletions: 0,
+    patch: "@@ -0,0 +1,2 @@\n+First line\n+Second line",
+  };
+  render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [file, prose], truncated: false }) }}>
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await screen.findByRole("button", { name: /example.ts/ });
+  expect(screen.getByRole("button", { name: /example.ts/ }).textContent).toContain("+1−1");
+  expect(screen.getByRole("button", { name: /README.md/ }).textContent).toContain("+2−0");
+  expect(screen.getByText("1 of 2 files")).toBeTruthy();
+  const wrapButton = screen.getByRole("button", { name: "Wrap lines" });
+  expect(wrapButton.getAttribute("aria-pressed")).toBe("false");
+  await waitFor(() => expect(document.querySelector(".d2h-file-wrapper")).toBeTruthy());
+  const diff = document.querySelector(".d2h-file-wrapper");
+  fireEvent.click(wrapButton);
+  await waitFor(() => expect(document.querySelector(".review-diff-wrap")).toBeTruthy());
+  expect(document.querySelector(".d2h-file-wrapper")).toBe(diff);
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Wrap lines" }).getAttribute("aria-pressed")).toBe("true"),
+  );
+  expect(screen.getByText("2 of 2 files")).toBeTruthy();
+  expect(document.querySelector(".review-file-title")?.textContent).toContain("+2−0");
+  expect(screen.getByRole("button", { name: "Next file" }).closest(".review-toolbar")).toBeTruthy();
+  fireEvent.input(screen.getByRole("searchbox"), { target: { value: "README" } });
+  expect(screen.getByText("2 of 2 files")).toBeTruthy();
+  expect(document.querySelector(".review-tree-heading")?.textContent).toContain("2");
+  fireEvent.keyDown(screen.getByRole("dialog"), { altKey: true, key: "ArrowUp" });
+  await waitFor(() => expect(screen.getByText("1 of 2 files")).toBeTruthy());
+  expect(screen.getByRole("button", { name: "Wrap lines" }).getAttribute("aria-pressed")).toBe("true");
 });

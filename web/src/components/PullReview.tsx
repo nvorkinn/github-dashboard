@@ -40,7 +40,15 @@ export function usablePatch(file: ChangedFile): boolean {
   return hunks > 0 && oldLeft === 0 && newLeft === 0 && added === file.additions && removed === file.deletions;
 }
 
-function FileDiff({ file, split }: { file: ChangedFile; split: boolean }) {
+/** Prose benefits from wrapping; source files retain their original line layout. */
+export function wrapsByDefault(path: string): boolean {
+  return (
+    /\.(md|mdx|markdown|txt|text|rst|adoc|asciidoc|org|tex|wiki)$/i.test(path) ||
+    /(?:^|\/)(README|CHANGELOG|CHANGES|LICENSE|COPYING|AUTHORS|NEWS)$/i.test(path)
+  );
+}
+
+function FileDiff({ file, split, wrap }: { file: ChangedFile; split: boolean; wrap: boolean }) {
   const target = useRef<HTMLDivElement>(null);
   const usable = usablePatch(file);
   useEffect(() => {
@@ -62,23 +70,57 @@ function FileDiff({ file, split }: { file: ChangedFile; split: boolean }) {
       },
     );
     ui.draw();
+    const element = target.current;
+    return () => element.replaceChildren();
+  }, [file, split, usable]);
+  useEffect(() => {
+    if (!target.current || !usable) return;
+    const element = target.current;
+    // Separate tables need equal row heights when a line wraps on only one side.
+    // Measure natural heights first so resizing can shrink as well as grow a pair.
+    const alignRows = () => {
+      const panes = element.querySelectorAll(".d2h-file-side-diff");
+      const before = [...(panes[0]?.querySelectorAll("tr") ?? [])];
+      const after = [...(panes[1]?.querySelectorAll("tr") ?? [])];
+      for (const row of [...before, ...after]) row.style.height = "";
+      if (!split || !wrap) return;
+      const heights = before.map((row, i) =>
+        Math.max(row.getBoundingClientRect().height, after[i]?.getBoundingClientRect().height ?? 0),
+      );
+      before.forEach((row, i) => {
+        const height = `${heights[i]}px`;
+        row.style.height = height;
+        if (after[i]) after[i].style.height = height;
+      });
+    };
+    alignRows();
+    const panes = [...element.querySelectorAll<HTMLElement>(".d2h-file-side-diff")];
+    const widths = () => [element.clientWidth, ...panes.map((pane) => pane.clientWidth)].join(":");
+    let width = widths();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(() => {
+            if (widths() === width) return;
+            width = widths();
+            alignRows();
+          });
+    observer?.observe(element);
+    for (const pane of panes) observer?.observe(pane);
     target.current.querySelectorAll<HTMLElement>(".d2h-file-side-diff, .d2h-file-diff").forEach((pane, index) => {
       pane.tabIndex = 0;
       pane.setAttribute("role", "region");
       pane.setAttribute(
         "aria-label",
         split
-          ? `${index === 0 ? "Before" : "After"} code, scroll horizontally for long lines`
-          : "Unified code, scroll horizontally for long lines",
+          ? `${index === 0 ? "Before" : "After"} code${wrap ? ", wrapped lines" : ", scroll horizontally for long lines"}`
+          : `Unified code${wrap ? ", wrapped lines" : ", scroll horizontally for long lines"}`,
       );
     });
-    target.current.scrollTop = 0;
-    return () => {
-      if (target.current) target.current.replaceChildren();
-    };
-  }, [file, split, usable]);
+    return () => observer?.disconnect();
+  }, [file, split, usable, wrap]);
   return usable ? (
-    <div ref={target} class="review-diff" />
+    <div ref={target} class={`review-diff ${wrap ? "review-diff-wrap" : ""}`} />
   ) : (
     <p class="empty">
       Preview unavailable: this patch is missing, incomplete, binary, or too large. Open on GitHub to review it.
@@ -91,11 +133,13 @@ function FileTree({
   selected,
   choose,
   prefix = "",
+  depth = 0,
 }: {
   files: ChangedFile[];
   selected: string | undefined;
   choose: (path: string) => void;
   prefix?: string;
+  depth?: number;
 }) {
   const folders = new Map<string, ChangedFile[]>();
   const leaves: ChangedFile[] = [];
@@ -134,8 +178,14 @@ function FileTree({
               <span>{folder}</span>
               <span class="review-count">{group.length}</span>
             </summary>
-            <div class="review-folder">
-              <FileTree files={group} selected={selected} choose={choose} prefix={`${prefix}${folder}`} />
+            <div class={depth < 2 ? "review-folder" : "review-folder review-folder-deep"}>
+              <FileTree
+                files={group}
+                selected={selected}
+                choose={choose}
+                prefix={`${prefix}${folder}`}
+                depth={depth + 1}
+              />
             </div>
           </details>
         );
@@ -183,6 +233,7 @@ export function PullReview({
   const [revision, refresh] = useState(0);
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [split, setSplit] = useState(true);
+  const [wrapping, setWrapping] = useState<Record<string, boolean>>({});
   const [tree, setTree] = useState(true);
   const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
@@ -190,6 +241,8 @@ export function PullReview({
   const key = `${current.repo}#${current.number}`;
   const index = Math.max(0, files?.files.findIndex((f) => f.path === paths[key]) ?? 0);
   const file = files?.files[index];
+  const wrapKey = `${key}:${file?.path}`;
+  const wrap = wrapping[wrapKey] ?? wrapsByDefault(file?.path ?? "");
   const prIndex = pulls.findIndex((p) => p.repo === current.repo && p.number === current.number);
   function moveFile(delta: number) {
     const next = files?.files[index + delta];
@@ -436,6 +489,26 @@ export function PullReview({
                 </span>
               )}
             </div>
+            <div class="review-file-navigation">
+              <span>
+                {files ? `${index + (file ? 1 : 0)} of ${files.files.length} files` : "Loading files…"}
+                <span class="review-shortcut"> · Alt+↑/↓</span>
+              </span>
+              <button type="button" disabled={index === 0} onClick={() => moveFile(-1)}>
+                Previous file
+              </button>
+              <button type="button" disabled={!files || index >= files.files.length - 1} onClick={() => moveFile(1)}>
+                Next file
+              </button>
+            </div>
+            <button
+              type="button"
+              aria-pressed={wrap}
+              disabled={!file}
+              onClick={() => setWrapping((previous) => ({ ...previous, [wrapKey]: !wrap }))}
+            >
+              Wrap lines
+            </button>
             <fieldset class="review-view-controls" aria-label="Diff layout">
               <button type="button" aria-pressed={split} onClick={() => setSplit(true)}>
                 Split
@@ -460,7 +533,7 @@ export function PullReview({
           </div>
           <section class="review-code-scroll" key={`${key}:${file?.path}:${split}`} aria-label="Scrollable code diff">
             {file ? (
-              <FileDiff file={file} split={split} />
+              <FileDiff file={file} split={split} wrap={wrap} />
             ) : (
               <p class="empty">
                 {problem
@@ -471,18 +544,6 @@ export function PullReview({
               </p>
             )}
           </section>
-          <footer class="review-file-navigation">
-            <span>
-              {files ? `${index + (file ? 1 : 0)} of ${files.files.length} files` : "Loading files…"}
-              <span class="review-shortcut"> · Alt+↑/↓</span>
-            </span>
-            <button type="button" disabled={index === 0} onClick={() => moveFile(-1)}>
-              Previous file
-            </button>
-            <button type="button" disabled={!files || index >= files.files.length - 1} onClick={() => moveFile(1)}>
-              Next file
-            </button>
-          </footer>
         </section>
       </div>
     </dialog>

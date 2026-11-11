@@ -9,7 +9,7 @@
   --review-green: #85e49a;
   --review-red: #f3a0ac;
   width: 94vw;
-  height: 92dvh;
+  height: 96dvh;
   max-width: 2600px;
   max-height: 96dvh;
   padding: 24px;
@@ -267,7 +267,7 @@
   scrollbar-width: thin;
 }
 .review-folder {
-  padding-left: 16px;
+  padding-left: 12px;
 }
 .review-tree summary {
   display: flex;
@@ -416,24 +416,24 @@
   scrollbar-width: thin;
 }
 .review-file-navigation {
-  flex-shrink: 0;
-  position: relative;
-  background: var(--review-bg);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  border-top: 1px solid var(--review-border);
   color: var(--review-muted);
   font-size: 0.75rem;
-}
-.review-file-navigation > span {
-  margin-right: auto;
+  flex-wrap: wrap;
 }
 .review-file-navigation button {
-  min-height: 27px;
-  padding: 3px 8px;
+  min-height: 30px;
+  padding: 4px 8px;
   font-size: 0.75rem;
+}
+.review-shortcut {
+  display: none;
+}
+.review-folder-deep {
+  padding-left: 6px;
+  border-left: 1px solid #48456355;
 }
 .review-diff {
   min-width: 0;
@@ -460,7 +460,7 @@
   overflow-y: hidden;
   scrollbar-width: thin;
 }
-.review-diff .d2h-file-side-diff + .d2h-file-side-diff {
+.review-diff :where(.d2h-file-side-diff) + .d2h-file-side-diff {
   border-left: 1px solid var(--review-border);
 }
 .review-diff .d2h-diff-table {
@@ -666,4 +666,66 @@
 }
 .review-diff .d2h-code-side-emptyplaceholder {
   min-height: 23px;
+}
+
+/* Alignment placeholders represent absent lines, never blank source lines. */
+.review-diff .d2h-emptyplaceholder,
+.review-diff .d2h-code-side-emptyplaceholder {
+  background: repeating-linear-gradient(135deg, #b2a0dc08 0 1px, transparent 1px 7px), #181c2d;
+}
+.review-diff .d2h-file-diff {
+  overflow-x: auto;
+}
+.review-diff-wrap .d2h-diff-table {
+  table-layout: fixed;
+}
+.review-diff-wrap .d2h-code-side-line,
+.review-diff-wrap .d2h-code-line {
+  display: block;
+  width: 100%;
+  white-space: normal;
+}
+.review-diff-wrap .d2h-code-line-ctn {
+  display: inline;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review-diff-wrap .d2h-code-side-line ins,
+.review-diff-wrap .d2h-code-side-line del,
+.review-diff-wrap .d2h-code-line ins,
+.review-diff-wrap .d2h-code-line del {
+  display: inline;
+}
+
+.review-diff .d2h-diff-table td {
+  vertical-align: top;
+}
+.pull-review button[aria-pressed="true"] {
+  background-color: #59428c;
+  background-image: none;
+}
+.review-diff-wrap .d2h-code-side-linenumber,
+.review-diff-wrap .d2h-code-linenumber {
+  position: static;
+  display: table-cell;
+}
+.review-diff-wrap .d2h-code-side-line,
+.review-diff-wrap .d2h-code-line {
+  padding: 0 12px;
+}
+
+/* Keep both horizontal scrollbars within the editor viewport, including tall patches. */
+.review-code-scroll {
+  overflow: hidden;
+}
+.review-diff,
+.review-diff .d2h-wrapper,
+.review-diff .d2h-file-wrapper,
+.review-diff .d2h-files-diff {
+  height: 100%;
+}
+.review-diff .d2h-file-side-diff,
+.review-diff .d2h-file-diff {
+  height: 100%;
+  overflow: auto;
 }
