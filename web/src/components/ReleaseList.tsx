@@ -41,7 +41,7 @@ export function sortRuns(runs: ReleaseRun[]): ReleaseRun[] {
  * The release workflows' runs that are going, one card per row, and under them the ones that just finished, each
  * folded to a few lines until it leaves.
  */
-export function ReleaseList({ runs, now }: { runs: ReleaseRun[]; now: number }) {
+export function ReleaseList({ runs, now, inspect = false }: { runs: ReleaseRun[]; now: number; inspect?: boolean }) {
   const shown = sortRuns(shownRuns(runs, now));
   return (
     <section class="panel" aria-labelledby="releases-heading">
@@ -55,7 +55,7 @@ export function ReleaseList({ runs, now }: { runs: ReleaseRun[]; now: number }) 
       ) : (
         <ul class="rows">
           {shown.map((run) => (
-            <ReleaseCard key={`${run.repo}:${run.id}`} run={run} now={now} />
+            <ReleaseCard key={`${run.repo}:${run.id}`} run={run} now={now} inspect={inspect} />
           ))}
         </ul>
       )}
@@ -63,7 +63,7 @@ export function ReleaseList({ runs, now }: { runs: ReleaseRun[]; now: number }) 
   );
 }
 
-export function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
+export function ReleaseCard({ run, now, inspect = false }: { run: ReleaseRun; now: number; inspect?: boolean }) {
   const actions = useActions()?.runs;
   // What a job's re-run came to: said under the jobs, as a chip has no room for it.
   const [jobNotice, setJobNotice] = useState<Notice | undefined>(undefined);
@@ -122,6 +122,29 @@ export function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
               {jobs}
             </details>
           )}
+      {inspect && (
+        <details class="workspace-job-details">
+          <summary>Job details &amp; logs</summary>
+          <p class="quiet">Logs open on GitHub with your repository permissions.</p>
+          {run.jobs.length === 0 ? (
+            <p class="empty">No job details available.</p>
+          ) : (
+            <ul class="workspace-job-list">
+              {run.jobs.map((job) => (
+                <li key={job.id}>
+                  <span>{job.name}</span>
+                  <StateChip state={job.state} />
+                  {job.url && (
+                    <ExternalLink href={job.url}>
+                      Logs on GitHub<span class="visually-hidden"> for {job.name}</span>
+                    </ExternalLink>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
+      )}
       {jobNotice && (
         <p class={jobNotice.failed ? "action-problem" : "action-done"} role={jobNotice.failed ? "alert" : "status"}>
           {jobNotice.text}

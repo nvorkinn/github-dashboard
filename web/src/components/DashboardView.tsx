@@ -126,12 +126,7 @@ export function DashboardView({
         </p>
       )}
       {view === "workspace" ? (
-        <Workspace
-          projects={data.projects.filter((project) => !hidden.has(project.repo))}
-          pulls={pulls}
-          runs={releases}
-          now={now}
-        />
+        <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
       ) : view === "lanes" ? (
         <LanesView
           projects={data.projects}

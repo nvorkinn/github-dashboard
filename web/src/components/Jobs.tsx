@@ -71,7 +71,9 @@ function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobG
       }
       paths.push(shape === "row" ? across(a, b, origin) : down(a, b, origin));
     }
-    const next = { width: Math.ceil(box.scrollWidth), height: Math.ceil(box.scrollHeight), paths };
+    // Measure the content box, not scrollWidth: the previous SVG size can otherwise
+    // keep the graph wide after the viewport shrinks.
+    const next = { width: Math.ceil(origin.width), height: Math.ceil(origin.height), paths };
     setLines((was) =>
       was.width === next.width && was.height === next.height && was.paths.join() === next.paths.join() ? was : next,
     );

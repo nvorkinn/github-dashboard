@@ -56,3 +56,15 @@ test("remembers how many columns the lanes take, two unless one was chosen", () 
   expect(screen.getByRole("button").textContent).toBe("1");
   expect(rememberedLaneColumns()).toBe(1);
 });
+
+test("Workspace can be selected and remembered without losing Stage or Lanes", () => {
+  render(<Switch />);
+  fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+  expect(pressed()).toEqual(["Workspace"]);
+  expect(rememberedView()).toBe("workspace");
+  cleanup();
+  render(<Switch />);
+  expect(pressed()).toEqual(["Workspace"]);
+  fireEvent.click(screen.getByRole("button", { name: "Stage" }));
+  expect(pressed()).toEqual(["Stage"]);
+});

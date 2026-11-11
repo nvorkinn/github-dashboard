@@ -3,37 +3,46 @@ import type { Project, PullRequest, ReleaseRun } from "../model.ts";
 import { summarize } from "../model.ts";
 import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
-import { ProjectActions } from "./ProjectList.tsx";
+import { ProjectActions, ProjectList } from "./ProjectList.tsx";
 import { PullList } from "./PullList.tsx";
-import { ReleaseList } from "./ReleaseList.tsx";
+import { ReleaseList, shownRuns } from "./ReleaseList.tsx";
 import "./Workspace.css";
 
-type Scope = "all" | string;
+type Scope = string | undefined;
 
 export function Workspace({
   projects,
   pulls,
   runs,
   now,
+  hidden,
+  onToggle,
 }: {
   projects: Project[];
   pulls: PullRequest[];
   runs: ReleaseRun[];
   now: number;
+  hidden: ReadonlySet<string>;
+  onToggle: (repo: string) => void;
 }) {
-  const [scope, setScope] = useState<Scope>("all");
+  const [scope, setScope] = useState<Scope>(undefined);
   const [tab, setTab] = useState<"all" | "pulls" | "workflows">("all");
   const [filter, setFilter] = useState("");
-  const selected = projects.find((project) => project.repo === scope);
+  const shown = projects.filter((project) => !hidden.has(project.repo));
+  const selected = shown.find((project) => project.repo === scope);
+  const currentScope = selected?.repo;
   const visiblePulls = selected ? pulls.filter((pull) => pull.repo === selected.repo) : pulls;
-  const visibleRuns = selected ? runs.filter((run) => run.repo === selected.repo) : runs;
+  const visibleRuns = shownRuns(selected ? runs.filter((run) => run.repo === selected.repo) : runs, now);
   const active = (run: ReleaseRun) => ["running", "waiting", "queued"].includes(run.state) && !run.finishedAt;
   const running = visibleRuns.filter(active);
   const attention = visiblePulls.filter(
     (pull) => summarize(pull.checks) === "failed" || pull.mergeState === "conflicts",
   );
+  const waiting = visibleRuns.filter((run) => run.state === "waiting" || run.approvals.length > 0);
+  const failed = visibleRuns.filter((run) => run.state === "failed" || run.state === "cancelled");
+  const attentionCount = attention.length + waiting.length + failed.length;
   const actions = useActions()?.runs;
-  const listed = [...projects]
+  const listed = [...shown]
     .sort((a, b) => a.name.localeCompare(b.name))
     .filter(
       (project) =>
@@ -47,15 +56,15 @@ export function Workspace({
         <div class="workspace-sidebar-label">WORKSPACE</div>
         <button
           type="button"
-          class={scope === "all" ? "workspace-nav active" : "workspace-nav"}
-          aria-current={scope === "all" ? "page" : undefined}
+          class={currentScope === undefined ? "workspace-nav active" : "workspace-nav"}
+          aria-current={currentScope === undefined ? "page" : undefined}
           onClick={() => {
-            setScope("all");
+            setScope(undefined);
             setTab("all");
           }}
         >
           <span>◈ &nbsp; Overview</span>
-          <span class="workspace-nav-count">{projects.length}</span>
+          <span class="workspace-nav-count">{shown.length}</span>
         </button>
         <div class="workspace-sidebar-label workspace-repo-label">REPOSITORIES</div>
         <input
@@ -74,8 +83,8 @@ export function Workspace({
               <button
                 key={project.repo}
                 type="button"
-                class={scope === project.repo ? "workspace-nav active" : "workspace-nav"}
-                aria-current={scope === project.repo ? "page" : undefined}
+                class={currentScope === project.repo ? "workspace-nav active" : "workspace-nav"}
+                aria-current={currentScope === project.repo ? "page" : undefined}
                 onClick={() => {
                   setScope(project.repo);
                   setTab("all");
@@ -85,12 +94,31 @@ export function Workspace({
                   <span class={busy ? "workspace-status busy" : "workspace-status"} aria-hidden="true" />
                   {project.name}
                 </span>
+                {busy && <span class="visually-hidden">Active workflow</span>}
                 {count > 0 && <span class="workspace-nav-count">{count}</span>}
               </button>
             );
           })}
           {listed.length === 0 && <p class="quiet workspace-no-repos">No matching repositories</p>}
         </nav>
+        <details class="workspace-manage">
+          <summary>Manage repositories</summary>
+          <ul>
+            {projects.map((project) => (
+              <li key={project.repo}>
+                <span title={project.repo}>{project.name}</span>
+                <button
+                  type="button"
+                  aria-label={`${hidden.has(project.repo) ? "Show" : "Hide"} ${project.name}`}
+                  onClick={() => onToggle(project.repo)}
+                >
+                  {hidden.has(project.repo) ? "Show" : "Hide"}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {projects.length === 0 && <p class="quiet">No repositories</p>}
+        </details>
       </aside>
       <div class="workspace-main">
         <div class="workspace-intro">
@@ -112,7 +140,7 @@ export function Workspace({
           <div class="workspace-metric">
             <span>OPEN PULL REQUESTS</span>
             <strong>{visiblePulls.length}</strong>
-            <small>Across selected repositories</small>
+            <small>{selected ? "In this repository" : "Across visible repositories"}</small>
           </div>
           <div class="workspace-metric">
             <span>ACTIVE WORKFLOWS</span>
@@ -121,12 +149,12 @@ export function Workspace({
           </div>
           <div class="workspace-metric">
             <span>NEEDS ATTENTION</span>
-            <strong class={attention.length ? "workspace-alert-number" : ""}>{attention.length}</strong>
-            <small>Failed checks or conflicts</small>
+            <strong class={attentionCount ? "workspace-alert-number" : ""}>{attentionCount}</strong>
+            <small>Failed PRs, workflows or approvals</small>
           </div>
           <div class="workspace-metric">
             <span>REPOSITORIES</span>
-            <strong>{selected ? 1 : projects.length}</strong>
+            <strong>{selected ? 1 : shown.length}</strong>
             <small>{selected ? "Selected repository" : "In your workspace"}</small>
           </div>
         </section>
@@ -139,27 +167,17 @@ export function Workspace({
         </fieldset>
         <div class={tab === "all" ? "workspace-content" : "workspace-content workspace-content-focused"}>
           {tab !== "workflows" && <PullList pulls={visiblePulls} now={now} />}
-          {tab !== "pulls" && <ReleaseList runs={visibleRuns} now={now} />}
+          {tab !== "pulls" && (
+            <div class="workspace-workflows">
+              <p class="workspace-eyebrow">WORKFLOW MISSION CONTROL</p>
+              <ReleaseList runs={visibleRuns} now={now} inspect />
+            </div>
+          )}
           {tab === "all" && !selected && (
-            <section class="workspace-release-panel">
-              <h3>Quick releases</h3>
-              <p class="quiet">Select a repository to inspect its workflows and release a new version.</p>
-              <div class="workspace-quick-repos">
-                {projects.map((project) => (
-                  <button
-                    key={project.repo}
-                    type="button"
-                    onClick={() => {
-                      setScope(project.repo);
-                      setTab("all");
-                    }}
-                  >
-                    {project.name}
-                    <span aria-hidden="true">→</span>
-                  </button>
-                ))}
-              </div>
-            </section>
+            <details class="workspace-release-panel">
+              <summary>Releases &amp; promotion</summary>
+              <ProjectList projects={shown} now={now} />
+            </details>
           )}
         </div>
       </div>
