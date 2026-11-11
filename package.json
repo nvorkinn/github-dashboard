@@ -1,0 +1,31 @@
+{
+  "name": "github-dashboard",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "node relay/src/main.ts",
+    "check": "biome ci . && tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.6",
+    "hono": "4.13.17",
+    "preact": "11.2.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@preact/preset-vite": "2.10.6",
+    "@testing-library/preact": "3.2.6",
+    "@types/node": "26.6.6",
+    "happy-dom": "21.0.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.7",
+    "vitest": "5.1.0",
+    "yaml": "2.9.1"
+  }
+}
