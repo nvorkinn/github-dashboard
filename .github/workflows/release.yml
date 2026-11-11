@@ -279,8 +279,8 @@ jobs:
           fi
           branch="github-dashboard-$TAG"
           user_id="$(gh api "users/$APP_SLUG%5Bbot%5D" --jq .id)"
-          git config user.name "$APP_SLUG[bot]"
-          git config user.email "$user_id+$APP_SLUG[bot]@users.noreply.github.com"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "$user_id+${APP_SLUG}[bot]@users.noreply.github.com"
           git switch -c "$branch"
           git commit -qam "Bump github-dashboard to $TAG"
           # The checkout keeps no credentials, so the token goes to git for this one push.
