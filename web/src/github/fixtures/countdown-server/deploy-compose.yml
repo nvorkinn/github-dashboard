@@ -1,0 +1,136 @@
+name: Deploy compose
+
+# Deploys a release to a host through its Docker daemon (DOCKER_HOST=ssh://...): the secrets are fetched from Vaultwarden
+# onto the runner and stay there with the compose file and the settings, and scripts/deploy-context.sh drives the daemon
+# over SSH, so nothing is installed or run on the host. One job deploys every service (no matrix, so no locks and no
+# max-parallel). Called by release.yml (dev), and run by hand to deploy or re-deploy a tag to dev. By hand, production
+# can only be dry-run: it pulls the images and prints what a deploy would do, changing no container. Production's real
+# deploys are promote.yml's, behind its approval.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: The GitHub environment holding the host's DEPLOY_* and BW_* secrets, dev or prod.
+        type: string
+        required: true
+      tag:
+        description: The release to deploy, e.g. v1.2.3
+        type: string
+        required: true
+      dry_run:
+        description: Pull the images and print what a deploy would do, without changing a container.
+        type: boolean
+        default: false
+      approved:
+        description: Set by promote.yml, after its approval, to deploy production for real. A run by hand has no such input.
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: dev (deploys) or prod (dry run only)
+        type: choice
+        options: [dev, prod]
+        default: dev
+      tag:
+        description: The release to deploy, e.g. v1.2.3
+        type: string
+        required: true
+      dry_run:
+        description: Pull the images and print what a deploy would do, without changing a container (always on for prod)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.dry_run && 'plan' || 'deploy' }} (${{ inputs.environment }}, docker context)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The target's secrets, with no reviewers of its own: promote.yml asks for its one approval before calling this.
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write # Tailscale's federated identity, below
+    concurrency:
+      group: deploy-compose-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      TARGET: ${{ inputs.environment }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      APPROVED: ${{ inputs.approved }}
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+    steps:
+      - name: Only promote.yml deploys production
+        # Not the event: in a called workflow that is the caller's, and promote.yml is started by hand too.
+        if: ${{ env.ENVIRONMENT == 'prod' && env.DRY_RUN != 'true' && env.APPROVED != 'true' }}
+        run: |
+          echo "::error::Production can only be planned (dry_run) here; promote.yml deploys it, after approval."
+          exit 1
+
+      # The scripts, from the branch the workflow runs on: an older release doesn't have them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # And the compose file and settings of the release itself.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          path: release
+          persist-credentials: false
+
+      - name: Join the tailnet
+        # Only for a host reachable over Tailscale alone (dev, on the home server): the environment's variables are empty
+        # for prod, a public host. Federated identity: GitHub's OIDC token for this job's environment, no secret.
+        if: ${{ vars.TAILSCALE_CLIENT_ID != '' }}
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ vars.TAILSCALE_CLIENT_ID }}
+          audience: ${{ vars.TAILSCALE_AUDIENCE }}
+          tags: tag:ci
+
+      - name: Set up SSH
+        env:
+          ORACLE_SSH_TOKEN: ${{ secrets.ORACLE_SSH_TOKEN }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_TOKEN" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # The Docker CLI runs `ssh <host> docker system dial-stdio` for every command, so one connection is kept open
+          # and shared.
+          cat > ~/.ssh/config <<'CONFIG'
+          Host *
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            ControlMaster auto
+            ControlPath ~/.ssh/cm-%C
+            ControlPersist 120
+            ServerAliveInterval 30
+          CONFIG
+          sed -i 's/^          //' ~/.ssh/config
+
+      # The shared action: secrets-map.json says what this target needs, and the items are in its collection.
+      - name: Fetch the secrets from Vaultwarden
+        uses: nvorkinn/.github/actions/vaultwarden-secrets@6796027a4711b904d27024c6b28d3b1d42c3bb68 # main
+        with:
+          map: secrets-map.json
+          target: ${{ env.TARGET }}
+          collection: countdown-server/${{ env.TARGET }}
+          bw-clientid: ${{ secrets.BW_CLIENTID }}
+          bw-clientsecret: ${{ secrets.BW_CLIENTSECRET }}
+          bw-password: ${{ secrets.BW_PASSWORD }}
+
+      - name: ${{ inputs.dry_run && 'Plan' || 'Deploy' }} through the host's Docker daemon
+        run: |
+          # The project directory is a fixed path on the runner (see deploy-context.sh); nothing on the host is read through it.
+          sudo install -d -o "$(id -u)" -g "$(id -g)" /opt/countdown-server
+          export DOCKER_HOST="ssh://$DEPLOY_TARGET"
+          RELEASE_DIR="$PWD/release" scripts/deploy-context.sh "$TARGET" "$TAG" "$RUNNER_TEMP/secrets"
+          rm -rf "$RUNNER_TEMP/secrets"

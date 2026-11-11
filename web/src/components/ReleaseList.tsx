@@ -1,10 +1,11 @@
 import { useState } from "preact/hooks";
-import type { Approval, CheckState, Job, ReleaseRun, RunActions } from "../model.ts";
+import type { Approval, CheckState, ReleaseRun, RunActions } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
+import { Jobs } from "./Jobs.tsx";
 import { shortName } from "./PullList.tsx";
 import { type Notice, RunAction } from "./RunAction.tsx";
-import { Legend, labelOf, StateChip, ToneIcon, toneOf } from "./state.tsx";
+import { Legend, StateChip } from "./state.tsx";
 import { duration } from "./time.ts";
 
 const ACTIVE: CheckState[] = ["running", "waiting", "queued"];
@@ -73,20 +74,12 @@ function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
             : `going for ${duration(now - started)}`}
         </span>
       </p>
-      {run.jobs.length > 0 && (
-        <ul class="jobs" aria-label="Jobs">
-          {run.jobs.map((job) => (
-            <JobChip
-              key={job.id}
-              job={job}
-              now={now}
-              rerun={finished && RERUNNABLE.includes(job.state) ? actions : undefined}
-              run={run}
-              onNotice={setJobNotice}
-            />
-          ))}
-        </ul>
-      )}
+      <Jobs
+        run={run}
+        now={now}
+        rerunOf={(job) => (finished && RERUNNABLE.includes(job.state) ? actions : undefined)}
+        onNotice={setJobNotice}
+      />
       {jobNotice && (
         <p class={jobNotice.failed ? "action-problem" : "action-done"} role={jobNotice.failed ? "alert" : "status"}>
           {jobNotice.text}
@@ -156,57 +149,5 @@ function ApprovalActions({
         }}
       />
     </span>
-  );
-}
-
-/** How long a job took or has been going, when that is known. */
-function jobTime(job: Job, now: number): string | undefined {
-  if (!job.startedAt) {
-    return undefined;
-  }
-  const started = Date.parse(job.startedAt);
-  if (job.finishedAt) {
-    return duration(Date.parse(job.finishedAt) - started);
-  }
-  return job.state === "running" ? duration(now - started) : undefined;
-}
-
-function JobChip({
-  job,
-  now,
-  run,
-  rerun,
-  onNotice,
-}: {
-  job: Job;
-  now: number;
-  run: ReleaseRun;
-  /** Set where the job can be re-run. */
-  rerun: RunActions | undefined;
-  onNotice: (notice: Notice | undefined) => void;
-}) {
-  const tone = toneOf(job.state);
-  const time = jobTime(job, now);
-  return (
-    <li class={`job tone-${tone}`} title={labelOf(job.state)}>
-      <ToneIcon tone={tone} />
-      {job.url ? <a href={job.url}>{job.name}</a> : <span>{job.name}</span>}
-      {/* The chip's colour and shape, in words, for who can't see them. */}
-      <span class="visually-hidden">: {labelOf(job.state)}</span>
-      {time && <span class="job-time">{time}</span>}
-      {rerun && (
-        <RunAction
-          label="Re-run"
-          name={`Re-run ${job.name}`}
-          title="Re-run this job, and the jobs that need it"
-          busy="Starting…"
-          onNotice={onNotice}
-          run={async () => {
-            await rerun.rerunJob(run, job);
-            return `Re-run of ${job.name} started.`;
-          }}
-        />
-      )}
-    </li>
   );
 }
