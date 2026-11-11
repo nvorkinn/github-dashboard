@@ -702,9 +702,25 @@ async function releaseRun(
     path && run.head_sha ? workflowFile(api, repo, path, run.head_sha) : undefined,
   ]);
   const jobs = rawJobs.map(job);
-  // Only a run that waits has anything to approve, so only such a run costs the request.
-  const approvals = runState(run, jobs) === "waiting" ? await pendingApprovals(api, repo, run.id) : [];
+  // Only a run with a job GitHub calls waiting can have something to approve, so only such a run costs the request.
+  const approvals = jobs.some(isWaiting) ? await pendingApprovals(api, repo, run.id) : [];
   return runOf(repo, workflow, run, jobs, definitions, approvals);
+}
+
+export function isWaiting(job: Job): boolean {
+  return job.state === "waiting";
+}
+
+/**
+ * A run's jobs, given the `approvals` it waits for. GitHub calls a job waiting whatever it waits for, a runner as
+ * much as an approval, so with nothing to approve its waiting jobs are queued ones. With `approvals` unset, for a run
+ * whose approvals couldn't be read, GitHub's word stands.
+ */
+export function settledJobs(jobs: Job[], approvals: Approval[] | undefined): Job[] {
+  if (approvals === undefined || approvals.length > 0) {
+    return jobs;
+  }
+  return jobs.map((one) => (isWaiting(one) ? { ...one, state: "queued" } : one));
 }
 
 /** The jobs of a run's latest attempt, which is what GitHub gives without `filter`. */
@@ -713,27 +729,38 @@ export function runJobs(api: Api, repo: string, run: number): Promise<RawJob[]> 
 }
 
 /**
- * How a run stands, given its jobs. A run with one job waiting for approval and another running is "in progress" to
- * GitHub, but what it needs is the approval.
+ * How a run stands, given its jobs as `settledJobs` left them. A run with one job waiting for approval and another
+ * running is "in progress" to GitHub, but what it needs is the approval. A run GitHub calls waiting with no job
+ * waiting for an approval is waiting for something else, such as a runner, and stands as its jobs do.
  */
 export function runState(run: Pick<RawRun, "status" | "conclusion">, jobs: Job[]): CheckState {
-  return run.status !== "completed" && jobs.some((one) => one.state === "waiting")
-    ? "waiting"
-    : checkState(run.status, run.conclusion);
+  const state = checkState(run.status, run.conclusion);
+  if (run.status === "completed") {
+    return state;
+  }
+  if (jobs.some(isWaiting)) {
+    return "waiting";
+  }
+  if (state !== "waiting") {
+    return state;
+  }
+  return jobs.some((one) => one.state === "running") ? "running" : "queued";
 }
 
 /**
  * A run of a release workflow as GitHub gives it, in the model's words: with its `jobs`, its workflow file's
- * `definitions` at its commit if they could be had, and the `approvals` it waits for.
+ * `definitions` at its commit if they could be had, and the `approvals` it waits for (unset if they couldn't be read).
+ * Only a run with something to approve, or whose approvals couldn't be read, is waiting: see `settledJobs`.
  */
 export function runOf(
   repo: string,
   workflow: Pick<RawWorkflow, "name">,
   run: RawRun,
-  jobs: Job[],
+  listed: Job[],
   definitions: WorkflowJob[] | undefined,
-  approvals: Approval[],
+  approvals: Approval[] | undefined,
 ): ReleaseRun {
+  const jobs = settledJobs(listed, approvals);
   return {
     repo,
     id: run.id,
@@ -747,7 +774,7 @@ export function runOf(
     finishedAt: run.status === "completed" ? run.updated_at : undefined,
     jobs,
     graph: definitions && jobGraph(definitions, jobs),
-    approvals,
+    approvals: approvals ?? [],
   };
 }
 
@@ -776,15 +803,15 @@ export function releaseTag(run: Pick<RawRun, "head_branch" | "event" | "display_
 
 /**
  * The environments a waiting run needs approved. A token without the permission to read them (GitHub answers 403 or
- * 404) leaves the run without buttons rather than without its card.
+ * 404) gets nothing, which leaves the run without buttons rather than without its card.
  */
-async function pendingApprovals(api: Api, repo: string, run: number): Promise<Approval[]> {
+async function pendingApprovals(api: Api, repo: string, run: number): Promise<Approval[] | undefined> {
   let pending: RawPendingDeployment[];
   try {
     pending = await api.list<RawPendingDeployment>(`repos/${repo}/actions/runs/${run}/pending_deployments`);
   } catch (error) {
     if (error instanceof GitHubError && error.retryAt === undefined && (error.status === 403 || error.status === 404)) {
-      return [];
+      return undefined;
     }
     throw error;
   }

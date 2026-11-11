@@ -21,6 +21,7 @@ import { createApi, GitHubError, limiter, MAX_PARALLEL, retryAt } from "./api.ts
 import {
   approval,
   isReleaseName,
+  isWaiting,
   job,
   latestOf,
   of,
@@ -41,7 +42,6 @@ import {
   refused,
   runJobs,
   runOf,
-  runState,
   settingsOf,
   shownRuns,
 } from "./read.ts";
@@ -867,17 +867,18 @@ async function releaseRun(
             completed_at: one.completedAt,
           }),
         );
-  const approvals: Approval[] =
-    runState(raw, jobs) === "waiting"
-      ? (run.pendingDeploymentRequests?.nodes ?? [])
-          .filter((one) => one !== null)
-          .map((one) =>
-            approval({
-              environment: { id: one.environment.databaseId, name: one.environment.name },
-              current_user_can_approve: one.currentUserCanApprove,
-            }),
-          )
-      : [];
+  // Unset when GitHub wouldn't say what the run waits for.
+  const pending = run.pendingDeploymentRequests?.nodes;
+  const approvals: Approval[] | undefined = jobs.some(isWaiting)
+    ? pending
+        ?.filter((one) => one !== null)
+        .map((one) =>
+          approval({
+            environment: { id: one.environment.databaseId, name: one.environment.name },
+            current_user_can_approve: one.currentUserCanApprove,
+          }),
+        )
+    : [];
   const file = suite?.commit?.file;
   return runOf(repo, workflow, raw, jobs, file ? blobOf(repo, file.oid)?.jobs : undefined, approvals);
 }

@@ -292,19 +292,22 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     }
     {
       const jobs: Json[] = (await get(`repos/${repo}/actions/runs/${run.id}/jobs`))?.jobs ?? [];
-      const pending: Json[] =
-        (await get(`repos/${repo}/actions/runs/${run.id}/pending_deployments`).catch((error) => {
+      // Null when the route refuses, as GitHub answers a field it won't show.
+      const pending: Json[] | null = await get(`repos/${repo}/actions/runs/${run.id}/pending_deployments`).then(
+        (found) => found ?? [],
+        (error) => {
           if (error instanceof Whole) {
             throw error;
           }
-          return [];
-        })) ?? [];
+          return null;
+        },
+      );
       const file = run.head_sha
         ? await get(`repos/${repo}/contents/${path}?ref=${run.head_sha}`).catch(() => undefined)
         : undefined;
       return {
         ...card,
-        pendingDeploymentRequests: {
+        pendingDeploymentRequests: pending && {
           nodes: pending.map((one) => ({
             currentUserCanApprove: one.current_user_can_approve,
             environment: { databaseId: one.environment.id, name: one.environment.name },

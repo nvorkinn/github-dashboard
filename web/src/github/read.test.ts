@@ -16,7 +16,10 @@ import {
   type ReleasePaths,
   readChanged,
   releaseTag,
+  runState,
+  settledJobs,
   shownRuns,
+  job as toJob,
 } from "./read.ts";
 import { account, fakeGitHub, job, type Routes, repo, run, withPull, withWorkflow } from "./testing.ts";
 
@@ -332,6 +335,37 @@ test("a waiting run whose approvals GitHub won't show has none, and still shows"
   const { data, problem } = await read(routes).result;
   expect(data.releases).toEqual([expect.objectContaining({ id: 4, state: "waiting", approvals: [] })]);
   expect(problem).toBeUndefined();
+});
+
+test("a run GitHub calls waiting with nothing to approve, such as one waiting for a runner, is queued", async () => {
+  const routes = account("octo/app");
+  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
+    { id: 4, status: "waiting", conclusion: null, jobs: [job(42, { status: "waiting", conclusion: null })] },
+  ]);
+  routes["repos/octo/app/actions/runs/4/pending_deployments"] = [];
+  const { data } = await read(routes).result;
+  expect(data.releases).toEqual([expect.objectContaining({ id: 4, state: "queued", approvals: [] })]);
+  expect(data.releases[0]?.jobs).toEqual([expect.objectContaining({ id: 42, state: "queued" })]);
+});
+
+test("a job GitHub calls waiting is waiting only with something to approve, or when that couldn't be read", () => {
+  const jobs = [
+    toJob(job(1, { status: "waiting", conclusion: null })),
+    toJob(job(2, { status: "in_progress", conclusion: null })),
+  ];
+  const states = (approvals: Parameters<typeof settledJobs>[1]) => settledJobs(jobs, approvals).map((one) => one.state);
+  expect(states([])).toEqual(["queued", "running"]);
+  expect(states([{ environmentId: 7, environment: "production", canApprove: false }])).toEqual(["waiting", "running"]);
+  expect(states(undefined)).toEqual(["waiting", "running"]);
+
+  // The run goes by its jobs, whatever GitHub calls it.
+  const waiting = { status: "waiting", conclusion: null };
+  expect(runState(waiting, settledJobs(jobs, undefined))).toBe("waiting");
+  expect(runState(waiting, settledJobs(jobs, []))).toBe("running");
+  expect(runState(waiting, settledJobs(jobs.slice(0, 1), []))).toBe("queued");
+  expect(runState(waiting, [])).toBe("queued");
+  expect(runState({ status: "in_progress", conclusion: null }, settledJobs(jobs, undefined))).toBe("waiting");
+  expect(runState({ status: "completed", conclusion: "success" }, jobs)).toBe("passed");
 });
 
 test("a project's Promote workflow is the active one at promote.yml, found in the same list of workflows", async () => {
