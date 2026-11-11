@@ -136,7 +136,7 @@ export function createDemoRunActions(
   }
 
   let nextId = 9500;
-  function start(project: Project, workflow: string, title: string, names: string[]): void {
+  function start(project: Project, workflow: string, title: string, tag: string, names: string[]): void {
     const now = Date.now();
     const id = nextId++;
     edits.started.push({
@@ -144,6 +144,7 @@ export function createDemoRunActions(
       id,
       workflow,
       title,
+      tag,
       url: `${project.url}/actions/runs/${id}`,
       state: "running",
       actor: "octocat",
@@ -189,12 +190,12 @@ export function createDemoRunActions(
     release: (project, tag) =>
       act(() => {
         edits.released.set(project.repo, { tag, at: Date.now() });
-        start(project, "Release", tag, ["version", "build", "publish release"]);
+        start(project, "Release", "Merge the latest changes", tag, ["version", "build", "publish release"]);
       }),
 
     promote: (project, tag) =>
       act(() => {
-        start(project, "Promote", tag, ["check tag", "approve-prod", "deploy prod"]);
+        start(project, "Promote", `Promote ${tag}`, tag, ["check tag", "approve-prod", "deploy prod"]);
       }),
   };
 }
