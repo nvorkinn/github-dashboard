@@ -14,6 +14,7 @@ import {
   planFor,
   readChanged,
   readDashboard,
+  releaseTag,
   shownRuns,
 } from "./read.ts";
 import { account, fakeGitHub, job, type Routes, repo, run, withPull, withWorkflow } from "./testing.ts";
@@ -771,4 +772,27 @@ test.each([
   );
   expect(error).toBeInstanceOf(GitHubError);
   expect(error).toMatchObject({ status });
+});
+
+test("a release run's tag is the tag it ran on, or the version its own title names", () => {
+  // Started by pushing a tag, or by publishing a release: the title is the commit's subject.
+  expect(releaseTag({ event: "push", head_branch: "v1.2.3", display_title: "Fix the thing (#7)" })).toBe("v1.2.3");
+  expect(releaseTag({ event: "release", head_branch: "2.0.0-rc.1", display_title: "Release" })).toBe("2.0.0-rc.1");
+  // Started by hand from main, with a run-name.
+  expect(releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Promote v1.12.3" })).toBe(
+    "v1.12.3",
+  );
+  expect(
+    releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Deploy 3.0.0-rc.3 to dev" }),
+  ).toBe("3.0.0-rc.3");
+  // A run that makes its tag as it goes doesn't say which.
+  expect(releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Release" })).toBeUndefined();
+  // A pushed commit's subject can name any version.
+  expect(
+    releaseTag({ event: "push", head_branch: "main", display_title: "Bump vite from 8.3.6 to 8.3.7" }),
+  ).toBeUndefined();
+  expect(releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Nightly 2026.11.11" })).toBe(
+    "2026.11.11",
+  );
+  expect(releaseTag({ event: "schedule", head_branch: "main" })).toBeUndefined();
 });
