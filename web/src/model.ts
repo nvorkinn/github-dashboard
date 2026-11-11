@@ -151,6 +151,26 @@ export type PullActions = {
   updateBranch(pull: PullRequest): Promise<void>;
 };
 
+/** One file a pull request changes. `status` is GitHub's word: added, modified, removed, renamed and the like. */
+export type ChangedFile = {
+  path: string;
+  /** Where a renamed or copied file was before. */
+  previousPath: string | undefined;
+  status: string;
+  additions: number;
+  deletions: number;
+};
+
+/** The files a pull request changes, as far as they were read. */
+export type PullFiles = {
+  files: ChangedFile[];
+  /** Whether it changes more than `files` holds. */
+  truncated: boolean;
+};
+
+/** Reads the files a pull request changes, rejecting with an `Error` if GitHub wouldn't say. */
+export type ReadFiles = (pull: PullRequest) => Promise<PullFiles>;
+
 /** A pull request's checks in one word: the worst that is true of them. `none` when it has no checks. */
 export function summarize(checks: Check[]): "none" | "failed" | "waiting" | "running" | "passed" {
   if (checks.length === 0) {

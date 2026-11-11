@@ -1,6 +1,8 @@
 import type { Auth } from "./auth.ts";
 import type { Actions } from "./components/actions.tsx";
+import { createApi } from "./github/api.ts";
 import { createDashboard } from "./github/dashboard.ts";
+import { createFilesReader } from "./github/files.ts";
 import { createPullActions } from "./github/pull_actions.ts";
 import type { Dashboard } from "./model.ts";
 
@@ -28,5 +30,5 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     const pulls = demoPullActions(dashboard);
     return pulls ? { pulls } : {};
   }
-  return { pulls: createPullActions(auth, dashboard) };
+  return { pulls: createPullActions(auth, dashboard), files: createFilesReader(createApi(auth)) };
 }
