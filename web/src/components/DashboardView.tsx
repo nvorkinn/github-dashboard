@@ -2,9 +2,11 @@ import { useState } from "preact/hooks";
 import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
+import { LanesView } from "./LanesView.tsx";
 import { ProjectList } from "./ProjectList.tsx";
 import { PullList } from "./PullList.tsx";
 import { ReleaseList } from "./ReleaseList.tsx";
+import type { View } from "./ViewSwitch.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
 export function useRefresh(dashboard: Dashboard): { refresh: () => void; pending: boolean } {
@@ -73,7 +75,17 @@ function Liveness({ live }: { live: boolean }) {
 }
 
 /** The dashboard itself: drawn from the state, less the projects the user has hidden. */
-export function DashboardView({ state, now, refresh }: { state: DashboardState; now: number; refresh: () => void }) {
+export function DashboardView({
+  state,
+  now,
+  refresh,
+  view = "stage",
+}: {
+  state: DashboardState;
+  now: number;
+  refresh: () => void;
+  view?: View;
+}) {
   const { hidden, toggle } = useHiddenProjects();
   if (state.status === "loading") {
     return <p class="quiet">Loading your projects…</p>;
@@ -101,12 +113,23 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
           {state.problem}
         </p>
       )}
-      {/* Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side. */}
-      <div class="stage">
-        <PullList pulls={pulls} now={now} hiddenCount={data.pulls.length - pulls.length} />
-        <ReleaseList runs={releases} now={now} />
-        <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
-      </div>
+      {view === "lanes" ? (
+        <LanesView
+          projects={data.projects}
+          pulls={data.pulls}
+          runs={releases}
+          now={now}
+          hidden={hidden}
+          onToggle={toggle}
+        />
+      ) : (
+        // Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side.
+        <div class="stage">
+          <PullList pulls={pulls} now={now} hiddenCount={data.pulls.length - pulls.length} />
+          <ReleaseList runs={releases} now={now} />
+          <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
+        </div>
+      )}
     </>
   );
 }

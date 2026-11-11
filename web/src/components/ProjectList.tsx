@@ -110,7 +110,7 @@ export function ProjectList({
  * Release, which publishes the next minor version at once, and Promote, which starts the project's Promote workflow
  * for its latest release. Neither can be taken back, so each asks first, naming the tag.
  */
-function ProjectActions({ project, actions }: { project: Project; actions: RunActions }) {
+export function ProjectActions({ project, actions }: { project: Project; actions: RunActions }) {
   const promote = promoteTag(project);
   return (
     <>

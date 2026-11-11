@@ -5,16 +5,28 @@ import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Settings } from "./components/Settings.tsx";
+import { useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import type { Dashboard } from "./model.ts";
 import { createNotifier, type Notifier } from "./notifications.ts";
 
-/** The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. */
+/** The pull request a demo was built from, which its note links back to. */
+export interface DemoPull {
+  number: number;
+  title: string;
+  url: string;
+}
+
+/**
+ * The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. `pull` is set on a pull
+ * request's demo.
+ */
 export function App({
   auth,
   dashboard,
   actions,
   demo = false,
   notifier,
+  pull,
 }: {
   auth: Auth;
   dashboard: Dashboard;
@@ -22,6 +34,7 @@ export function App({
   demo?: boolean;
   /** Shows the desktop notifications. Left out, the browser's, as the settings page sets them. */
   notifier?: Notifier | undefined;
+  pull?: DemoPull | undefined;
 }) {
   const state = useAuthState(auth);
   const signedIn = state.status === "signedIn";
@@ -43,7 +56,17 @@ export function App({
     <>
       {demo && (
         <p role="note" class="demo-note">
-          Demo: sample data, nothing here is real.
+          {pull ? (
+            <>
+              Demo of{" "}
+              <a href={pull.url}>
+                #{pull.number} {pull.title}
+              </a>
+              : sample data, nothing here is real.
+            </>
+          ) : (
+            "Demo: sample data, nothing here is real."
+          )}
         </p>
       )}
       {signedIn ? (
@@ -100,6 +123,7 @@ function SignedIn({
   // What needs attention shows as a desktop notification, for as long as the dashboard runs.
   useEffect(() => dashboard.onNotice?.((notice) => notifier.notify(notice)), [dashboard, notifier]);
 
+  const [view, setView] = useView();
   return (
     <>
       <header class="top">
@@ -109,6 +133,7 @@ function SignedIn({
           </a>
         </h1>
         <div class="top-controls">
+          <ViewSwitch view={view} onChange={setView} />
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
           <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
             Settings
@@ -121,7 +146,7 @@ function SignedIn({
           <Settings notifier={notifier} />
         ) : (
           <ActionsContext.Provider value={actions}>
-            <DashboardView state={state} now={now} refresh={refresh} />
+            <DashboardView state={state} now={now} refresh={refresh} view={view} />
           </ActionsContext.Provider>
         )}
       </main>
