@@ -546,6 +546,48 @@ h2 {
   min-width: 0;
 }
 
+/* The project's name, and at the row's end the button that folds a pull request's details away or out. */
+.pull-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.fold-toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.fold-toggle:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.fold-toggle::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-top: -0.2rem;
+  border-right: 2px solid var(--quiet);
+  border-bottom: 2px solid var(--quiet);
+  transform: rotate(45deg);
+  transition: transform 0.12s;
+}
+
+.fold-toggle[aria-expanded="true"]::before {
+  margin-top: 0.2rem;
+  transform: rotate(-135deg);
+}
+
 .pull-title,
 .release-title {
   display: block;
@@ -619,6 +661,37 @@ button.action-confirm:hover:not(:disabled) {
   color: var(--problem);
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+/* Folded: the title over one line of states, with the buttons at its end. */
+.pull.pull-folded {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 0.375rem 0.5rem;
+}
+
+.pull-folded > .pull-main {
+  flex: 1 1 100%;
+}
+
+.pull-folded > .pull-badges {
+  flex-flow: row wrap;
+  align-items: center;
+  padding-top: 0;
+}
+
+.pull-folded > .pull-badges:empty {
+  display: none;
+}
+
+.pull-folded > .pull-actions {
+  flex: 1 1 auto;
+  align-items: flex-end;
+}
+
+.pull-folded .action-buttons {
+  justify-content: flex-end;
 }
 
 .checks-none {

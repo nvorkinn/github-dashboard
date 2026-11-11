@@ -136,7 +136,7 @@ export function PullList({ pulls, now, hiddenCount = 0 }: { pulls: PullRequest[]
                 ) : (
                   <ul class="cards" aria-labelledby={`column-${value}`}>
                     {these.map((pull) => (
-                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} />
+                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} foldable />
                     ))}
                   </ul>
                 )}
@@ -173,7 +173,13 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
   }
 }
 
-export function PullRow({ pull: read, now }: { pull: PullRequest; now: number }) {
+/**
+ * One pull request. A `foldable` one starts folded, down to its project, number, title, states and buttons, with a
+ * button that unfolds the rest: who opened it and when, its branches, each check and the files changed.
+ */
+export function PullRow({ pull: read, now, foldable = false }: { pull: PullRequest; now: number; foldable?: boolean }) {
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = foldable && !unfolded;
   const actions = useActions()?.pulls;
   const readFiles = useActions()?.files;
   const [doneState, setDone] = useState<Done | undefined>(undefined);
@@ -183,34 +189,48 @@ export function PullRow({ pull: read, now }: { pull: PullRequest; now: number })
       ? { ...read, autoMerge: done.what === "autoMergeOn" }
       : read;
   return (
-    <li class="pull">
-      {pull.authorAvatarUrl ? (
+    <li class={folded ? "pull pull-folded" : "pull"}>
+      {folded ? null : pull.authorAvatarUrl ? (
         <img class="avatar" src={pull.authorAvatarUrl} alt="" width="32" height="32" loading="lazy" />
       ) : (
         <span class="avatar avatar-missing" aria-hidden="true" />
       )}
       <div class="pull-main">
-        <span class="repo-label" title={pull.repo}>
-          {shortName(pull.repo)}
-        </span>
+        <div class="pull-head">
+          <span class="repo-label" title={pull.repo}>
+            {shortName(pull.repo)}
+          </span>
+          {foldable && (
+            <button
+              type="button"
+              class="fold-toggle"
+              aria-expanded={unfolded}
+              aria-label={`Details of #${pull.number} in ${shortName(pull.repo)}`}
+              title={unfolded ? "Hide details" : "Show details"}
+              onClick={() => setUnfolded(!unfolded)}
+            />
+          )}
+        </div>
         <ExternalLink class="pull-title" href={pull.url}>
           <span class="number">#{pull.number}</span> {pull.title}
         </ExternalLink>
-        <p class="meta">
-          <span>{pull.author}</span>
-          <span class="branches">
-            <code>{pull.head}</code>
-            <span aria-hidden="true"> → </span>
-            <span class="visually-hidden"> into </span>
-            <code>{pull.base}</code>
-          </span>
-          <span>
-            opened <Ago at={pull.createdAt} now={now} />
-          </span>
-          <span>
-            updated <Ago at={pull.updatedAt} now={now} />
-          </span>
-        </p>
+        {!folded && (
+          <p class="meta">
+            <span>{pull.author}</span>
+            <span class="branches">
+              <code>{pull.head}</code>
+              <span aria-hidden="true"> → </span>
+              <span class="visually-hidden"> into </span>
+              <code>{pull.base}</code>
+            </span>
+            <span>
+              opened <Ago at={pull.createdAt} now={now} />
+            </span>
+            <span>
+              updated <Ago at={pull.updatedAt} now={now} />
+            </span>
+          </p>
+        )}
       </div>
       <div class="pull-badges">
         {pull.draft && <span class="badge">Draft</span>}
@@ -229,11 +249,11 @@ export function PullRow({ pull: read, now }: { pull: PullRequest; now: number })
         )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
       </div>
-      <Checks checks={pull.checks} />
+      <Checks checks={pull.checks} folded={folded} />
       {actions && done?.what !== "merged" && (
         <PullButtons pull={pull} actions={actions} updated={done?.what === "updated"} onDone={setDone} />
       )}
-      {readFiles && <FilesChanged pull={pull} read={readFiles} />}
+      {readFiles && !folded && <FilesChanged pull={pull} read={readFiles} />}
     </li>
   );
 }
@@ -476,13 +496,24 @@ function tally(checks: Check[]): string {
   return [...counts].map(([word, count]) => `${count} ${word}`).join(", ");
 }
 
-/** The checks in one word, and each of them behind it. */
-function Checks({ checks }: { checks: Check[] }) {
+/** The checks in one word, and each of them behind it; `folded`, the one word alone. */
+function Checks({ checks, folded }: { checks: Check[]; folded: boolean }) {
   const summary = summarize(checks);
   if (summary === "none") {
     return <p class="checks checks-none quiet">No checks</p>;
   }
   const look = SUMMARY_LOOKS[summary];
+  if (folded) {
+    return (
+      <p class="checks">
+        <span class={`chip tone-${look.tone}`} title={tally(checks)}>
+          <ToneIcon tone={look.tone} />
+          <span class="visually-hidden">Checks: </span>
+          {look.label}
+        </span>
+      </p>
+    );
+  }
   return (
     <details class="checks">
       <summary>

@@ -20,6 +20,13 @@ function numbers(): string[] {
   return screen.getAllByRole("listitem").flatMap((item) => item.querySelector(".number")?.textContent ?? []);
 }
 
+/** Unfolds every pull request on the page. */
+function unfold() {
+  for (const toggle of screen.getAllByRole("button", { name: /^Details of / })) {
+    fireEvent.click(toggle);
+  }
+}
+
 test("says so when there are none", () => {
   render(<PullList pulls={[]} now={NOW} />);
   expect(screen.getByText("No open pull requests")).toBeTruthy();
@@ -42,6 +49,7 @@ test("draws a pull request", () => {
       ]}
     />,
   );
+  unfold();
   const row = screen.getByRole("listitem");
   const link = within(row).getByRole("link", { name: "#42 Show wind gusts" });
   expect(link.getAttribute("href")).toBe("https://github.com/octocat/weather-station/pull/1");
@@ -57,6 +65,40 @@ test("draws a pull request", () => {
   expect(within(row).queryByText("Draft")).toBeNull();
   expect(within(row).queryByText("Auto-merge")).toBeNull();
   expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Pull requests 1");
+});
+
+test("starts folded, down to the project, number, title, states and buttons, and unfolds on request", () => {
+  const { actions } = fakeActions();
+  const { container } = render(
+    <ActionsContext.Provider value={{ pulls: actions, files: () => Promise.resolve({ files: [], truncated: false }) }}>
+      <PullList
+        now={NOW}
+        pulls={[pull({ number: 42, title: "Show wind gusts", autoMerge: true, checks: checks("passed", "failed") })]}
+      />
+    </ActionsContext.Provider>,
+  );
+  const row = screen.getByRole("listitem");
+  const toggle = within(row).getByRole("button", { name: "Details of #42 in weather-station" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(within(row).getByText("weather-station")).toBeTruthy();
+  expect(within(row).getByRole("link", { name: "#42 Show wind gusts" })).toBeTruthy();
+  expect(within(row).getByText("Ready to merge")).toBeTruthy();
+  expect(row.querySelector(".checks .chip")?.textContent).toBe("Checks: Failed");
+  expect(buttons()).toEqual(["Merge", "Cancel auto-merge"]);
+  // Nothing else: no author or picture, no branches or times, no list of checks, no files.
+  expect(row.querySelector("img, .avatar, details")).toBeNull();
+  expect(row.querySelector(".meta")).toBeNull();
+  expect(container.querySelector(".check-list")).toBeNull();
+
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(row.querySelector(".meta")?.textContent).toContain("monalisa");
+  expect(row.querySelector("img")).toBeTruthy();
+  expect(container.querySelectorAll(".check-list li")).toHaveLength(2);
+  expect(within(row).getByText("Files changed")).toBeTruthy();
+
+  fireEvent.click(toggle);
+  expect(container.querySelector(".check-list")).toBeNull();
 });
 
 test("does without an avatar when there is none", () => {
@@ -93,6 +135,7 @@ test("sums the checks up in one word, with each of them behind it", () => {
   ];
   for (const [states, word, tally] of cases) {
     const { container } = render(<PullList now={NOW} pulls={[pull({ checks: checks(...states) })]} />);
+    unfold();
     const summary = container.querySelector("summary");
     expect(summary?.querySelector(".chip")?.textContent).toBe(word);
     expect(summary?.querySelector(".tally")?.textContent).toBe(tally);
@@ -118,6 +161,7 @@ test("lists failed checks first, with a link where there is one", () => {
       ]}
     />,
   );
+  unfold();
   const items = [...container.querySelectorAll(".check-list li")].map((item) => item.textContent);
   expect(items).toEqual(["e2eFailed", "buildRunning", "lintDone"]);
   expect(screen.getByRole("link", { name: "e2e" }).getAttribute("href")).toBe(
@@ -250,7 +294,12 @@ function withActions(pulls: PullRequest[], actions: PullActions | null = fakeAct
   );
 }
 
-const buttons = () => screen.queryAllByRole("button").map((button) => button.textContent);
+// Not the one that unfolds a pull request, which every one has.
+const buttons = () =>
+  screen
+    .queryAllByRole("button")
+    .filter((button) => !button.classList.contains("fold-toggle"))
+    .map((button) => button.textContent);
 
 test("has no buttons where nothing can be done", () => {
   render(<PullList now={NOW} pulls={[pull()]} />);
@@ -318,8 +367,8 @@ test("a confirmed merge shows while it runs, and then that it merged", async () 
   fireEvent.click(screen.getByRole("button", { name: "Confirm merge" }));
   expect(actions.merge).toHaveBeenCalledExactlyOnceWith(shown);
   expect(buttons()).toEqual(["Merging…", "Auto-merge"]);
-  for (const button of screen.getAllByRole("button")) {
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+  for (const button of screen.getByRole("group").querySelectorAll("button")) {
+    expect(button.disabled).toBe(true);
   }
   // A second click while it runs starts nothing.
   fireEvent.click(screen.getByRole("button", { name: "Auto-merge" }));
@@ -419,6 +468,7 @@ function withFiles(pulls: PullRequest[], read: ReadFiles) {
     </ActionsContext.Provider>
   );
   const rendered = render(tree(pulls));
+  unfold();
   return { ...rendered, show: (shown: PullRequest[]) => rendered.rerender(tree(shown)) };
 }
 
