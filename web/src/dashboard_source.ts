@@ -1,4 +1,5 @@
 import type { Auth } from "./auth.ts";
+import { createDashboard } from "./github/dashboard.ts";
 import type { Dashboard } from "./model.ts";
 
 /**
@@ -12,17 +13,5 @@ export async function makeDashboard(auth: Auth, demo: boolean): Promise<Dashboar
     // `?show=problem` and the like put the demo into a state its script never reaches.
     return createDemoDashboard({ show: new URLSearchParams(location.search).get("show") ?? undefined });
   }
-  // TODO(merge): the next line becomes `return createDashboard(auth);`, from "./github/dashboard.ts".
-  return notConnected(auth);
-}
-
-/** Stands in until the GitHub side exists: a dashboard that never has anything. */
-function notConnected(_auth: Auth): Dashboard {
-  return {
-    state: () => ({ status: "failed", problem: "Not connected yet." }),
-    subscribe: () => () => {},
-    start() {},
-    refresh: async () => {},
-    stop() {},
-  };
+  return createDashboard(auth);
 }

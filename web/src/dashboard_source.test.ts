@@ -2,12 +2,12 @@ import { expect, test } from "vitest";
 import { createAuth } from "./auth.ts";
 import { makeDashboard } from "./dashboard_source.ts";
 
-// TODO(merge): goes with the placeholder in dashboard_source.ts.
-test("outside the demo there is nothing to show yet", async () => {
+test("outside the demo the dashboard reads GitHub, and has read nothing until started", async () => {
   const dashboard = await makeDashboard(createAuth(), false);
-  expect(dashboard.state()).toEqual({ status: "failed", problem: "Not connected yet." });
-  dashboard.start();
-  await dashboard.refresh();
-  dashboard.stop();
-  expect(dashboard.state().status).toBe("failed");
+  expect(dashboard.state()).toEqual({ status: "loading" });
+});
+
+test("the demo flag alone doesn't bring in the sample data: the build has to be the demo's", async () => {
+  const dashboard = await makeDashboard(createAuth(), true);
+  expect(dashboard.state()).toEqual({ status: "loading" });
 });
