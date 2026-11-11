@@ -98,6 +98,14 @@ test("says so when it is the demo", async () => {
   expect(await screen.findByRole("note")).toBeTruthy();
 });
 
+test("links a pull request's demo back to the pull request", async () => {
+  stubBackend(signedOut);
+  const url = "https://github.com/nvorkinn/github-dashboard/pull/14";
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} demo pull={{ number: 14, title: "Link demos", url }} />);
+  const link = await screen.findByRole("link", { name: "#14 Link demos" });
+  expect(link.getAttribute("href")).toBe(url);
+});
+
 test("starts the dashboard once signed in, and not before", async () => {
   stubBackend(signedOut);
   const dashboard = fakeDashboard();

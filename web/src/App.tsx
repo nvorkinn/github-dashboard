@@ -7,17 +7,29 @@ import { useDashboardState, useNow } from "./components/hooks.ts";
 import { useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import type { Dashboard } from "./model.ts";
 
-/** The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. */
+/** The pull request a demo was built from, which its note links back to. */
+export interface DemoPull {
+  number: number;
+  title: string;
+  url: string;
+}
+
+/**
+ * The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. `pull` is set on a pull
+ * request's demo.
+ */
 export function App({
   auth,
   dashboard,
   actions,
   demo = false,
+  pull,
 }: {
   auth: Auth;
   dashboard: Dashboard;
   actions?: Actions | undefined;
   demo?: boolean;
+  pull?: DemoPull | undefined;
 }) {
   const state = useAuthState(auth);
   const signedIn = state.status === "signedIn";
@@ -39,7 +51,17 @@ export function App({
     <>
       {demo && (
         <p role="note" class="demo-note">
-          Demo: sample data, nothing here is real.
+          {pull ? (
+            <>
+              Demo of{" "}
+              <a href={pull.url}>
+                #{pull.number} {pull.title}
+              </a>
+              : sample data, nothing here is real.
+            </>
+          ) : (
+            "Demo: sample data, nothing here is real."
+          )}
         </p>
       )}
       {signedIn ? (
