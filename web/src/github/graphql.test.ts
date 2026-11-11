@@ -257,6 +257,7 @@ test("a field GitHub answers only in part is shown as far as it came, with a pro
   withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
     { id: 4, status: "waiting", conclusion: null, jobs: [job(42, { status: "waiting", conclusion: null })] },
   ]);
+  routes["repos/octo/app/actions/runs/4/pending_deployments"] = () => Response.json({}, { status: 403 });
   const quiet = altered(routes, (data, body) => {
     if (data.w0) {
       data.w0.runs.nodes[0].pendingDeploymentRequests = null;
