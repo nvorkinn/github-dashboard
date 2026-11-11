@@ -118,7 +118,7 @@ export function ProjectActions({ project, actions }: { project: Project; actions
       <RunAction<string>
         label="Release"
         name={`Release ${project.name}`}
-        title={`Publish the next minor release of ${project.defaultBranch}, with notes GitHub writes`}
+        title="Publish the next minor release of the default branch, with notes GitHub writes"
         busy="Releasing…"
         prepare={() => actions.nextRelease(project)}
         ask={(tag) => `Release ${tag}?`}

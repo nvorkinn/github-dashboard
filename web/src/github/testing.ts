@@ -132,7 +132,6 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
         url: one.html_url,
         isPrivate: one.private,
         pushedAt: one.pushed_at,
-        defaultBranchRef: one.default_branch ? { name: one.default_branch } : null,
         mergeCommitAllowed: settings.allow_merge_commit ?? true,
         squashMergeAllowed: settings.allow_squash_merge ?? true,
         rebaseMergeAllowed: settings.allow_rebase_merge ?? true,

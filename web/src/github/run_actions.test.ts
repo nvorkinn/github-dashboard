@@ -244,7 +244,6 @@ const releaseRoutes = (more: Record<string, unknown> = {}) => ({
     { tag_name: "v1.9.0", draft: true },
     { tag_name: "v1.0.0", draft: false },
   ],
-  [`POST ${RELEASES}/generate-notes`]: { name: "v1.3.0", body: "## What's Changed" },
   [`POST ${RELEASES}`]: { id: 1, tag_name: "v1.3.0" },
   ...more,
 });
@@ -264,36 +263,30 @@ test("the next release is the next minor of the published ones, unless that tag 
   );
 });
 
-test("releasing checks again, has GitHub write the notes and publishes them on the default branch", async () => {
+test("releasing checks again and publishes in one call, leaving the branch and the notes to GitHub", async () => {
   const { actions, sent, dashboard } = setUp(releaseRoutes());
-  await actions.release(project({ defaultBranch: "trunk" }), "v1.3.0");
+  await actions.release(project(), "v1.3.0");
   expect(sent()).toEqual([
     {
       method: "POST",
-      path: `${RELEASES}/generate-notes`,
-      body: { tag_name: "v1.3.0", target_commitish: "trunk", previous_tag_name: "v1.2.3" },
-    },
-    {
-      method: "POST",
       path: RELEASES,
-      body: {
-        tag_name: "v1.3.0",
-        target_commitish: "trunk",
-        name: "v1.3.0",
-        body: "## What's Changed",
-        draft: false,
-        prerelease: false,
-      },
+      // No target: GitHub tags the head of the default branch.
+      body: { tag_name: "v1.3.0", generate_release_notes: true, draft: false, prerelease: false },
     },
   ]);
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "release", repo: REPO });
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "workflow_run", repo: REPO });
 });
 
-test("the first release has no previous tag to write the notes from", async () => {
+test("the first release is published the same way", async () => {
   const { actions, sent } = setUp(releaseRoutes({ [`GET ${RELEASES}`]: [] }));
   await actions.release(project(), "v1.0.0");
-  expect(sent()[0]?.body).toEqual({ tag_name: "v1.0.0", target_commitish: "main" });
+  expect(sent()[0]?.body).toEqual({
+    tag_name: "v1.0.0",
+    generate_release_notes: true,
+    draft: false,
+    prerelease: false,
+  });
 });
 
 test("releasing a tag that is no longer the next one is refused", async () => {
@@ -304,17 +297,19 @@ test("releasing a tag that is no longer the next one is refused", async () => {
   expect(sent()).toEqual([]);
 });
 
-test("a release whose notes went through but whose publishing failed says it may have gone through", async () => {
+test("a release whose publishing failed says it may have gone through", async () => {
   const { actions } = setUp(releaseRoutes({ [`POST ${RELEASES}`]: () => new Response(null, { status: 502 }) }));
   await expect(actions.release(project(), "v1.3.0")).rejects.toThrow(
     "GitHub is having trouble (502). It may have gone through: check GitHub before trying again.",
   );
 });
 
-const promotable = project({ promoteWorkflow: 31, defaultBranch: "main" });
+const promotable = project({ promoteWorkflow: 31 });
 const promoteRoutes = (more: Record<string, unknown> = {}) => ({
   [`GET repos/${REPO}/actions/workflows/31`]: { id: 31, path: PROMOTE_WORKFLOW, state: "active" },
   [`GET ${RELEASES}/tags/v1.2.3`]: { tag_name: "v1.2.3" },
+  // The branch the workflow is started on is asked for at that moment.
+  [`GET repos/${REPO}`]: { default_branch: "trunk" },
   [`POST repos/${REPO}/actions/workflows/31/dispatches`]: () => new Response(null, { status: 204 }),
   ...more,
 });
@@ -326,7 +321,7 @@ test("promoting checks the workflow and the release, then starts the workflow wi
     {
       method: "POST",
       path: `repos/${REPO}/actions/workflows/31/dispatches`,
-      body: { ref: "main", inputs: { tag: "v1.2.3" } },
+      body: { ref: "trunk", inputs: { tag: "v1.2.3" } },
     },
   ]);
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "workflow_run", repo: REPO });

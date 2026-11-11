@@ -98,7 +98,6 @@ type GqlRepo = {
   url: string;
   isPrivate: boolean;
   pushedAt: string | null;
-  defaultBranchRef: { name: string } | null;
   mergeCommitAllowed: boolean;
   squashMergeAllowed: boolean;
   rebaseMergeAllowed: boolean;
@@ -181,7 +180,6 @@ type GqlError = { type?: string; path?: (string | number)[]; message?: string };
 
 const LISTED = `fragment Listed on Repository {
   nameWithOwner name description url isPrivate pushedAt
-  defaultBranchRef { name }
   mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed
   latestRelease { tagName url publishedAt createdAt }
 }`;
@@ -734,8 +732,6 @@ function rawRepo(repo: GqlRepo): RawRepo {
     name: repo.name,
     description: repo.description,
     html_url: repo.url,
-    // An empty repository has no branch yet; "main" is what it will get.
-    default_branch: repo.defaultBranchRef?.name ?? "main",
     private: repo.isPrivate,
     archived: false,
     pushed_at: repo.pushedAt,

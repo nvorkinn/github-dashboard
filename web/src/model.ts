@@ -126,7 +126,6 @@ export type Project = {
   name: string;
   description: string | undefined;
   url: string;
-  defaultBranch: string;
   private: boolean;
   pushedAt: string | undefined;
   /** The newest published release, if there is one. */

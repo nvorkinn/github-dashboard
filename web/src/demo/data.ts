@@ -98,7 +98,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       name: "weather-station",
       description: "Reads the roof sensors and draws the charts",
       url: github("weather-station"),
-      defaultBranch: "main",
       private: false,
       pushedAt: before(12 * MINUTE),
       latestRelease: {
@@ -115,7 +114,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       name: "trail-maps",
       description: "Offline hiking maps",
       url: github("trail-maps"),
-      defaultBranch: "main",
       private: false,
       pushedAt: before(5 * HOUR),
       latestRelease: { tag: "v0.9.0", url: github("trail-maps/releases/tag/v0.9.0"), publishedAt: before(23 * DAY) },
@@ -128,7 +126,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       name: "home-ledger",
       description: "Household bookkeeping",
       url: github("home-ledger"),
-      defaultBranch: "main",
       private: true,
       pushedAt: before(26 * HOUR),
       latestRelease: {
@@ -145,7 +142,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       name: "recipe-box",
       description: undefined,
       url: github("recipe-box"),
-      defaultBranch: "trunk",
       private: false,
       pushedAt: before(9 * DAY),
       latestRelease: undefined,
@@ -159,7 +155,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       name: "garden-sensors",
       description: "Firmware and gateway for the soil moisture probes",
       url: github("garden-sensors"),
-      defaultBranch: "main",
       private: false,
       pushedAt: before(40 * MINUTE),
       latestRelease: {

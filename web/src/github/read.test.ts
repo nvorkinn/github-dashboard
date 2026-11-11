@@ -127,7 +127,7 @@ test("projects are the installations' repositories, without archived ones, the l
     "user/installations/8/repositories": {
       total_count: 2,
       repositories: [
-        repo("acme/new", { pushed_at: "2026-11-10T00:00:00Z", private: true, default_branch: "trunk" }),
+        repo("acme/new", { pushed_at: "2026-11-10T00:00:00Z", private: true }),
         repo("acme/empty", { pushed_at: null }),
       ],
     },
@@ -159,7 +159,6 @@ test("projects are the installations' repositories, without archived ones, the l
       name: "new",
       description: "A sample",
       url: "https://github.com/acme/new",
-      defaultBranch: "trunk",
       private: true,
       pushedAt: "2026-11-10T00:00:00Z",
       latestRelease: {
@@ -175,7 +174,6 @@ test("projects are the installations' repositories, without archived ones, the l
       name: "old",
       description: undefined,
       url: "https://github.com/octo/old",
-      defaultBranch: "main",
       private: false,
       pushedAt: "2026-01-01T00:00:00Z",
       // A 404 from releases/latest.
