@@ -98,7 +98,7 @@ export function nextPage(link: string | null): string | undefined {
  * or a 403 (which is also a token without the permission, which isn't one): with `retry-after` (seconds) for a
  * secondary limit, or `x-ratelimit-remaining: 0` and `x-ratelimit-reset` (epoch seconds) for the hourly one.
  */
-async function retryAt(response: Response): Promise<number | undefined> {
+export async function retryAt(response: Response): Promise<number | undefined> {
   if (response.status !== 403 && response.status !== 429) {
     return undefined;
   }

@@ -1,7 +1,8 @@
 import { useState } from "preact/hooks";
-import type { Check, CheckState, PullRequest } from "../model.ts";
+import type { Check, CheckState, PullActions, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
+import { ConfirmButton, useAction, useActions } from "./actions.tsx";
 import type { Tone } from "./state.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
 
@@ -108,7 +109,33 @@ export function shortName(repo: string): string {
   return repo.slice(repo.indexOf("/") + 1);
 }
 
-function PullRow({ pull, now }: { pull: PullRequest; now: number }) {
+/**
+ * What an action that went through changed, shown at once rather than when GitHub is read again. Each holds only as
+ * long as what was read doesn't say otherwise: auto-merge until the pull request is read again, a merge until its
+ * row goes, and an update of the branch until its head is the new commit.
+ */
+type Done = { of: PullRequest; what: "autoMergeOn" | "autoMergeOff" | "merged" | "updated" };
+
+function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined {
+  switch (done?.what) {
+    case "autoMergeOn":
+    case "autoMergeOff":
+      return done.of === pull ? done : undefined;
+    case "updated":
+      return done.of.sha === pull.sha ? done : undefined;
+    default:
+      return done;
+  }
+}
+
+function PullRow({ pull: read, now }: { pull: PullRequest; now: number }) {
+  const actions = useActions()?.pulls;
+  const [doneState, setDone] = useState<Done | undefined>(undefined);
+  const done = stillShown(doneState, read);
+  const pull =
+    done?.what === "autoMergeOn" || done?.what === "autoMergeOff"
+      ? { ...read, autoMerge: done.what === "autoMergeOn" }
+      : read;
   return (
     <li class="pull">
       {pull.authorAvatarUrl ? (
@@ -141,11 +168,121 @@ function PullRow({ pull, now }: { pull: PullRequest; now: number }) {
       </div>
       <div class="pull-badges">
         {pull.draft && <span class="badge">Draft</span>}
-        <MergeState pull={pull} />
+        {done?.what === "merged" ? (
+          <span class="chip tone-done">
+            <ToneIcon tone="done" />
+            Merged
+          </span>
+        ) : done?.what === "updated" ? (
+          <span class="chip tone-running">
+            <ToneIcon tone="running" />
+            Updating branch
+          </span>
+        ) : (
+          <MergeState pull={pull} />
+        )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
       </div>
       <Checks checks={pull.checks} />
+      {actions && done?.what !== "merged" && (
+        <PullButtons pull={pull} actions={actions} updated={done?.what === "updated"} onDone={setDone} />
+      )}
     </li>
+  );
+}
+
+/**
+ * The buttons for what can be done to a pull request now, and why the last one didn't work. Auto-merge can be turned
+ * on for one that isn't a draft, and off for any; a pull request that is ready can be merged, after a confirmation
+ * as that can't be undone; one that is behind its base can have its branch updated.
+ */
+function PullButtons({
+  pull,
+  actions,
+  updated,
+  onDone,
+}: {
+  pull: PullRequest;
+  actions: PullActions;
+  updated: boolean;
+  onDone: (done: Done) => void;
+}) {
+  const { busy, problem, run } = useAction();
+  const canMerge = pull.mergeState === "clean" && !pull.draft;
+  const canUpdate = pull.mergeState === "behind" && !updated;
+  const canAutoMerge = pull.autoMerge || !pull.draft;
+  if (!canMerge && !canUpdate && !canAutoMerge) {
+    return null;
+  }
+  const subject = `#${pull.number} in ${shortName(pull.repo)}`;
+  return (
+    <div class="pull-actions">
+      {/* biome-ignore lint/a11y/useSemanticElements: a fieldset would bring a border and a legend it doesn't need. */}
+      <div class="action-buttons" role="group" aria-label={`Actions for ${subject}`}>
+        {canMerge && (
+          <ConfirmButton
+            label="Merge"
+            confirmLabel="Confirm merge"
+            busyLabel="Merging…"
+            busy={busy === "merge"}
+            disabled={busy !== undefined}
+            onConfirm={() =>
+              run("merge", async () => {
+                await actions.merge(pull);
+                onDone({ of: pull, what: "merged" });
+              })
+            }
+          />
+        )}
+        {canUpdate && (
+          <button
+            type="button"
+            class="action"
+            disabled={busy !== undefined}
+            onClick={() =>
+              run("update", async () => {
+                await actions.updateBranch(pull);
+                onDone({ of: pull, what: "updated" });
+              })
+            }
+          >
+            {busy === "update" ? "Updating…" : "Update branch"}
+          </button>
+        )}
+        {canAutoMerge && (
+          <button
+            type="button"
+            class="action"
+            disabled={busy !== undefined}
+            title={
+              pull.autoMerge
+                ? undefined
+                : "Merge once the required checks pass, or now if nothing is required and every check passed"
+            }
+            onClick={() =>
+              run("autoMerge", async () => {
+                const enabled = !pull.autoMerge;
+                const { merged } = await actions.setAutoMerge(pull, enabled);
+                onDone({ of: pull, what: merged ? "merged" : enabled ? "autoMergeOn" : "autoMergeOff" });
+              })
+            }
+          >
+            {busy === "autoMerge"
+              ? pull.autoMerge
+                ? "Turning off…"
+                : "Turning on…"
+              : pull.autoMerge
+                ? "Cancel auto-merge"
+                : "Auto-merge"}
+          </button>
+        )}
+      </div>
+      {problem && (
+        <p class="action-problem" role="alert">
+          {problem}
+        </p>
+      )}
+    </div>
   );
 }
 

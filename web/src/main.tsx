@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
-import { makeDashboard } from "./dashboard_source.ts";
+import { makeActions, makeDashboard } from "./dashboard_source.ts";
 import "./style.css";
 
 const auth = createAuth();
@@ -13,8 +13,9 @@ if (demo) {
   installDemo({ onSignIn: () => void auth.start() });
 }
 const dashboard = await makeDashboard(auth, demo);
+const actions = await makeActions(auth, dashboard, demo);
 
 const root = document.getElementById("app");
 if (root) {
-  render(<App auth={auth} dashboard={dashboard} demo={demo} />, root);
+  render(<App auth={auth} dashboard={dashboard} actions={actions} demo={demo} />, root);
 }

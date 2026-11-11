@@ -278,6 +278,11 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       return started ? readAll() : Promise.resolve();
     },
 
+    changed(change) {
+      // Read like the relay's events: with whatever else changed in the same moment.
+      onChange(change);
+    },
+
     stop() {
       started = false;
       events.stop();

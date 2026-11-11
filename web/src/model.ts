@@ -38,6 +38,8 @@ export type PullRequest = {
   mergeState: "clean" | "blocked" | "conflicts" | "behind" | "unknown";
   autoMerge: boolean;
   checks: Check[];
+  /** GitHub's global id for it, which its GraphQL API (auto-merge) asks for. */
+  nodeId: string;
 };
 
 /** One job of a workflow run. */
@@ -66,6 +68,20 @@ export type ReleaseRun = {
   /** Unset while it runs. */
   finishedAt: string | undefined;
   jobs: Job[];
+  /**
+   * While it waits for an approval: the environments waiting for one, such as production. Read only for runs that
+   * wait, so empty for every other run.
+   */
+  approvals: Approval[];
+};
+
+/** One protected environment a waiting run needs approved before its job goes on. */
+export type Approval = {
+  environmentId: number;
+  /** The environment's name, such as "production". */
+  environment: string;
+  /** Whether the signed-in user is one of its required reviewers, and so may approve or reject it. */
+  canApprove: boolean;
 };
 
 export type Project = {
@@ -80,7 +96,16 @@ export type Project = {
   pushedAt: string | undefined;
   /** The newest published release, if there is one. */
   latestRelease: { tag: string; url: string; publishedAt: string } | undefined;
+  /** How the page merges its pull requests: the first way the repository allows, a merge commit first. */
+  mergeMethod: MergeMethod;
+  /** Whether the repository allows auto-merge. True when its settings couldn't be read: GitHub then says. */
+  autoMergeAllowed: boolean;
+  /** The id of its active Promote workflow (`PROMOTE_WORKFLOW`), when it has one. */
+  promoteWorkflow: number | undefined;
 };
+
+/** The ways GitHub merges a pull request. */
+export type MergeMethod = "merge" | "squash" | "rebase";
 
 /** Everything on the page at one moment. The lists are complete: something missing from them is gone. */
 export type DashboardData = {
@@ -119,6 +144,27 @@ export type Dashboard = {
   refresh(): Promise<void>;
   /** Stops keeping it fresh and forgets what was read, such as on sign-out. */
   stop(): void;
+  /**
+   * Says that something changed, as an event from the relay would, so that it is read again: such as after the page
+   * itself merged a pull request. `kind` is a webhook's name and the rest says where, as in the relay's events.
+   */
+  changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number }): void;
+};
+
+/**
+ * What the page can do to an open pull request. Each one resolves once GitHub took it, and rejects with an `Error`
+ * whose message says why not, in words for the user. On success the dashboard reads the pull request again.
+ */
+export type PullActions = {
+  /**
+   * Turns auto-merge on or off. GitHub won't wait when the base branch requires nothing; turning it on then merges at
+   * once if every check passed, and `merged` says so.
+   */
+  setAutoMerge(pull: PullRequest, enabled: boolean): Promise<{ merged: boolean }>;
+  /** Merges it now, but only the commit the page showed as its head, whose checks were seen. */
+  merge(pull: PullRequest): Promise<void>;
+  /** Brings its base's new commits into its branch, if its head is still the one the page showed. */
+  updateBranch(pull: PullRequest): Promise<void>;
 };
 
 /** A pull request's checks in one word: the worst that is true of them. `none` when it has no checks. */
@@ -137,4 +183,33 @@ export function summarize(checks: Check[]): "none" | "failed" | "waiting" | "run
     return "running";
   }
   return "passed";
+}
+
+/**
+ * What the page can do to release runs and projects. Each one checks again on GitHub that it still applies, and
+ * fails with an `Error` whose message says why in words for the user. On success the dashboard reads again what
+ * changed. The real ones are in web/src/github/run_actions.ts; the demo has its own.
+ */
+export type RunActions = {
+  /** Approves or rejects one environment a waiting run needs. */
+  review(run: ReleaseRun, approval: Approval, verdict: "approved" | "rejected"): Promise<void>;
+  /** Re-runs a finished run's failed and cancelled jobs, with the jobs that need them. */
+  rerunFailed(run: ReleaseRun): Promise<void>;
+  /** Re-runs one failed or cancelled job of a finished run, with the jobs that need it. */
+  rerunJob(run: ReleaseRun, job: Job): Promise<void>;
+  /** The tag the project's next release would get, once it is known that no such tag exists yet. */
+  nextRelease(project: Project): Promise<string>;
+  /** Publishes a release of the default branch with this tag and the notes GitHub writes for it. */
+  release(project: Project, tag: string): Promise<void>;
+  /** Starts the project's Promote workflow for this release tag. */
+  promote(project: Project, tag: string): Promise<void>;
+};
+
+/** A release tag that Promote takes: a plain version with its `v`, such as v1.2.3. */
+export const RELEASE_TAG = /^v\d+\.\d+\.\d+$/;
+
+/** The release the project's Promote button offers: its latest, if it has a Promote workflow and such a tag. */
+export function promoteTag(project: Project): string | undefined {
+  const tag = project.latestRelease?.tag;
+  return project.promoteWorkflow !== undefined && tag !== undefined && RELEASE_TAG.test(tag) ? tag : undefined;
 }

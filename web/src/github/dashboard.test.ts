@@ -390,6 +390,19 @@ test("a change is read a second after it came, and only what it names", async ()
   dashboard.stop();
 });
 
+test("a change the page itself made is read like one from the relay, and not once it has stopped", async () => {
+  const { dashboard, calls } = await setUpLive(appWithPulls());
+  dashboard.changed({ kind: "pull_request", repo: "octo/app", pull: 2 });
+  await pass(CHANGE_WAIT_MS);
+  expect(calls).toEqual(pullCalls(2));
+
+  dashboard.stop();
+  calls.length = 0;
+  dashboard.changed({ kind: "pull_request", repo: "octo/app", pull: 2 });
+  await pass(CHANGE_WAIT_MS);
+  expect(calls).toEqual([]);
+});
+
 test("a burst of changes is one read, a second after the last of them", async () => {
   const { dashboard, stream, calls } = await setUpLive(appWithPulls());
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });

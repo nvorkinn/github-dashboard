@@ -7,8 +7,10 @@ import {
   checkState,
   checks,
   isReleaseName,
+  mergeMethod,
   mergeState,
   type Plan,
+  PROMOTE_WORKFLOW,
   planFor,
   readChanged,
   readDashboard,
@@ -128,6 +130,13 @@ test("projects are the installations' repositories, without archived ones, the l
         repo("acme/empty", { pushed_at: null }),
       ],
     },
+    // Its own page has its merge settings; octo/old's can't be read, and counts as allowing everything.
+    "repos/acme/new": repo("acme/new", {
+      allow_merge_commit: false,
+      allow_squash_merge: true,
+      allow_rebase_merge: true,
+      allow_auto_merge: false,
+    }),
     "repos/acme/new/releases/latest": {
       tag_name: "v2.1.0",
       html_url: "https://github.com/acme/new/releases/tag/v2.1.0",
@@ -157,6 +166,8 @@ test("projects are the installations' repositories, without archived ones, the l
         url: "https://github.com/acme/new/releases/tag/v2.1.0",
         publishedAt: "2026-11-09T10:00:00Z",
       },
+      mergeMethod: "squash",
+      autoMergeAllowed: false,
     },
     {
       repo: "octo/old",
@@ -168,9 +179,44 @@ test("projects are the installations' repositories, without archived ones, the l
       pushedAt: "2026-01-01T00:00:00Z",
       // A 404 from releases/latest.
       latestRelease: undefined,
+      mergeMethod: "merge",
+      autoMergeAllowed: true,
     },
     expect.objectContaining({ repo: "acme/empty", pushedAt: undefined }),
   ]);
+});
+
+test.each([
+  [{}, "merge"],
+  [{ allow_merge_commit: false }, "squash"],
+  [{ allow_merge_commit: false, allow_squash_merge: false }, "rebase"],
+  [{ allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, "merge"],
+  // GitHub doesn't allow turning all three off, but if it said so, a merge commit is what it would be asked for.
+  [{ allow_merge_commit: false, allow_squash_merge: false, allow_rebase_merge: false }, "merge"],
+] as const)("the merge method of %j is %s: the first allowed, a merge commit first", (settings, method) => {
+  expect(mergeMethod(settings)).toBe(method);
+});
+
+test("merge settings in the list of repositories are used as they are, without reading each repository", async () => {
+  const routes = account("octo/app");
+  const settings = { allow_merge_commit: false, allow_squash_merge: false, allow_rebase_merge: true };
+  routes["user/installations/7/repositories"] = {
+    total_count: 1,
+    repositories: [repo("octo/app", { ...settings, allow_auto_merge: true })],
+  };
+  const { result, calls } = read(routes);
+  expect((await result).data.projects[0]).toMatchObject({ mergeMethod: "rebase", autoMergeAllowed: true });
+  expect(calls).not.toContain("repos/octo/app");
+});
+
+test("merge settings that can't be read again stay as they were, and are no problem", async () => {
+  const routes = account("octo/app");
+  const before = (await read(routes).result).data;
+  const earlier = { ...before, projects: before.projects.map((one) => ({ ...one, mergeMethod: "squash" as const })) };
+  routes["repos/octo/app"] = () => Response.json({ message: "Not Found" }, { status: 404 });
+  const { data, problem } = await read(routes, earlier).result;
+  expect(problem).toBeUndefined();
+  expect(data.projects[0]).toMatchObject({ mergeMethod: "squash", autoMergeAllowed: true });
 });
 
 test("a pull request is read with its merge state and checks", async () => {
@@ -203,6 +249,7 @@ test("a pull request is read with its merge state and checks", async () => {
         { name: "test", state: "running", url: "https://github.com/r/1" },
         { name: "ci/build", state: "passed", url: undefined },
       ],
+      nodeId: "PR_node12",
     },
   ]);
   expect(calls).toContain("repos/octo/app/pulls?state=open&per_page=100");
@@ -242,6 +289,15 @@ test("releases are the active release workflows' unfinished runs and last finish
     { id: 2 },
   ]);
   withWorkflow(routes, "octo/app", { id: 4, name: "Promote" }, [{ id: 1, display_title: undefined }]);
+  routes["repos/octo/app/actions/runs/4/pending_deployments"] = [
+    {
+      environment: { id: 70, name: "production" },
+      wait_timer: 0,
+      current_user_can_approve: true,
+      reviewers: [],
+    },
+    { environment: { id: 71, name: "billing" }, wait_timer: 5, current_user_can_approve: false, reviewers: [] },
+  ];
 
   const { result, calls } = read(routes);
   const { data } = await result;
@@ -270,12 +326,17 @@ test("releases are the active release workflows' unfinished runs and last finish
         expect.objectContaining({ id: 43, state: "queued", startedAt: undefined, finishedAt: undefined }),
         expect.objectContaining({ id: 44, state: "running", startedAt: "2026-11-01T12:00:10Z" }),
       ],
+      approvals: [
+        { environmentId: 70, environment: "production", canApprove: true },
+        { environmentId: 71, environment: "billing", canApprove: false },
+      ],
     },
     expect.objectContaining({
       id: 3,
       state: "failed",
       finishedAt: "2026-11-03T12:10:00Z",
       jobs: [expect.objectContaining({ state: "failed" }), expect.objectContaining({ state: "skipped" })],
+      approvals: [],
     }),
     expect.objectContaining({ id: 1, workflow: "Promote", title: "Promote", state: "passed", actor: "octocat" }),
   ]);
@@ -283,6 +344,46 @@ test("releases are the active release workflows' unfinished runs and last finish
   expect(calls).toContain("repos/octo/app/actions/runs/4/jobs?per_page=100");
   // Not the CI workflow's runs, the disabled workflow's, or the jobs of the older finished release.
   expect(calls.filter((call) => /workflows\/[12]\/runs|runs\/[289]\/jobs/.test(call))).toEqual([]);
+  // What waits for an approval is asked only of the run that waits.
+  expect(calls.filter((call) => call.includes("pending_deployments"))).toEqual([
+    "repos/octo/app/actions/runs/4/pending_deployments?per_page=100",
+  ]);
+  // No workflow is at promote.yml.
+  expect(data.projects[0]?.promoteWorkflow).toBeUndefined();
+});
+
+test("a waiting run whose approvals GitHub won't show has none, and still shows", async () => {
+  const routes = account("octo/app");
+  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
+    { id: 4, status: "waiting", conclusion: null, jobs: [job(42, { status: "waiting", conclusion: null })] },
+  ]);
+  routes["repos/octo/app/actions/runs/4/pending_deployments"] = () => Response.json({}, { status: 403 });
+  const { data, problem } = await read(routes).result;
+  expect(data.releases).toEqual([expect.objectContaining({ id: 4, state: "waiting", approvals: [] })]);
+  expect(problem).toBeUndefined();
+});
+
+test("a project's Promote workflow is the active one at promote.yml, found in the same list of workflows", async () => {
+  const routes = account("octo/app", "octo/off", "octo/none");
+  withWorkflow(routes, "octo/app", { id: 1, name: "CI" }, []);
+  withWorkflow(routes, "octo/app", { id: 6, name: "Ship to prod", path: PROMOTE_WORKFLOW }, []);
+  withWorkflow(routes, "octo/off", { id: 7, name: "Promote", state: "disabled_manually", path: PROMOTE_WORKFLOW }, []);
+  withWorkflow(routes, "octo/none", { id: 8, name: "Promote" }, []);
+  const { result, calls } = read(routes);
+  const { data } = await result;
+  expect(data.projects.map((one) => [one.repo, one.promoteWorkflow])).toEqual([
+    ["octo/app", 6],
+    ["octo/off", undefined],
+    ["octo/none", undefined],
+  ]);
+  expect(calls.filter((call) => call.includes("actions/workflows/6"))).toEqual([]);
+
+  // A read of the release runs reads it again; a read of something else keeps it.
+  routes["repos/octo/app/actions/workflows"] = { total_count: 0, workflows: [] };
+  const kept = await changed(routes, [{ kind: "release", repo: "octo/app" }], data);
+  expect(kept.data.projects[0]?.promoteWorkflow).toBe(6);
+  const gone = await changed(routes, [{ kind: "workflow_run", repo: "octo/app", run: 1 }], data);
+  expect(gone.data.projects[0]?.promoteWorkflow).toBeUndefined();
 });
 
 test("a project that can't be read keeps what was read before, and the others are read", async () => {

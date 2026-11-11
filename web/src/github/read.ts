@@ -1,10 +1,22 @@
-import type { Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
+import type {
+  Approval,
+  Check,
+  CheckState,
+  DashboardData,
+  Job,
+  MergeMethod,
+  Project,
+  PullRequest,
+  ReleaseRun,
+} from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
 // as a newer release replaces it.
 export const RECENT_RELEASES = 5;
+// The workflow a project's Promote button starts: it deploys a release that dev already has to production.
+export const PROMOTE_WORKFLOW = ".github/workflows/promote.yml";
 
 // The parts of GitHub's answers that are used. Everything else in them is ignored.
 type RawInstallation = { id: number };
@@ -17,6 +29,11 @@ type RawRepo = {
   private: boolean;
   archived: boolean;
   pushed_at: string | null;
+  // Only in some answers (a repository's own page, for a user who can push to it), so each may be missing.
+  allow_merge_commit?: boolean;
+  allow_squash_merge?: boolean;
+  allow_rebase_merge?: boolean;
+  allow_auto_merge?: boolean;
 };
 type RawRelease = { tag_name: string; html_url: string; published_at: string | null; created_at: string };
 type RawPull = {
@@ -33,10 +50,11 @@ type RawPull = {
   mergeable?: boolean | null;
   mergeable_state?: string;
   auto_merge?: object | null;
+  node_id: string;
 };
 type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
 type RawStatus = { context: string; state: string; target_url: string | null };
-type RawWorkflow = { id: number; name: string; state: string };
+type RawWorkflow = { id: number; name: string; state: string; path?: string };
 type RawRun = {
   id: number;
   name: string | null;
@@ -59,6 +77,10 @@ type RawJob = {
   started_at: string | null;
   completed_at: string | null;
 };
+export type RawPendingDeployment = {
+  environment: { id: number; name?: string };
+  current_user_can_approve: boolean;
+};
 
 export type ReadResult = {
   data: DashboardData;
@@ -77,8 +99,11 @@ export async function readDashboard(api: Api, previous?: DashboardData): Promise
   const failed = new Set<string>();
   const read = await Promise.all(
     repos.map(async (repo) => {
-      const parts = await readRepo(api, repo.full_name, ALL_OF_IT, previous, failed);
-      return { ...parts, project: project(repo, parts.latestRelease) };
+      const [parts, settings] = await Promise.all([
+        readRepo(api, repo.full_name, ALL_OF_IT, previous, failed),
+        mergeSettings(api, repo, previous),
+      ]);
+      return { ...parts, project: project(repo, parts.latestRelease, settings, parts.promoteWorkflow) };
     }),
   );
   return {
@@ -221,7 +246,7 @@ export async function readChanged(api: Api, plan: Map<string, RepoPlan>, previou
   );
   const projects = previous.projects.map((one) => {
     const parts = read.get(one.repo);
-    return parts ? { ...one, latestRelease: parts.latestRelease } : one;
+    return parts ? { ...one, latestRelease: parts.latestRelease, promoteWorkflow: parts.promoteWorkflow } : one;
   });
   return {
     data: {
@@ -244,7 +269,12 @@ function problemOf(failed: Set<string>): string | undefined {
     : `Couldn't read everything from ${names.length === 1 ? names[0] : `${names.length} projects`}.`;
 }
 
-type RepoParts = { latestRelease: Project["latestRelease"]; pulls: PullRequest[]; releases: ReleaseRun[] };
+type RepoParts = {
+  latestRelease: Project["latestRelease"];
+  pulls: PullRequest[];
+  releases: ReleaseRun[];
+  promoteWorkflow: Project["promoteWorkflow"];
+};
 
 /**
  * The parts of one repository: read if `wanted` names them, and as they were in `previous` otherwise. A part that
@@ -261,6 +291,7 @@ async function readRepo(
     latestRelease: previous?.projects.find(of(repo))?.latestRelease,
     pulls: previous?.pulls.filter(of(repo)) ?? [],
     releases: previous?.releases.filter(of(repo)) ?? [],
+    promoteWorkflow: previous?.projects.find(of(repo))?.promoteWorkflow,
   };
 
   async function part<T>(isWanted: boolean, read: () => Promise<T>, fallback: T): Promise<T> {
@@ -270,7 +301,7 @@ async function readRepo(
     try {
       return await read();
     } catch (error) {
-      if (!(error instanceof GitHubError) || error.retryAt !== undefined || error.status === 401) {
+      if (!refused(error)) {
         throw error;
       }
       failed.add(repo);
@@ -286,9 +317,10 @@ async function readRepo(
       () => (numbers === "all" ? pullRequests(api, repo) : somePullRequests(api, repo, numbers, was.pulls)),
       was.pulls,
     ),
-    part(wanted.releases, () => releaseRuns(api, repo), was.releases),
+    // The Promote workflow is found in the same list of workflows as the release workflows.
+    part(wanted.releases, () => releaseRuns(api, repo), { runs: was.releases, promoteWorkflow: was.promoteWorkflow }),
   ]);
-  return { latestRelease, pulls, releases };
+  return { latestRelease, pulls, releases: releases.runs, promoteWorkflow: releases.promoteWorkflow };
 }
 
 /**
@@ -311,7 +343,62 @@ async function repositories(api: Api): Promise<RawRepo[]> {
   return [...repos.values()].sort((a, b) => (b.pushed_at ?? "").localeCompare(a.pushed_at ?? ""));
 }
 
-function project(repo: RawRepo, latestRelease: Project["latestRelease"]): Project {
+type MergeSettings = Pick<Project, "mergeMethod" | "autoMergeAllowed">;
+
+const MERGE_SETTINGS = ["allow_merge_commit", "allow_squash_merge", "allow_rebase_merge", "allow_auto_merge"] as const;
+
+/**
+ * How the repository's pull requests are merged. The list of repositories may carry its settings; if it doesn't,
+ * they are on the repository's own page, which is one request more per repository (and mostly a 304, which GitHub
+ * doesn't count). Settings that can't be read are what they were, or else count as allowed: GitHub's refusal then
+ * says what isn't, when the user acts. Nothing on the page shows them, so they are no problem for it.
+ */
+async function mergeSettings(api: Api, repo: RawRepo, previous: DashboardData | undefined): Promise<MergeSettings> {
+  if (MERGE_SETTINGS.every((key) => typeof repo[key] === "boolean")) {
+    return settingsOf(repo);
+  }
+  try {
+    return settingsOf(await api.get<RawRepo>(`repos/${repo.full_name}`));
+  } catch (error) {
+    if (!refused(error)) {
+      throw error;
+    }
+    return previous?.projects.find(of(repo.full_name)) ?? settingsOf({});
+  }
+}
+
+function settingsOf(repo: Partial<RawRepo>): MergeSettings {
+  return { mergeMethod: mergeMethod(repo), autoMergeAllowed: repo.allow_auto_merge !== false };
+}
+
+/**
+ * The first merge method the repository allows, preferring a merge commit, as countdown-server's dashboard did. A
+ * setting that isn't known counts as allowed.
+ */
+export function mergeMethod(repo: Partial<Pick<RawRepo, (typeof MERGE_SETTINGS)[number]>>): MergeMethod {
+  if (repo.allow_merge_commit !== false) {
+    return "merge";
+  }
+  if (repo.allow_squash_merge !== false) {
+    return "squash";
+  }
+  if (repo.allow_rebase_merge !== false) {
+    return "rebase";
+  }
+  return "merge";
+}
+
+/** Whether `error` is GitHub refusing one read, rather than something that fails every call. */
+function refused(error: unknown): boolean {
+  return error instanceof GitHubError && error.retryAt === undefined && error.status !== 401;
+}
+
+function project(
+  repo: RawRepo,
+  latestRelease: Project["latestRelease"],
+  settings: MergeSettings,
+  promoteWorkflow: Project["promoteWorkflow"],
+): Project {
   return {
     repo: repo.full_name,
     name: repo.name,
@@ -321,6 +408,9 @@ function project(repo: RawRepo, latestRelease: Project["latestRelease"]): Projec
     private: repo.private,
     pushedAt: repo.pushed_at ?? undefined,
     latestRelease,
+    mergeMethod: settings.mergeMethod,
+    autoMergeAllowed: settings.autoMergeAllowed,
+    promoteWorkflow,
   };
 }
 
@@ -375,7 +465,8 @@ async function somePullRequests(
   return [...added, ...kept].filter((pull) => pull !== undefined);
 }
 
-async function pullRequest(api: Api, repo: string, number: number): Promise<PullRequest | undefined> {
+/** One pull request with its checks, as it is now; undefined if it is closed or gone. */
+export async function pullRequest(api: Api, repo: string, number: number): Promise<PullRequest | undefined> {
   // The list doesn't say whether a pull request can be merged; only its own page does.
   const pull = await unlessGone(api.get<RawPull>(`repos/${repo}/pulls/${number}`));
   if (pull?.state !== "open") {
@@ -403,6 +494,7 @@ async function pullRequest(api: Api, repo: string, number: number): Promise<Pull
     mergeState: mergeState(pull),
     autoMerge: pull.auto_merge != null,
     checks: checks(checkRuns, statuses),
+    nodeId: pull.node_id,
   };
 }
 
@@ -500,13 +592,19 @@ export function isReleaseName(name: string | null | undefined): boolean {
 
 /**
  * Per release workflow, the runs still going among its latest ones and the last one that finished, the last started
- * first. Read per workflow, so CI runs can't push a release off the page.
+ * first. Read per workflow, so CI runs can't push a release off the page. With them, from the same list of
+ * workflows, the id of the repository's active Promote workflow, if it has one.
  */
-async function releaseRuns(api: Api, repo: string): Promise<ReleaseRun[]> {
-  const workflows = (await api.list<RawWorkflow>(`repos/${repo}/actions/workflows`, "workflows")).filter(
-    // A disabled workflow starts no more releases.
-    (workflow) => workflow.state === "active" && isReleaseName(workflow.name),
+async function releaseRuns(
+  api: Api,
+  repo: string,
+): Promise<{ runs: ReleaseRun[]; promoteWorkflow: number | undefined }> {
+  // A disabled workflow starts no more releases.
+  const active = (await api.list<RawWorkflow>(`repos/${repo}/actions/workflows`, "workflows")).filter(
+    (workflow) => workflow.state === "active",
   );
+  const workflows = active.filter((workflow) => isReleaseName(workflow.name));
+  const promoteWorkflow = active.find((workflow) => workflow.path === PROMOTE_WORKFLOW)?.id;
   const runs = await Promise.all(
     workflows.map(async (workflow) => {
       const latestRuns = (
@@ -517,7 +615,7 @@ async function releaseRuns(api: Api, repo: string): Promise<ReleaseRun[]> {
       return Promise.all(shownRuns(latestRuns).map((run) => releaseRun(api, repo, workflow, run)));
     }),
   );
-  return runs.flat().sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return { runs: runs.flat().sort((a, b) => b.startedAt.localeCompare(a.startedAt)), promoteWorkflow };
 }
 
 /** Of a workflow's latest runs: the unfinished ones, and the latest finished one so its outcome stays up. */
@@ -540,6 +638,8 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
   if (run.status !== "completed" && jobs.some((one) => one.state === "waiting")) {
     state = "waiting";
   }
+  // Only a run that waits has anything to approve, so only such a run costs the request.
+  const approvals = state === "waiting" ? await pendingApprovals(api, repo, run.id) : [];
   return {
     repo,
     id: run.id,
@@ -551,6 +651,33 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
     startedAt: run.run_started_at ?? run.created_at,
     finishedAt: run.status === "completed" ? run.updated_at : undefined,
     jobs,
+    approvals,
+  };
+}
+
+/**
+ * The environments a waiting run needs approved. A token without the permission to read them (GitHub answers 403 or
+ * 404) leaves the run without buttons rather than without its card.
+ */
+async function pendingApprovals(api: Api, repo: string, run: number): Promise<Approval[]> {
+  let pending: RawPendingDeployment[];
+  try {
+    pending = await api.list<RawPendingDeployment>(`repos/${repo}/actions/runs/${run}/pending_deployments`);
+  } catch (error) {
+    if (error instanceof GitHubError && error.retryAt === undefined && (error.status === 403 || error.status === 404)) {
+      return [];
+    }
+    throw error;
+  }
+  return pending.map(approval);
+}
+
+/** A pending deployment as GitHub lists it, in the model's words. */
+export function approval(raw: RawPendingDeployment): Approval {
+  return {
+    environmentId: raw.environment.id,
+    environment: raw.environment.name ?? `environment ${raw.environment.id}`,
+    canApprove: raw.current_user_can_approve,
   };
 }
 
