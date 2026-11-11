@@ -1,6 +1,42 @@
 import { randomBytes } from "node:crypto";
 import { expect, test } from "vitest";
-import { readAuthConfig, readWebhookSecret } from "./config.ts";
+import { readAuthConfig, readTelegramConfig, readWebhookSecret } from "./config.ts";
+
+test("Telegram is optional, and needs both its settings", () => {
+  expect(readTelegramConfig({})).toBeUndefined();
+  expect(readTelegramConfig({ TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "" })).toBeUndefined();
+  expect(readTelegramConfig({ TELEGRAM_BOT_TOKEN: "123:abc-DEF_9", TELEGRAM_CHAT_ID: "-100123" })).toEqual({
+    botToken: "123:abc-DEF_9",
+    chatId: "-100123",
+  });
+  expect(readTelegramConfig({ TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: "@my_channel" })?.chatId).toBe(
+    "@my_channel",
+  );
+  expect(() => readTelegramConfig({ TELEGRAM_BOT_TOKEN: "123:abc" })).toThrow(
+    "Telegram is half configured: TELEGRAM_CHAT_ID not set",
+  );
+  expect(() => readTelegramConfig({ TELEGRAM_CHAT_ID: "42" })).toThrow(
+    "Telegram is half configured: TELEGRAM_BOT_TOKEN not set",
+  );
+});
+
+test("refuses Telegram settings in the wrong form, without quoting the token", () => {
+  for (const token of ["abc", "123", "123:", "123:abc def", "bot123:abc"]) {
+    let message = "";
+    try {
+      readTelegramConfig({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: "42" });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message, token).toContain("TELEGRAM_BOT_TOKEN must be");
+    expect(message, token).not.toContain(token);
+  }
+  for (const chat of ["forty-two", "4 2", "@ab", "https://t.me/x"]) {
+    expect(() => readTelegramConfig({ TELEGRAM_BOT_TOKEN: "123:abc", TELEGRAM_CHAT_ID: chat }), chat).toThrow(
+      "TELEGRAM_CHAT_ID must be",
+    );
+  }
+});
 
 test("the webhook secret is optional and apart from the sign-in settings", () => {
   expect(readWebhookSecret({})).toBeUndefined();

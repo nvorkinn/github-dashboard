@@ -168,6 +168,49 @@ test("a body over the limit is refused, whether or not it says how long it is", 
   expect(published).toEqual([{ kind: "push", action: "x".repeat(40) }]);
 });
 
+test("the hook sees each signed webhook whole, with its delivery id, after the change is published", async () => {
+  const hub = createHub();
+  const order: string[] = [];
+  hub.subscribe(() => order.push("published"));
+  const seen: unknown[][] = [];
+  const routes = webhookRoutes({
+    secret: SECRET,
+    hub,
+    onWebhook: (...args) => {
+      order.push("hook");
+      seen.push(args);
+    },
+  });
+
+  const id = "72d3162e-cc78-11e3-81ab-4c9367dc0958";
+  const signed = delivery("pull_request", pullRequestBody, { "X-GitHub-Delivery": id });
+  expect((await routes.request("/webhook", signed)).status).toBe(204);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(seen).toEqual([["pull_request", JSON.parse(pullRequestBody), id]]);
+  expect(order).toEqual(["published", "hook"]);
+
+  // A delivery id that doesn't look like one is left out; a ping and a refused webhook reach no hook.
+  await routes.request("/webhook", delivery("push", "{}", { "X-GitHub-Delivery": "not one" }));
+  await routes.request("/webhook", delivery("ping", "{}"));
+  await routes.request("/webhook", delivery("push", "{}", { "X-Hub-Signature-256": "sha256=00" }));
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(seen.slice(1)).toEqual([["push", {}, undefined]]);
+});
+
+test("a hook that throws or rejects leaves the answer alone, and is logged by the kind of error", async () => {
+  for (const onWebhook of [
+    () => {
+      throw new TypeError("nvorkinn: a message that could quote the payload");
+    },
+    () => Promise.reject(new RangeError("nvorkinn")),
+  ]) {
+    const routes = webhookRoutes({ secret: SECRET, hub: createHub(), onWebhook });
+    expect((await routes.request("/webhook", delivery("pull_request", pullRequestBody))).status).toBe(204);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(warnings.mock.calls).toEqual([["webhook hook failed: TypeError"], ["webhook hook failed: RangeError"]]);
+});
+
 test("GitHub's own limit of 25 MB is the default", async () => {
   const { app, published } = setUp();
   const request = delivery("push", "{}", { "Content-Length": String(25 * 1024 * 1024 + 1) });

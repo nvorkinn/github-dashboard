@@ -27,11 +27,18 @@ export type Hub = {
   subscribe(listener: (change: Change) => void): () => void;
   /** How many are listening now. */
   listeners(): number;
+  /**
+   * When the last listener left (`Date.now()`), or the hub was made if nobody has listened yet; nothing while
+   * someone listens. The Telegram notices use it to stay quiet while a page is open and just after.
+   */
+  idleSince(): number | undefined;
 };
 
 export function createHub(): Hub {
   // One entry per call to subscribe, so the same function subscribed twice is two listeners.
   const listeners = new Set<{ listener: (change: Change) => void }>();
+  // A restart counts as everyone having just left: open pages connect again within seconds.
+  let idleSince: number | undefined = Date.now();
   return {
     publish(change) {
       for (const entry of [...listeners]) {
@@ -45,11 +52,15 @@ export function createHub(): Hub {
     subscribe(listener) {
       const entry = { listener };
       listeners.add(entry);
+      idleSince = undefined;
       return () => {
-        listeners.delete(entry);
+        if (listeners.delete(entry) && listeners.size === 0) {
+          idleSince = Date.now();
+        }
       };
     },
     listeners: () => listeners.size,
+    idleSince: () => idleSince,
   };
 }
 
