@@ -69,7 +69,7 @@ test("shows runs still going and those that finished within five minutes, failed
   expect(shownRuns(runs, NOW + 1000).map((one) => one.id)).toEqual([1, 2, 3]);
 
   render(<ReleaseList now={NOW} runs={runs} />);
-  expect(screen.getByRole("heading").textContent).toBe("Release workflows 5");
+  expect(screen.getByRole("heading").textContent).toBe("Running now 5");
 });
 
 test("draws a run under way with its jobs", () => {
@@ -103,18 +103,18 @@ test("draws a run under way with its jobs", () => {
   // The state is in words too, not only in the colour and the shape.
   expect(jobs.map((item) => item.textContent)).toEqual([
     "build: Done1m 30s",
-    "deploy dev: Running1m 5s",
+    "deploy dev: Running · 1m 5s",
     "approve-prod: Waiting for approval",
     "deploy prod: Not started",
     "notify: Skipped",
     "sign: Failed10s",
   ]);
   expect(jobs.map((item) => item.className)).toEqual([
-    "job tone-done",
-    "job tone-running",
-    "job tone-waiting",
+    "job tone-done job-tick",
+    "job tone-running job-live",
+    "job tone-waiting job-live",
     "job tone-queued",
-    "job tone-skipped",
+    "job tone-skipped job-tick",
     "job tone-failed",
   ]);
   expect(within(card).getByRole("link", { name: "build" }).getAttribute("href")).toBe("https://x/1");
@@ -133,7 +133,7 @@ test("puts runs still going first, then the newest", () => {
 test("stacks the cards in one list", () => {
   const { container } = render(<ReleaseList now={NOW} runs={[run({ id: 1 }), run({ id: 2 }), run({ id: 3 })]} />);
   expect(container.querySelectorAll("ul.rows > li.release")).toHaveLength(3);
-  expect(screen.getByRole("heading").textContent).toBe("Release workflows 3");
+  expect(screen.getByRole("heading").textContent).toBe("Running now 3");
 });
 
 function withActions(runs: ReleaseRun[], actions = fakeRunActions()) {

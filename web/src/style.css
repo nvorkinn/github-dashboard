@@ -2,13 +2,14 @@
    security policy allows only stylesheet files, so there are no inline styles anywhere. */
 :root {
   color-scheme: light dark;
-  --text: light-dark(#1f2328, #e6edf3);
-  --quiet: light-dark(#59636e, #9198a1);
-  --background: light-dark(#f6f8fa, #0d1117);
-  --panel: light-dark(#ffffff, #151b23);
-  --border: light-dark(#d1d9e0, #30363d);
-  --surface: light-dark(#f6f8fa, #212830);
-  --link: light-dark(#0969da, #79b8ff);
+  --text: light-dark(#1b2230, #e8edf5);
+  --quiet: light-dark(#566175, #a3aec2);
+  --background: light-dark(#eef1f6, #0b0f17);
+  --panel: light-dark(#ffffff, #121826);
+  --border: light-dark(#d5dbe5, #27314a);
+  --surface: light-dark(#f3f5f9, #182033);
+  --link: light-dark(#0b5cc7, #8cc4ff);
+  --radius: 14px;
   --problem: light-dark(#b42318, #ff8b82);
   --note: light-dark(#fff8c5, #3a2f00);
 
@@ -81,19 +82,25 @@ code {
   background: var(--note);
 }
 
+/* The header stays in view, over the page as it scrolls. */
 .top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem 1rem;
-  padding: 0.625rem 1rem;
-  background: var(--panel);
+  padding: 0.75rem 2rem;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
 
 h1 {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
+  font-weight: 650;
   letter-spacing: -0.01em;
 }
 
@@ -150,9 +157,9 @@ h1 {
 }
 
 main {
-  max-width: 100rem;
+  max-width: 130rem;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 1.5rem 2rem 2.5rem;
 }
 
 .avatar {
@@ -175,7 +182,7 @@ select {
   color: inherit;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -224,40 +231,59 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* Two areas side by side: the pull requests, and the column of release runs and projects. */
-.overview {
+/* The stage: pull requests, then the running workflows, then the projects, one under the other; on a wide screen
+   the three stand side by side in that order. Each section is a heading over cards, with no box around it. */
+.stage {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
   align-items: start;
 }
 
-.activity {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1rem;
+@media (min-width: 100rem) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr) minmax(26rem, 32rem) minmax(17rem, 20rem);
+    gap: 1.75rem;
+  }
+
+  /* Each column scrolls on its own, so a long board doesn't push the runs out of sight. */
+  .stage > .panel {
+    position: sticky;
+    top: 4.5rem;
+    max-height: calc(100dvh - 5.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    /* Room for focus rings and card shadows inside the scrolling box. */
+    padding: 2px 4px 4px;
+  }
 }
 
 .panel {
   min-width: 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
 }
 
 .panel-heading {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 0.375rem 0.75rem;
-  min-height: 3rem;
-  padding: 0.5rem 0.875rem;
-  border-bottom: 1px solid var(--border);
+  min-height: 2.5rem;
+  padding: 0 0 0.75rem;
 }
 
 h2 {
-  font-size: 1rem;
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.heading-note {
+  font-size: 0.875rem;
+}
+
+.order {
+  margin-left: auto;
 }
 
 .count {
@@ -282,18 +308,86 @@ h2 {
 }
 
 .empty {
-  padding: 1.25rem 0.875rem;
+  padding: 1.25rem 1rem;
   color: var(--quiet);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
 }
 
-/* One per row, always: a release card is never put beside another. */
-.rows > li {
-  padding: 0.75rem 0.875rem;
-  border-top: 1px solid var(--border);
+/* Cards: one per row in a list, a release card never beside another. */
+.rows,
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.rows > li:first-child {
-  border-top: 0;
+.rows > li,
+.cards > li {
+  padding: 0.875rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px light-dark(rgb(16 24 40 / 0.06), transparent);
+}
+
+/* A run going on stands out by its state: blue while it runs, amber while it waits for someone. */
+.release:not(.release-folded) {
+  padding: 1rem 1.125rem;
+}
+
+.release:has(> .release-top .tone-running) {
+  border-color: color-mix(in srgb, var(--running) 55%, var(--border));
+}
+
+.release:has(> .release-top .tone-waiting) {
+  border-color: color-mix(in srgb, var(--waiting) 60%, var(--border));
+}
+
+/* The pull request board: three columns where they fit, each under a heading underlined in its colour. */
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 1.25rem 1rem;
+  align-items: start;
+}
+
+.board-column {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.board-column h3 {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0 0.25rem 0.375rem;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  border-bottom: 2px solid var(--column);
+}
+
+.column-ready {
+  --column: var(--done);
+}
+
+.column-progress {
+  --column: var(--running);
+}
+
+.column-attention {
+  --column: var(--failed);
+}
+
+.column-empty {
+  padding: 0.5rem 0.25rem;
+  font-size: 0.875rem;
+}
+
+/* Projects: cards in a grid that fills the width, and one column when the stage gives them a narrow one. */
+.stage > .panel:last-child > .rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
 }
 
 /* States */
@@ -686,6 +780,11 @@ button.action-confirm:hover:not(:disabled) {
 
 /* Release runs */
 
+.release:not(.release-folded) .release-title {
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+}
+
 .release-top {
   display: flex;
   align-items: flex-start;
@@ -722,8 +821,50 @@ button.action-confirm:hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
-/* A run's jobs on its workflow's graph: a column per stage, left to right, with lines from each job to those that
-   wait for it. A graph wider than the card scrolls sideways. */
+/* A finished job with nothing to look at: a small, quiet tick, so the live step stands out. */
+.job.job-tick {
+  padding-block: 0;
+  font-size: 0.75rem;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--tone) 22%, transparent);
+}
+
+.job.job-tick a,
+.job.job-tick > span {
+  color: var(--quiet);
+}
+
+.job-tick .icon {
+  width: 11px;
+  height: 11px;
+}
+
+/* The step going on now, or waiting for someone: bigger, ringed, and saying what it is doing. */
+.job.job-live {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--tone) 14%, var(--panel));
+  border: 1.5px solid var(--tone);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 14%, transparent);
+}
+
+.job-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.job-text .job-state {
+  color: var(--tone);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A run's jobs on its workflow's graph, with lines from each job to those that wait for it. The graph picks its
+   shape (Jobs.tsx): across, a timeline, or top to bottom. */
 .graph {
   margin-top: 0.5rem;
   overflow-x: auto;
@@ -765,20 +906,105 @@ button.action-confirm:hover:not(:disabled) {
   max-width: 18rem;
 }
 
-/* A matrix too big to show job by job: one card that opens into its jobs. */
-.job-group {
-  display: block;
+/* Across: a column per stage, left to right. A graph wider than the card scrolls sideways. */
+.graph-row .graph-stage .jobs {
+  align-items: flex-start;
 }
 
-.job-group summary {
+/* Top to bottom: a row per stage, its cards side by side and wrapping. */
+.graph-stack .graph-inner,
+.graph-timeline .graph-inner {
+  width: auto;
+}
+
+.graph-stack .graph-stages {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.25rem;
+}
+
+.graph-stack .graph-stage .jobs {
+  flex-flow: row wrap;
+  justify-content: center;
+  align-items: center;
+}
+
+/* A single chain in a narrow card: one step under the other, joined by a line down the left. */
+.graph-timeline .graph-stages {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.graph-timeline .graph-stage {
+  position: relative;
+}
+
+.graph-timeline .graph-stage + .graph-stage::before {
+  position: absolute;
+  top: -0.75rem;
+  left: calc(0.5rem + 6px);
+  height: 0.75rem;
+  border-left: 2px solid var(--border);
+  content: "";
+}
+
+.graph-timeline .graph-stage > .jobs > .job {
+  max-width: none;
+}
+
+/* On a timeline the line down the left joins the steps, so a finished one needs no box of its own. */
+.graph-timeline .job.job-tick {
+  border-color: transparent;
+}
+
+.graph-timeline .job .job-time {
+  margin-left: auto;
+}
+
+/* A matrix too big for a card per job: one box, its jobs in a grid. */
+.job-matrix {
+  padding: 0.625rem 0.75rem;
+  background: color-mix(in srgb, var(--tone) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  border-radius: 12px;
+}
+
+.job-matrix.job-live {
+  border: 1.5px solid var(--tone);
+}
+
+.graph-stack .graph-stage > .jobs > .job-matrix {
+  flex: 1 1 100%;
+}
+
+.job-matrix-head {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  cursor: pointer;
+  gap: 0.4rem;
+  font-size: 0.875rem;
 }
 
-.job-group .jobs {
-  margin-block: 0.375rem 0.25rem;
+.job-matrix-name {
+  flex-grow: 1;
+  font-weight: 600;
+}
+
+.job-matrix-count {
+  color: var(--quiet);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.375rem;
+}
+
+.job-grid > .job {
+  flex-wrap: wrap;
+  max-width: none;
 }
 
 /* A run that finished: folded, with its jobs behind "Jobs", until it leaves. */
@@ -864,8 +1090,10 @@ button.action-confirm:hover:not(:disabled) {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 1rem;
-  padding: 0.625rem 0.875rem;
-  border-top: 1px solid var(--border);
+  margin-top: 0.75rem;
+  padding: 0.625rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
 }
 
 .hidden-projects h3 {
@@ -980,20 +1208,20 @@ button.action.secondary {
   background: var(--panel);
 }
 
-/* Narrower than two useful columns: everything in one. */
-@media (max-width: 62rem) {
-  .overview {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 @media (max-width: 40rem) {
   main {
-    padding: 0.75rem 0.5rem;
+    padding: 1rem 0.75rem 2rem;
   }
 
+  /* A phone's header wraps to a few lines: too tall to keep over the page. */
   .top {
+    position: static;
     padding: 0.5rem 0.75rem;
+  }
+
+  .rows > li,
+  .cards > li {
+    padding: 0.75rem;
   }
 
   .top-controls {
@@ -1032,6 +1260,41 @@ button.action.secondary {
 
   .pull-badges:empty {
     display: none;
+  }
+}
+
+/* A pull request card in a narrow board column: its badges and buttons go under the text, as on a phone. */
+@container (max-width: 30rem) {
+  .pull {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    grid-template-areas:
+      "avatar main"
+      ". badges"
+      ". checks"
+      ". actions"
+      ". files";
+  }
+
+  .pull-badges {
+    flex-flow: row wrap;
+    align-items: center;
+  }
+
+  .pull-badges:empty {
+    display: none;
+  }
+
+  .pull-actions {
+    align-items: flex-start;
+  }
+
+  .action-buttons {
+    justify-content: flex-start;
+  }
+
+  .action-problem {
+    max-width: none;
+    text-align: left;
   }
 }
 

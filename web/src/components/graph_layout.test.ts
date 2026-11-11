@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 import type { CheckState, Job, JobNode } from "../model.ts";
-import { type Card, groupState, layoutGraph, MATRIX_EXPANDED_MAX } from "./graph_layout.ts";
+import {
+  type Card,
+  groupState,
+  layoutGraph,
+  MATRIX_EXPANDED_MAX,
+  pickShape,
+  ROW_STAGE_MAX,
+  rowWidth,
+} from "./graph_layout.ts";
 
 let nextId = 1;
 const job = (state: CheckState = "passed"): Job => ({
@@ -74,4 +82,50 @@ test.each<[CheckState[], CheckState]>([
   [["neutral", "skipped"], "neutral"],
 ])("a matrix of %j is %s", (states, expected) => {
   expect(groupState(states.map(job))).toBe(expected);
+});
+
+test("a pipeline that fits across runs left to right", () => {
+  const layout = layoutGraph({
+    nodes: [node("a"), node("b", ["a"]), node("c", ["a"]), node("d", ["b"])],
+    unplaced: [],
+  });
+  expect(pickShape(layout, rowWidth(layout))).toBe("row");
+  // Before the room is known, too.
+  expect(pickShape(layout, undefined)).toBe("row");
+});
+
+test("a single chain that doesn't fit across becomes a timeline", () => {
+  const layout = layoutGraph({ nodes: [node("a"), node("b", ["a"]), node("c", ["b"])], unplaced: [] });
+  expect(pickShape(layout, rowWidth(layout) - 1)).toBe("timeline");
+});
+
+test("a graph with parallel jobs that doesn't fit across runs top to bottom", () => {
+  const layout = layoutGraph({ nodes: [node("a"), node("b", ["a"]), node("c", ["a"])], unplaced: [] });
+  expect(pickShape(layout, rowWidth(layout) - 1)).toBe("stack");
+});
+
+test("a big matrix or a wide fan-out runs top to bottom, however much room there is", () => {
+  const big = layoutGraph({
+    nodes: [
+      node(
+        "matrix",
+        [],
+        Array.from({ length: MATRIX_EXPANDED_MAX + 1 }, () => job()),
+      ),
+    ],
+    unplaced: [],
+  });
+  expect(pickShape(big, 10_000)).toBe("stack");
+  const wide = layoutGraph({
+    nodes: Array.from({ length: ROW_STAGE_MAX + 1 }, (_, n) => node(`n${n}`)),
+    unplaced: [],
+  });
+  expect(pickShape(wide, 10_000)).toBe("stack");
+});
+
+test("a running job takes more room across than a finished one", () => {
+  const width = (state: CheckState) =>
+    rowWidth(layoutGraph({ nodes: [node("deploy", [], [{ ...job(state), name: "deploy" }])], unplaced: [] }));
+  expect(width("running")).toBeGreaterThan(width("queued"));
+  expect(width("queued")).toBeGreaterThan(width("passed"));
 });
