@@ -44,6 +44,35 @@ export function useView(): [View, (view: View) => void] {
   ];
 }
 
+/** How many lanes stand side by side on a wide screen. */
+export type LaneColumns = 1 | 2;
+
+const LANE_COLUMNS_KEY = "github-dashboard:lane-columns";
+
+export function rememberedLaneColumns(): LaneColumns {
+  try {
+    return localStorage.getItem(LANE_COLUMNS_KEY) === "1" ? 1 : 2;
+  } catch {
+    return 2;
+  }
+}
+
+/** The chosen number of lane columns, as the browser remembers it, and a way to choose the other. */
+export function useLaneColumns(): [LaneColumns, (columns: LaneColumns) => void] {
+  const [columns, setColumns] = useState(rememberedLaneColumns);
+  return [
+    columns,
+    (chosen) => {
+      setColumns(chosen);
+      try {
+        localStorage.setItem(LANE_COLUMNS_KEY, String(chosen));
+      } catch {
+        // Not remembered, then.
+      }
+    },
+  ];
+}
+
 /** Two buttons side by side, the pressed one being the view shown. */
 export function ViewSwitch({ view, onChange }: { view: View; onChange: (view: View) => void }) {
   return (

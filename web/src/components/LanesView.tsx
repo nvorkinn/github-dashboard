@@ -5,11 +5,13 @@ import { ExternalLink } from "./ExternalLink.tsx";
 import { ProjectActions } from "./ProjectList.tsx";
 import { PullRow, sortPulls } from "./PullList.tsx";
 import { ReleaseCard, shownRuns, sortRuns } from "./ReleaseList.tsx";
+import type { LaneColumns } from "./ViewSwitch.tsx";
 
 /**
  * One lane per shown project, holding its release buttons, its runs going on now and its open pull requests; a lane
  * with none of either shrinks to its name. The hidden projects wait in a dock after the lanes, each a button that
- * brings its lane back. On a wide screen the lanes stand side by side as columns.
+ * brings its lane back. On a wide screen the lanes stand two abreast, unless one
+ * column is chosen.
  */
 export function LanesView({
   projects,
@@ -18,6 +20,7 @@ export function LanesView({
   now,
   hidden,
   onToggle,
+  columns = 2,
 }: {
   projects: Project[];
   /** Every open pull request, of hidden projects too: the dock counts theirs. */
@@ -26,6 +29,8 @@ export function LanesView({
   now: number;
   hidden: ReadonlySet<string>;
   onToggle: (repo: string) => void;
+  /** How many lanes stand side by side on a wide screen. */
+  columns?: LaneColumns | undefined;
 }) {
   const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
   const shown = sorted.filter((project) => !hidden.has(project.repo));
@@ -33,7 +38,7 @@ export function LanesView({
   const going = sortRuns(shownRuns(runs, now));
   const pullsOf = (repo: string) => pulls.filter((pull) => pull.repo === repo);
   return (
-    <div class="lanes">
+    <div class={columns === 1 ? "lanes lanes-single" : "lanes"}>
       {shown.length === 0 && (
         <p class="empty lanes-empty">{away.length === 0 ? "No projects" : "Every project is hidden"}</p>
       )}

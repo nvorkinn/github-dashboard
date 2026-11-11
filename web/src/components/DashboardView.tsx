@@ -6,7 +6,7 @@ import { LanesView } from "./LanesView.tsx";
 import { ProjectList } from "./ProjectList.tsx";
 import { PullList } from "./PullList.tsx";
 import { ReleaseList } from "./ReleaseList.tsx";
-import type { View } from "./ViewSwitch.tsx";
+import type { LaneColumns, View } from "./ViewSwitch.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
 export function useRefresh(dashboard: Dashboard): { refresh: () => void; pending: boolean } {
@@ -80,11 +80,13 @@ export function DashboardView({
   now,
   refresh,
   view = "stage",
+  laneColumns,
 }: {
   state: DashboardState;
   now: number;
   refresh: () => void;
   view?: View;
+  laneColumns?: LaneColumns | undefined;
 }) {
   const { hidden, toggle } = useHiddenProjects();
   if (state.status === "loading") {
@@ -121,6 +123,7 @@ export function DashboardView({
           now={now}
           hidden={hidden}
           onToggle={toggle}
+          columns={laneColumns}
         />
       ) : (
         // Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side.
