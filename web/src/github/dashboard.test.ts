@@ -504,7 +504,6 @@ test.each([
   ["that changes which repositories there are", { kind: "repository", repo: "octo/app", action: "renamed" }],
   ["that names no repository", { kind: "installation_repositories", action: "added" }],
   ["in a repository that isn't known", { kind: "pull_request", repo: "octo/new", pull: 1 }],
-  ["of a kind that isn't known", { kind: "something_new", repo: "octo/app" }],
 ])("a change %s reads everything", async (_, change) => {
   const { dashboard, stream, reads } = await setUpLive(appWithPulls());
   stream.change(change);
@@ -512,6 +511,14 @@ test.each([
   expect(reads()).toBe(0);
   await pass(1);
   expect(reads()).toBe(1);
+  dashboard.stop();
+});
+
+test("a change of a kind that isn't known reads nothing", async () => {
+  const { dashboard, stream, calls } = await setUpLive(appWithPulls());
+  stream.change({ kind: "something_new", repo: "octo/app" });
+  await pass(CHANGE_MAX_WAIT_MS);
+  expect(calls).toEqual([]);
   dashboard.stop();
 });
 

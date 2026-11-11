@@ -106,8 +106,8 @@ goes with, and a permission added later has to be accepted on the app's installa
 | Deployment review   | Deployments                              |
 
 Deployments is the one permission here beyond those the page already needs for its own calls (Actions, Checks,
-Commit statuses, Contents, Pull requests). This table is written from GitHub's documentation as remembered, not
-checked against the app's page: if an event is missing from the list there, its permission is the thing to look at.
+Commit statuses, Contents, Pull requests). If an event is missing
+from the list on the app's page, its permission is the thing to look at.
 
 At the reverse proxy, `/api/github/webhook` must be reachable without Tinyauth, since GitHub can't sign in there;
 everything else, `/api/events` included, stays behind it. The relay has no list of who may read the stream. The
@@ -151,8 +151,8 @@ curl -X POST localhost:8080/api/github/webhook -H "X-GitHub-Event: pull_request"
 The demo is the page running on built-in sample data (`web/src/demo.ts` for the sign-in, `web/src/demo/` for the
 dashboard), with no relay, sign-in or GitHub behind it: it starts signed in as a sample user. One pull request's
 checks and one release run follow a script that moves every few seconds and then starts over, so the page can be
-seen updating. Adding `?show=problem`, `?show=failed`, `?show=empty` or `?show=loading` to the address holds the
-demo in a state the script never reaches.
+seen updating. Adding `?show=problem`, `?show=failed`, `?show=empty`, `?show=loading` or `?show=offline` (the event
+stream is down) to the address holds the demo in a state the script never reaches.
 The Preview workflow publishes it to GitHub Pages from the `gh-pages` branch:
 
 - each pull request's at `https://nvorkinn.github.io/github-dashboard/pr-<number>/`, linked from the pull request as

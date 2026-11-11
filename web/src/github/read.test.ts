@@ -423,7 +423,8 @@ test.each<[string, Change[], Plan]>([
   ["a repository that changed", [{ kind: "repository", repo: "octo/app", action: "archived" }], "everything"],
   ["an installation", [{ kind: "installation", action: "created" }], "everything"],
   ["repositories added", [{ kind: "installation_repositories", action: "added" }], "everything"],
-  ["a kind that isn't known", [{ kind: "star", repo: "octo/app" }], "everything"],
+  ["a kind that isn't known", [{ kind: "star", repo: "octo/app" }], plan({})],
+  ["a kind that isn't known and names no repository", [{ kind: "github_app_authorization" }], plan({})],
   ["a change without a repository", [{ kind: "check_run", sha: "sha1" }], "everything"],
   ["a repository that isn't known", [{ kind: "pull_request", repo: "octo/new", pull: 1 }], "everything"],
   [

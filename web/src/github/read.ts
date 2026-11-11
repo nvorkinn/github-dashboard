@@ -105,6 +105,24 @@ export type Plan = "everything" | Map<string, RepoPlan>;
 
 const ALL_OF_IT: RepoPlan = { pulls: "all", releases: true, latestRelease: true };
 
+// The kinds of change that can add, remove or rename a project: all of it is read again.
+const WHICH_PROJECTS = new Set(["repository", "installation", "installation_repositories"]);
+
+// The kinds of change that something on the page shows. `planFor` says what each one reads.
+const SHOWN = new Set([
+  "pull_request",
+  "pull_request_review",
+  "pull_request_review_thread",
+  "check_run",
+  "check_suite",
+  "status",
+  "workflow_run",
+  "workflow_job",
+  "deployment_review",
+  "push",
+  "release",
+]);
+
 /**
  * What a batch of changes asks to be read again, given what is `known` now. A busy CI run sends dozens of them, so
  * each one reads as little as shows it:
@@ -119,14 +137,22 @@ const ALL_OF_IT: RepoPlan = { pulls: "all", releases: true, latestRelease: true 
  * The pull request a change is about is the one it numbers, or else the ones whose head is its commit: none for a
  * check on the default branch, which is most of them. A change that names neither is about all of the repository's.
  *
- * Anything else reads everything: the kinds that change which repositories there are (`repository`,
- * `installation`, `installation_repositories`), a kind not listed here, and a change that names no repository or
- * one that isn't known.
+ * The kinds that change which repositories there are (`repository`, `installation`, `installation_repositories`)
+ * read everything, and so does one of the kinds above that names no repository or one that isn't known. Any other
+ * kind reads nothing.
  */
 export function planFor(changes: Change[], known: DashboardData): Plan {
   const plan = new Map<string, RepoPlan>();
   for (const change of changes) {
+    if (WHICH_PROJECTS.has(change.kind)) {
+      return "everything";
+    }
+    // GitHub sends an App more kinds than it asked for. Nothing on the page shows what these say.
+    if (!SHOWN.has(change.kind)) {
+      continue;
+    }
     const name = change.repo;
+    // A project the page doesn't know yet.
     if (name === undefined || !known.projects.some(of(name))) {
       return "everything";
     }
@@ -153,8 +179,6 @@ export function planFor(changes: Change[], known: DashboardData): Plan {
       case "release":
         repo.latestRelease = true;
         break;
-      default:
-        return "everything";
     }
   }
   // Such as a check on a commit that no pull request has as its head: nothing on the page shows it.
