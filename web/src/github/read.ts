@@ -11,7 +11,7 @@ import type {
 } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
-import { jobGraph, workflowFile } from "./workflow_graph.ts";
+import { jobGraph, markedReleaseFiles, WORKFLOWS_FOLDER, workflowFile } from "./workflow_graph.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
 // as a newer release replaces it.
@@ -592,10 +592,34 @@ function statusState(state: string): CheckState {
   }
 }
 
-/** Whether a workflow's name makes it a release the dashboard shows: a release, a promotion or a deploy. */
+/**
+ * Whether a workflow's name makes it a release: a release, a promotion or a deploy. Only a guess, used for a
+ * repository that marks none of its workflow files (see `releaseWorkflows`).
+ */
 export function isReleaseName(name: string | null | undefined): boolean {
   const lower = (name ?? "").toLowerCase();
   return lower.includes("release") || lower.includes("promote") || lower.includes("deploy");
+}
+
+/**
+ * Of a repository's workflows, the ones whose runs the dashboard shows as releases. Only a workflow with a file in
+ * the repository counts, so not the ones GitHub runs by itself, such as "pages build and deployment". Of those:
+ * the ones whose file carries the mark, a comment line `# dashboard: release`; and in a repository that marks none,
+ * the ones whose name says release, promote or deploy.
+ */
+export async function releaseWorkflows<T extends { name: string; path?: string | undefined }>(
+  api: Api,
+  repo: string,
+  workflows: T[],
+): Promise<T[]> {
+  const withFile = workflows.filter((workflow) => workflow.path?.startsWith(`${WORKFLOWS_FOLDER}/`));
+  if (withFile.length === 0) {
+    return [];
+  }
+  const marked = await markedReleaseFiles(api, repo);
+  return marked.size > 0
+    ? withFile.filter((workflow) => marked.has(workflow.path ?? ""))
+    : withFile.filter((workflow) => isReleaseName(workflow.name));
 }
 
 /**
@@ -611,7 +635,7 @@ async function releaseRuns(
   const active = (await api.list<RawWorkflow>(`repos/${repo}/actions/workflows`, "workflows")).filter(
     (workflow) => workflow.state === "active",
   );
-  const workflows = active.filter((workflow) => isReleaseName(workflow.name));
+  const workflows = await releaseWorkflows(api, repo, active);
   const promoteWorkflow = active.find((workflow) => workflow.path === PROMOTE_WORKFLOW)?.id;
   const runs = await Promise.all(
     workflows.map(async (workflow) => {

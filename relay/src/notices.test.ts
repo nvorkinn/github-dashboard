@@ -100,6 +100,11 @@ test("a finished release says how it went, but other runs are quiet", () => {
   });
   expect(noticeFrom("workflow_run", { ...payload, workflow_run: { ...run, name: "Test" } })).toBeUndefined();
   expect(noticeFrom("workflow_run", { ...payload, action: "in_progress" })).toBeUndefined();
+  // A workflow GitHub runs by itself has no file in the repository, and is no release whatever its name.
+  const pages = { id: 3, name: "pages build and deployment", path: "dynamic/pages/pages-build-deployment" };
+  expect(noticeFrom("workflow_run", { ...payload, workflow_run: pages })).toBeUndefined();
+  const filed = { ...run, path: ".github/workflows/release.yml" };
+  expect(noticeFrom("workflow_run", { ...payload, workflow_run: filed })).toBeDefined();
   const promote = noticeFrom("workflow_run", { ...payload, workflow_run: { id: 2, name: "Promote to prod" } });
   expect(promote?.text).toBe(
     "Promote to prod in nvorkinn/countdown: finished\nhttps://github.com/nvorkinn/countdown/actions/runs/2",
@@ -182,7 +187,7 @@ test.each<[string, string, unknown]>([
   expect(noticeFrom(kind, payload)).toBeUndefined();
 });
 
-test("a release run is one whose name says release, promote or deploy, as the page decides it", () => {
+test("a release run is one whose name says release, promote or deploy", () => {
   expect(["Release", "Deploy to prod", "PROMOTE"].every((name) => isReleaseName(name))).toBe(true);
   expect(["CI", "Tests", "", undefined].some((name) => isReleaseName(name))).toBe(false);
 });

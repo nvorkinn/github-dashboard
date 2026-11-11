@@ -43,6 +43,8 @@ function setUp(routes: Record<string, unknown>) {
 
 const REPO = "octocat/weather-station";
 const RUN = `repos/${REPO}/actions/runs/1`;
+const FILE = ".github/workflows/release.yml";
+const WORKFLOWS = `repos/${REPO}/contents/.github/workflows`;
 const production: Approval = { environmentId: 70, environment: "production", canApprove: true };
 const waitingRun = run({ state: "waiting", finishedAt: undefined, approvals: [production] });
 const pending = (canApprove = true) => [
@@ -51,13 +53,14 @@ const pending = (canApprove = true) => [
 
 test("approving re-checks the run and its pending deployments, then approves that one environment", async () => {
   const { actions, asked, sent, dashboard } = setUp({
-    [`GET ${RUN}`]: { id: 1, name: "Release", status: "waiting", conclusion: null },
+    [`GET ${RUN}`]: { id: 1, name: "Release", path: FILE, status: "waiting", conclusion: null },
     [`GET ${RUN}/pending_deployments`]: pending(),
     [`POST ${RUN}/pending_deployments`]: [{ id: 5 }],
   });
   await actions.review(waitingRun, production, "approved");
   expect(asked.map((one) => `${one.method} ${one.path}`)).toEqual([
     `GET ${RUN}`,
+    `GET ${WORKFLOWS}`,
     `GET ${RUN}/pending_deployments?per_page=100`,
     `POST ${RUN}/pending_deployments`,
   ]);
@@ -67,7 +70,7 @@ test("approving re-checks the run and its pending deployments, then approves tha
 
 test("rejecting sends the same with state rejected", async () => {
   const { actions, sent } = setUp({
-    [`GET ${RUN}`]: { id: 1, name: "Deploy", status: "in_progress", conclusion: null },
+    [`GET ${RUN}`]: { id: 1, name: "Deploy", path: `${FILE}@refs/heads/main`, status: "in_progress", conclusion: null },
     [`GET ${RUN}/pending_deployments`]: pending(),
     [`POST ${RUN}/pending_deployments`]: [],
   });
@@ -86,7 +89,13 @@ test.each([
     "the run is no release",
     { status: "waiting", name: "CI" },
     pending(),
-    "Only unfinished release, promote or deploy workflows can be approved from this dashboard.",
+    "Only unfinished runs of release workflows can be approved from this dashboard.",
+  ],
+  [
+    "the run is of a workflow GitHub runs by itself",
+    { status: "waiting", name: "pages build and deployment", path: "dynamic/pages/pages-build-deployment" },
+    pending(),
+    "Only unfinished runs of release workflows can be approved from this dashboard.",
   ],
   [
     "the environment no longer waits",
@@ -102,12 +111,37 @@ test.each([
   ],
 ])("approving is refused when %s, sending nothing", async (_, now, deployments, message) => {
   const { actions, sent, dashboard } = setUp({
-    [`GET ${RUN}`]: { id: 1, conclusion: null, ...now },
+    [`GET ${RUN}`]: { id: 1, conclusion: null, path: FILE, ...now },
     [`GET ${RUN}/pending_deployments`]: deployments,
   });
   await expect(actions.review(waitingRun, production, "approved")).rejects.toThrow(message);
   expect(sent()).toEqual([]);
   expect(dashboard.changed).not.toHaveBeenCalled();
+});
+
+test("in a repository that marks its release workflows, only a run of a marked one can be approved", async () => {
+  const blob = (text: string) => ({ encoding: "base64", content: btoa(text) });
+  const routes = {
+    [`GET ${WORKFLOWS}`]: [
+      { type: "file", path: FILE, sha: "marked" },
+      { type: "file", path: ".github/workflows/deploy-docs.yml", sha: "plain" },
+    ],
+    [`GET repos/${REPO}/git/blobs/marked`]: blob("name: Ship\n# dashboard: release\non: push\n"),
+    [`GET repos/${REPO}/git/blobs/plain`]: blob("name: Deploy docs\non: push\n"),
+    [`GET ${RUN}/pending_deployments`]: pending(),
+    [`POST ${RUN}/pending_deployments`]: [],
+  };
+  const docs = setUp({
+    ...routes,
+    [`GET ${RUN}`]: { id: 1, name: "Deploy docs", path: ".github/workflows/deploy-docs.yml", status: "waiting" },
+  });
+  await expect(docs.actions.review(waitingRun, production, "approved")).rejects.toThrow(
+    "Only unfinished runs of release workflows can be approved from this dashboard.",
+  );
+  expect(docs.sent()).toEqual([]);
+  const ship = setUp({ ...routes, [`GET ${RUN}`]: { id: 1, name: "Ship", path: FILE, status: "waiting" } });
+  await ship.actions.review(waitingRun, production, "approved");
+  expect(ship.sent()).toHaveLength(1);
 });
 
 const failedRun = run({ state: "failed" });
@@ -342,7 +376,7 @@ test("GitHub's refusals are said in words for the user", async () => {
 
   // Each write says which permission it takes, should the app not have it.
   const notAllowed = setUp({
-    [`GET ${RUN}`]: { id: 1, name: "Release", status: "waiting", conclusion: null },
+    [`GET ${RUN}`]: { id: 1, name: "Release", path: FILE, status: "waiting", conclusion: null },
     [`GET ${RUN}/pending_deployments`]: pending(),
     [`POST ${RUN}/pending_deployments`]: () =>
       Response.json({ message: "Resource not accessible by integration" }, { status: 403 }),

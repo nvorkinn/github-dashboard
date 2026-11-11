@@ -163,6 +163,21 @@ curl -X POST localhost:8080/api/github/webhook -H "X-GitHub-Event: pull_request"
   -d "$body"
 ```
 
+## Release workflows
+
+The dashboard shows the runs of a repository's release workflows, not of every workflow. GitHub has no tags or
+categories for workflows, so a workflow is marked as a release in its own file, with a comment line anywhere in it:
+
+```yaml
+name: Release
+# dashboard: release
+```
+
+The page reads the mark from the files in `.github/workflows` on the default branch. A repository that marks none of
+its workflows goes by their names instead: the ones that say release, promote or deploy. Once one file is marked,
+names no longer count there. A workflow GitHub runs by itself, such as "pages build and deployment", has no file and
+is never shown.
+
 ## Telegram
 
 When nobody is looking at the dashboard, the relay sends a short message to a Telegram chat about the webhooks that
@@ -178,6 +193,9 @@ need attention, with a link to the thing on github.com and, when `PUBLIC_URL` is
 
 The last comes with a "Review in GitHub" button that opens the run, where Review deployments approves it. Everything
 else, such as checks passing or a pull request opening, sends nothing.
+
+The relay holds no token, so it can't read the mark in a workflow's file and goes by the workflow's name here, even
+in a repository that marks its release workflows.
 
 It stays quiet while a page is open: a message goes only when no page has had `/api/events` open for the last 30
 seconds, so a reload, a brief reconnect or a restart of the relay sends nothing. An open page shows it already.

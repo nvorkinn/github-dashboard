@@ -52,7 +52,10 @@ export type Job = {
   finishedAt: string | undefined;
 };
 
-/** One run of a release workflow (a workflow whose name says release, deploy or promote). */
+/**
+ * One run of a release workflow: one whose file carries the comment `# dashboard: release` or, in a repository that
+ * marks none, one whose name says release, deploy or promote.
+ */
 export type ReleaseRun = {
   repo: string;
   id: number;

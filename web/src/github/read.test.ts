@@ -641,6 +641,63 @@ test("pull requests read by number are changed, added at the front, or gone", as
   );
 });
 
+test("a repository that marks its release workflows shows those and no others, whatever their names", async () => {
+  const routes = account("octo/app");
+  withWorkflow(routes, "octo/app", { id: 1, name: "Ship it" }, [{ id: 11 }]);
+  withWorkflow(routes, "octo/app", { id: 2, name: "Deploy docs" }, [{ id: 12 }]);
+  withWorkflow(routes, "octo/app", { id: 3, name: "Release notes", path: ".github/workflows/notes.yaml" }, [
+    { id: 13 },
+  ]);
+  const blob = (text: string) => ({ encoding: "base64", content: btoa(text) });
+  routes["repos/octo/app/contents/.github/workflows"] = [
+    { type: "file", path: ".github/workflows/1.yml", sha: "ship" },
+    { type: "file", path: ".github/workflows/2.yml", sha: "docs" },
+    { type: "file", path: ".github/workflows/notes.yaml", sha: "notes" },
+    { type: "file", path: ".github/workflows/README.md", sha: "readme" },
+    { type: "dir", path: ".github/workflows/scripts", sha: "scripts" },
+  ];
+  routes["repos/octo/app/git/blobs/ship"] = blob("name: Ship it\n\n#  Dashboard: Release\non: push\n");
+  // Not a line of its own, so no mark.
+  routes["repos/octo/app/git/blobs/docs"] = blob("name: Deploy docs # dashboard: release\non: push\n");
+  routes["repos/octo/app/git/blobs/notes"] = blob("name: Release notes\n# dashboard: releases\non: push\n");
+
+  const first = read(routes);
+  expect((await first.result).data.releases.map((one) => one.id)).toEqual([11]);
+  expect(first.calls.filter((call) => call.includes("/git/blobs/")).sort()).toEqual([
+    "repos/octo/app/git/blobs/docs",
+    "repos/octo/app/git/blobs/notes",
+    "repos/octo/app/git/blobs/ship",
+  ]);
+
+  // Read again, the folder is listed again but a file whose content is the same isn't read twice.
+  routes["repos/octo/app/contents/.github/workflows"] = [
+    { type: "file", path: ".github/workflows/1.yml", sha: "ship" },
+    { type: "file", path: ".github/workflows/2.yml", sha: "docs2" },
+  ];
+  routes["repos/octo/app/git/blobs/docs2"] = blob("# dashboard: release\nname: Deploy docs\n");
+  const second = read(routes);
+  expect((await second.result).data.releases.map((one) => one.id).sort()).toEqual([11, 12]);
+  expect(second.calls.filter((call) => call.includes("/git/blobs/"))).toEqual(["repos/octo/app/git/blobs/docs2"]);
+});
+
+test("a repository that marks no workflow goes by their names, but never shows one GitHub runs by itself", async () => {
+  const routes = account("octo/app");
+  withWorkflow(routes, "octo/app", { id: 1, name: "Deploy" }, [{ id: 11 }]);
+  withWorkflow(routes, "octo/app", { id: 2, name: "CI" }, [{ id: 12 }]);
+  withWorkflow(
+    routes,
+    "octo/app",
+    { id: 3, name: "pages build and deployment", path: "dynamic/pages/pages-build-deployment" },
+    [{ id: 13 }],
+  );
+  routes["repos/octo/app/contents/.github/workflows"] = [
+    { type: "file", path: ".github/workflows/1.yml", sha: "unmarked" },
+  ];
+  routes["repos/octo/app/git/blobs/unmarked"] = { encoding: "base64", content: btoa("name: Deploy\n") };
+  const { result } = read(routes);
+  expect((await result).data.releases.map((one) => one.id)).toEqual([11]);
+});
+
 test("a workflow's run or job reads the repository's release runs", async () => {
   const { routes, before } = await everything();
   expect(before.releases).toMatchObject([{ id: 4, state: "passed" }]);
@@ -665,6 +722,7 @@ test("a workflow's run or job reads the repository's release runs", async () => 
     "repos/octo/app/actions/runs/5/jobs?per_page=100",
     "repos/octo/app/actions/workflows/3/runs?per_page=5",
     "repos/octo/app/actions/workflows?per_page=100",
+    "repos/octo/app/contents/.github/workflows",
   ]);
   expect(data.releases).toMatchObject([
     { id: 5, state: "running", jobs: [{ id: 51, state: "running" }] },
