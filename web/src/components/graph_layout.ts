@@ -1,13 +1,16 @@
 import type { CheckState, Job, JobGraph, JobNode } from "../model.ts";
 
-/** A matrix of up to this many jobs shows each of them; a bigger one is one card that opens into them. */
+/** A matrix of up to this many jobs shows each of them as a card; a bigger one is one box with a grid of them. */
 export const MATRIX_EXPANDED_MAX = 6;
+
+/** More cards than this side by side in one stage read better as a row across, so the graph runs top to bottom. */
+export const ROW_STAGE_MAX = 4;
 
 /** One card on the graph. */
 export type Card =
   /** One of the run's jobs. */
   | { kind: "job"; key: string; job: Job }
-  /** A matrix too big to show job by job: its state is that of its jobs together. */
+  /** A matrix too big for a card per job: one box, its state that of its jobs together. */
   | { kind: "group"; key: string; name: string; jobs: Job[]; state: CheckState; done: number }
   /** A job of the file the run has no job for yet. */
   | { kind: "pending"; key: string; name: string };
@@ -114,4 +117,61 @@ export function groupState(jobs: Job[]): CheckState {
     return "skipped";
   }
   return states.has("passed") ? "passed" : "neutral";
+}
+
+/**
+ * Which way a graph runs:
+ * - `row`: stages left to right, when they fit across.
+ * - `timeline`: a single chain that doesn't fit across, one step under the other.
+ * - `stack`: stages top to bottom, each stage's cards across; for a big matrix or a wide fan-out, or a graph that
+ *   neither fits across nor is a single chain.
+ */
+export type Shape = "row" | "timeline" | "stack";
+
+/**
+ * The shape for a graph in a space `width` pixels wide. Until the width is known (0 or undefined) a graph that
+ * doesn't have to be a stack is a row.
+ */
+export function pickShape(layout: Layout, width: number | undefined): Shape {
+  const { stages } = layout;
+  if (stages.some((cards) => cards.length > ROW_STAGE_MAX || cards.some((card) => card.kind === "group"))) {
+    return "stack";
+  }
+  if (!width || rowWidth(layout) <= width) {
+    return "row";
+  }
+  return stages.every((cards) => cards.length === 1) ? "timeline" : "stack";
+}
+
+/** About how wide a graph is as a row, in pixels: each stage as wide as its widest card, with the gaps between. */
+export function rowWidth({ stages }: Layout): number {
+  const cards = stages.reduce((sum, stage) => sum + Math.max(0, ...stage.map(cardWidth)), 0);
+  return cards + STAGE_GAP * Math.max(0, stages.length - 1);
+}
+
+// Measured on the page's own look: 13px text, a 14px icon, the chip's padding and border.
+const STAGE_GAP = 32;
+const CHAR = 7;
+const CHIP = 40;
+const CARD_MAX = 288;
+
+function cardWidth(card: Card): number {
+  if (card.kind !== "job") {
+    return Math.min(CARD_MAX, CHIP + CHAR * card.name.length);
+  }
+  const { job } = card;
+  const tone = isLive(job.state) ? 1.12 : isTick(job.state) ? 0.92 : 1;
+  // A job with a time shows it beside its name; a live one says what it is doing under it.
+  const time = job.startedAt && !isLive(job.state) ? 48 : 0;
+  return Math.min(CARD_MAX, Math.ceil(tone * (CHIP + CHAR * job.name.length) + time));
+}
+
+/** A job that is going on now, or waiting for someone: the one to look at. */
+export function isLive(state: CheckState): boolean {
+  return state === "running" || state === "waiting";
+}
+
+/** A job that finished with nothing to look at: drawn small, so the live ones stand out. */
+export function isTick(state: CheckState): boolean {
+  return state === "passed" || state === "neutral" || state === "skipped";
 }

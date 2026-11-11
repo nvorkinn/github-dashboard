@@ -379,19 +379,18 @@ test("re-running the failed run's jobs, or one of them, puts them back to queued
   await acted(runs(dashboard).rerunFailed(failed));
   const after = byId(data(dashboard), FAILED_RUN);
   expect(after).toMatchObject({ state: "queued", finishedAt: undefined });
-  expect(after.jobs.map((job) => job.state)).toEqual(["passed", "passed", "queued", "queued", "queued", "queued"]);
+  expect(after.jobs.map((job) => job.state)).toEqual([
+    ...["passed", "passed", "passed", "passed", "passed"],
+    ...["queued", "queued", "passed", "passed", "queued", "queued"],
+  ]);
   dashboard.stop();
 
   const again = started("offline");
   const job = byId(data(again), FAILED_RUN).jobs.find((one) => one.state === "cancelled") as Job;
   await acted(runs(again).rerunJob(byId(data(again), FAILED_RUN), job));
   expect(byId(data(again), FAILED_RUN).jobs.map((one) => one.state)).toEqual([
-    "passed",
-    "passed",
-    "failed",
-    "queued",
-    "queued",
-    "queued",
+    ...["passed", "passed", "passed", "passed", "passed"],
+    ...["failed", "queued", "passed", "passed", "queued", "queued"],
   ]);
   again.stop();
 });
@@ -451,5 +450,20 @@ test("the scripted run waits for its approval again each time round, and stoppin
   dashboard.start();
   vi.advanceTimersByTime(400);
   expect(byId(data(dashboard), FAILED_RUN).state).toBe("failed");
+  dashboard.stop();
+});
+
+test("the sample runs come with their workflow's graph, built from their jobs as they are", async () => {
+  const dashboard = started("offline");
+  const failed = byId(data(dashboard), FAILED_RUN);
+  expect(failed.graph?.nodes.map((node) => [node.key, node.jobs.length])).toEqual([
+    ["version", 1],
+    ["build", 8],
+    ["sign", 1],
+    ["publish release", 1],
+  ]);
+  expect(failed.graph?.unplaced).toEqual([]);
+  await acted(runs(dashboard).rerunFailed(failed));
+  expect(byId(data(dashboard), FAILED_RUN).graph?.nodes[2]?.jobs[0]?.state).toBe("queued");
   dashboard.stop();
 });

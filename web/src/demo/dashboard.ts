@@ -2,6 +2,7 @@ import { AUTO_MERGE_OFF, DRAFT_REFUSED } from "../github/pull_actions.ts";
 import type { Dashboard, DashboardData, DashboardState, PullActions, PullRequest, RunActions } from "../model.ts";
 import { applyEdits, clearEdits, createDemoRunActions, forgetRun, noEdits } from "./actions.ts";
 import { FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
+import { withGraphs } from "./graphs.ts";
 
 export type DemoOptions = {
   /** How long each frame of the script stays up. */
@@ -92,7 +93,7 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   function ready(refreshing: boolean, readAt: number): DashboardState {
     return {
       status: "ready",
-      data: show === "empty" ? NOTHING : applyEdits(tweaked(sampleData({ base, frame, frameAt })), edits),
+      data: show === "empty" ? NOTHING : withGraphs(applyEdits(tweaked(sampleData({ base, frame, frameAt })), edits)),
       readAt,
       refreshing,
       problem: show === "problem" ? "GitHub didn't answer (503). Showing what was read 5 minutes ago." : undefined,

@@ -103,18 +103,18 @@ test("draws a run under way with its jobs", () => {
   // The state is in words too, not only in the colour and the shape.
   expect(jobs.map((item) => item.textContent)).toEqual([
     "build: Done1m 30s",
-    "deploy dev: Running1m 5s",
+    "deploy dev: Running · 1m 5s",
     "approve-prod: Waiting for approval",
     "deploy prod: Not started",
     "notify: Skipped",
     "sign: Failed10s",
   ]);
   expect(jobs.map((item) => item.className)).toEqual([
-    "job tone-done",
-    "job tone-running",
-    "job tone-waiting",
+    "job tone-done job-tick",
+    "job tone-running job-live",
+    "job tone-waiting job-live",
     "job tone-queued",
-    "job tone-skipped",
+    "job tone-skipped job-tick",
     "job tone-failed",
   ]);
   expect(within(card).getByRole("link", { name: "build" }).getAttribute("href")).toBe("https://x/1");
