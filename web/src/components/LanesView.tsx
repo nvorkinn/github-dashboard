@@ -9,7 +9,7 @@ import { ReleaseCard, shownRuns, sortRuns } from "./ReleaseList.tsx";
 /**
  * One lane per shown project, holding its release buttons, its runs going on now and its open pull requests; a lane
  * with none of either shrinks to its name. The hidden projects wait in a dock after the lanes, each a button that
- * brings its lane back. On a wide screen the lanes stand side by side as columns.
+ * brings its lane back. On a wide screen the lanes stand two abreast.
  */
 export function LanesView({
   projects,

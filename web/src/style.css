@@ -1562,66 +1562,34 @@ h1 .home {
   }
 }
 
-/* A big screen: the lanes become columns side by side, each its head over its runs over its pull requests, and the
-   dock a slim column at the end. More lanes than fit scroll sideways. */
+/* A big screen: the lanes stand two abreast, each its head across the top with its runs beside its pull requests,
+   so the page only ever scrolls down. A lone lane, and the dock, take the whole width. */
 @media (min-width: 100rem) {
   .lanes {
-    flex-direction: row;
-    align-items: flex-start;
-    overflow-x: auto;
-    padding-bottom: 0.5rem;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .lanes > .lanes-empty,
+  .lanes > .dock,
+  .lanes:not(:has(> .lane ~ .lane)) > .lane {
+    grid-column: 1 / -1;
   }
 
   .lane:not(.lane-quiet) {
-    flex: 1 0 24rem;
-    grid-template-columns: minmax(0, 1fr);
-    max-height: calc(100dvh - 7rem);
-    overflow-y: auto;
-    scrollbar-width: thin;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   }
 
   .lane:not(.lane-quiet) .lane-head {
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem 1rem;
   }
 
-  .lane:not(.lane-quiet) .lane-pulls {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .lane-quiet {
-    flex: 0 0 15rem;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .lanes > .lane-quiet > .lane-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .lane-quiet .lane-actions {
-    margin: 0.25rem 0 0;
-  }
-
-  .dock {
-    flex: 0 0 13rem;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .dock ul {
-    flex-direction: column;
-  }
-
-  .dock-project {
-    width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
-    padding-block: 0.375rem;
-    text-align: left;
+  .lane:not(.lane-quiet) .lane-actions {
+    margin: 0 0 0 auto;
   }
 }
