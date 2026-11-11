@@ -752,3 +752,25 @@ test("and no more once GitHub has", async () => {
   expect(dashboard.state()).toMatchObject({ data: { pulls: [{ mergeState: "clean" }] } });
   dashboard.stop();
 });
+
+test("passes the relay's notices on while started, and reads nothing for them", async () => {
+  const { dashboard, stream, calls } = await setUpLive(account("octo/app"));
+  const notices: string[] = [];
+  const stop = dashboard.onNotice?.((notice) => notices.push(notice.key));
+  const notice = {
+    type: "checks",
+    key: "checks:octo/app:1",
+    repo: "octo/app",
+    headline: "Checks failed in octo/app",
+    url: "https://github.com/octo/app/pull/1",
+  };
+  stream.emit("notice", JSON.stringify(notice));
+  await pass(10_000);
+  expect(notices).toEqual(["checks:octo/app:1"]);
+  expect(calls).toEqual([]);
+
+  stop?.();
+  stream.emit("notice", JSON.stringify({ ...notice, key: "another" }));
+  expect(notices).toEqual(["checks:octo/app:1"]);
+  dashboard.stop();
+});

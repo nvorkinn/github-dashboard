@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Notice } from "../model.ts";
 import { BACKOFF_MS, type Change, createEvents, STEADY_MS } from "./events.ts";
 import { fakeStreams } from "./testing.ts";
 
@@ -24,12 +25,14 @@ function setUp() {
   const fake = fakeStreams();
   const lives: boolean[] = [];
   const changes: Change[] = [];
+  const notices: Notice[] = [];
   const events = createEvents({
     connect: fake.connect,
     onLive: (live) => lives.push(live),
     onChange: (change) => changes.push(change),
+    onNotice: (notice) => notices.push(notice),
   });
-  return { ...fake, events, lives, changes };
+  return { ...fake, events, lives, changes, notices };
 }
 
 test("connects on start, and is live from the relay's hello", () => {
@@ -243,5 +246,38 @@ test("where there is no EventSource it never connects and is never live", () => 
   vi.advanceTimersByTime(60_000);
   expect(events.live()).toBe(false);
   expect(vi.getTimerCount()).toBe(0);
+  events.stop();
+});
+
+const NOTICE: Notice = {
+  type: "merged",
+  key: "merged:octo/app#7",
+  repo: "octo/app",
+  headline: "Merged octo/app#7: Add parcels",
+  url: "https://github.com/octo/app/pull/7",
+};
+
+test("passes each notice on", () => {
+  const { events, last, notices, changes } = setUp();
+  events.start();
+  last().emit("hello");
+  last().emit("notice", JSON.stringify({ ...NOTICE, extra: "left out" }));
+  expect(notices).toEqual([NOTICE]);
+  expect(changes).toEqual([]);
+  events.stop();
+});
+
+test.each([
+  ["not JSON", "{oops"],
+  ["of an unknown kind", JSON.stringify({ ...NOTICE, type: "opened" })],
+  ["without a key", JSON.stringify({ ...NOTICE, key: "" })],
+  ["without a headline", JSON.stringify({ ...NOTICE, headline: 5 })],
+  ["linking away from github.com", JSON.stringify({ ...NOTICE, url: "https://example.com/" })],
+  ["with no repository", JSON.stringify({ ...NOTICE, repo: undefined })],
+])("a notice %s is none, and nothing is thrown", (_, data) => {
+  const { events, last, notices } = setUp();
+  events.start();
+  expect(() => last().emit("notice", data)).not.toThrow();
+  expect(notices).toEqual([]);
   events.stop();
 });

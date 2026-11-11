@@ -19,6 +19,8 @@ export type Change = {
   run?: number;
 };
 
+import { NOTICE_TYPES, type Notice, type NoticeType } from "../model.ts";
+
 /** As much of an `EventSource` as is used. */
 export type EventStream = {
   addEventListener(type: string, listener: (event: Event) => void): void;
@@ -34,6 +36,8 @@ export type EventsOptions = {
   /** `true` on every connect, when the relay says hello; `false` when that connection ends. */
   onLive(live: boolean): void;
   onChange(change: Change): void;
+  /** Something that needs attention, for a desktop notification. */
+  onNotice?(notice: Notice): void;
 };
 
 export type Events = {
@@ -95,6 +99,12 @@ export function createEvents(options: EventsOptions): Events {
       const change = stream === mine ? parse(event) : undefined;
       if (change) {
         options.onChange(change);
+      }
+    });
+    mine.addEventListener("notice", (event) => {
+      const notice = stream === mine ? parseNotice(event) : undefined;
+      if (notice) {
+        options.onNotice?.(notice);
       }
     });
     mine.addEventListener("error", () => {
@@ -161,18 +171,49 @@ function hidden(): boolean {
   return typeof document !== "undefined" && document.hidden;
 }
 
-/** The change an event carries, or nothing if its data isn't one. Fields of the wrong type are left out. */
-function parse(event: Event): Change | undefined {
+function dataOf(event: Event): Record<string, unknown> | undefined {
   let data: unknown;
   try {
     data = JSON.parse(String((event as MessageEvent).data));
   } catch {
     return undefined;
   }
-  if (typeof data !== "object" || data === null) {
+  return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The notice an event carries, or nothing if its data isn't one: every field must be there, of its type, and its link
+ * must go to github.com, since a click opens it.
+ */
+function parseNotice(event: Event): Notice | undefined {
+  const data = dataOf(event);
+  if (!data) {
     return undefined;
   }
-  const { kind, repo, action, pull, sha, run } = data as Record<string, unknown>;
+  const { type, key, repo, headline, url } = data;
+  if (
+    typeof type !== "string" ||
+    !(NOTICE_TYPES as readonly string[]).includes(type) ||
+    typeof key !== "string" ||
+    key === "" ||
+    typeof repo !== "string" ||
+    typeof headline !== "string" ||
+    headline === "" ||
+    typeof url !== "string" ||
+    !url.startsWith("https://github.com/")
+  ) {
+    return undefined;
+  }
+  return { type: type as NoticeType, key, repo, headline, url };
+}
+
+/** The change an event carries, or nothing if its data isn't one. Fields of the wrong type are left out. */
+function parse(event: Event): Change | undefined {
+  const data = dataOf(event);
+  if (!data) {
+    return undefined;
+  }
+  const { kind, repo, action, pull, sha, run } = data;
   if (typeof kind !== "string" || kind === "") {
     return undefined;
   }

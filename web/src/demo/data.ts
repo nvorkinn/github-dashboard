@@ -1,4 +1,4 @@
-import type { Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
+import type { Check, CheckState, DashboardData, Job, Notice, Project, PullRequest, ReleaseRun } from "../model.ts";
 import { AVATARS } from "./avatars.ts";
 
 /**
@@ -59,6 +59,26 @@ const RELEASE_STEPS: Step[] = [
   { name: "publish release", from: 10, to: 11 },
 ];
 const RELEASE_DONE = 11;
+
+/**
+ * What the relay would tell the page as the script reaches `frame`, for the desktop notifications: the scripted
+ * release waiting for its approval, and finishing. `round` tells one time round the script from the next, as a new
+ * run attempt would.
+ */
+export function demoNotices(frame: number, round: number): Notice[] {
+  const repo = `${OWNER}/weather-station`;
+  const url = github(`weather-station/actions/runs/${SCRIPTED_RUN}`);
+  const waitsFrom = RELEASE_STEPS.find((step) => step.waits)?.from;
+  if (frame === waitsFrom) {
+    const headline = `A release in ${repo} is waiting for your approval`;
+    return [{ type: "waiting", key: `waiting:${repo}:${SCRIPTED_RUN}:${round}`, repo, headline, url }];
+  }
+  if (frame === RELEASE_DONE) {
+    const headline = `Release in ${repo}: success`;
+    return [{ type: "release", key: `finished:${repo}:${SCRIPTED_RUN}:${round}`, repo, headline, url }];
+  }
+  return [];
+}
 
 /**
  * Everything on the page. `base` is when the demo started, which the still parts are dated from; `frame` is the

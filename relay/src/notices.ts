@@ -1,13 +1,30 @@
 import { commit, pullNumbers, record, text, wholeNumber } from "./payload.ts";
 
-/** One Telegram notice about a webhook: what it says, and what makes another webhook a repeat of it. */
+/**
+ * The kinds of notice, which the page lets the user pick from for its desktop notifications: a pull request merged,
+ * changes requested on one, checks failed on one, a release run finished, a release run waiting for approval.
+ */
+export const NOTICE_TYPES = ["merged", "changes", "checks", "release", "waiting"] as const;
+export type NoticeType = (typeof NOTICE_TYPES)[number];
+
+/**
+ * One notice about a webhook: what it says, and what makes another webhook a repeat of it. It goes to Telegram while
+ * nobody is watching, and to the open pages, for their desktop notifications, while someone is.
+ */
 export type Notice = {
+  type: NoticeType;
+  /** The repository's full name, `owner/name`. */
+  repo: string;
+  /** Its first line, such as `Merged owner/name#7: its title`. */
+  headline: string;
+  /** The thing on github.com: the pull request (the first, when there are several) or the run. */
+  url: string;
   /**
    * What the notice is about, such as `checks:owner/name:<sha>`. A later webhook with the same key is a repeat
    * (GitHub delivering again, another job of the same run waiting, another failed check on the same commit).
    */
   key: string;
-  /** Short plain text ending in a link to the thing on github.com. */
+  /** Short plain text: the headline, then a link to each thing on github.com, one per line. */
   text: string;
   /** For a release waiting for approval: its run on github.com, where Review deployments approves it. */
   review?: string;
@@ -21,8 +38,15 @@ const MAX_TITLE = 120;
 // A check can name many pull requests (one per branch that has the commit); a notice lists a few.
 const MAX_PULLS = 5;
 
+/** What an open page is told of a notice: no more than it shows in a desktop notification. */
+export type PageNotice = Pick<Notice, "type" | "key" | "repo" | "headline" | "url">;
+
+export function pageNotice({ type, key, repo, headline, url }: Notice): PageNotice {
+  return { type, key, repo, headline, url };
+}
+
 /**
- * What to tell the Telegram chat about a webhook, or nothing when it isn't worth a notice. Only what needs attention
+ * What to tell about a webhook, or nothing when it isn't worth a notice. Only what needs attention
  * gets one, as the dashboard in countdown-server did: a pull request merging or getting changes requested, a pull
  * request's checks failing, and a release run (a workflow whose name says release, promote or deploy, as the page
  * reads it) finishing or waiting for approval.
@@ -78,10 +102,9 @@ function merged(repo: string, root: Record<string, unknown>): Notice | undefined
   if (root.action !== "closed" || pull.merged !== true || number === undefined) {
     return undefined;
   }
-  return {
-    key: `merged:${repo}#${number}`,
-    text: `Merged ${repo}#${number}${titled(pull.title)}\n${pullUrl(repo, number)}`,
-  };
+  return notice("merged", repo, `merged:${repo}#${number}`, `Merged ${repo}#${number}${titled(pull.title)}`, [
+    pullUrl(repo, number),
+  ]);
 }
 
 function changesRequested(repo: string, root: Record<string, unknown>, delivery: string | undefined) {
@@ -91,10 +114,13 @@ function changesRequested(repo: string, root: Record<string, unknown>, delivery:
   if (root.action !== "submitted" || review.state !== "changes_requested" || number === undefined) {
     return undefined;
   }
-  return {
-    key: `changes:${repo}#${number}:${wholeNumber(review.id) ?? delivery ?? ""}`,
-    text: `Changes requested on ${repo}#${number}${titled(pull.title)}\n${pullUrl(repo, number)}`,
-  };
+  return notice(
+    "changes",
+    repo,
+    `changes:${repo}#${number}:${wholeNumber(review.id) ?? delivery ?? ""}`,
+    `Changes requested on ${repo}#${number}${titled(pull.title)}`,
+    [pullUrl(repo, number)],
+  );
 }
 
 /**
@@ -108,10 +134,13 @@ function checksFailed(repo: string, root: Record<string, unknown>, check: Record
     return undefined;
   }
   const links = pulls.slice(0, MAX_PULLS).map((number) => pullUrl(repo, number));
-  return {
-    key: `checks:${repo}:${commit(check.head_sha) ?? pulls.join(",")}`,
-    text: `Checks failed in ${repo}\n${links.join("\n")}`,
-  };
+  return notice(
+    "checks",
+    repo,
+    `checks:${repo}:${commit(check.head_sha) ?? pulls.join(",")}`,
+    `Checks failed in ${repo}`,
+    links,
+  );
 }
 
 function releaseFinished(repo: string, root: Record<string, unknown>): Notice | undefined {
@@ -121,10 +150,13 @@ function releaseFinished(repo: string, root: Record<string, unknown>): Notice | 
   if (root.action !== "completed" || !isReleaseName(name) || id === undefined) {
     return undefined;
   }
-  return {
-    key: `finished:${repo}:${id}:${wholeNumber(run.run_attempt) ?? 1}`,
-    text: `${short(name)} in ${repo}: ${text(run.conclusion) ?? "finished"}\n${runUrl(repo, id)}`,
-  };
+  return notice(
+    "release",
+    repo,
+    `finished:${repo}:${id}:${wholeNumber(run.run_attempt) ?? 1}`,
+    `${short(name)} in ${repo}: ${text(run.conclusion) ?? "finished"}`,
+    [runUrl(repo, id)],
+  );
 }
 
 /**
@@ -143,8 +175,13 @@ function releaseWaiting(
   }
   const run = runUrl(repo, id);
   return {
-    key: `waiting:${repo}:${id}:${attempt ?? 1}`,
-    text: `A release in ${repo} is waiting for your approval\n${run}`,
+    ...notice(
+      "waiting",
+      repo,
+      `waiting:${repo}:${id}:${attempt ?? 1}`,
+      `A release in ${repo} is waiting for your approval`,
+      [run],
+    ),
     review: run,
   };
 }
@@ -153,6 +190,10 @@ function releaseWaiting(
 export function isReleaseName(name: string | undefined): name is string {
   const lower = (name ?? "").toLowerCase();
   return lower.includes("release") || lower.includes("promote") || lower.includes("deploy");
+}
+
+function notice(type: NoticeType, repo: string, key: string, headline: string, links: string[]): Notice {
+  return { type, repo, key, headline, url: links[0] ?? "", text: [headline, ...links].join("\n") };
 }
 
 function titled(value: unknown): string {

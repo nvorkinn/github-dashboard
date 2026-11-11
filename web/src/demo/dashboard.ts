@@ -1,7 +1,15 @@
 import { AUTO_MERGE_OFF, DRAFT_REFUSED } from "../github/pull_actions.ts";
-import type { Dashboard, DashboardData, DashboardState, PullActions, PullRequest, RunActions } from "../model.ts";
+import type {
+  Dashboard,
+  DashboardData,
+  DashboardState,
+  Notice,
+  PullActions,
+  PullRequest,
+  RunActions,
+} from "../model.ts";
 import { applyEdits, clearEdits, createDemoRunActions, forgetRun, noEdits } from "./actions.ts";
-import { FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
+import { demoNotices, FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
 import { withGraphs } from "./graphs.ts";
 
 export type DemoOptions = {
@@ -52,6 +60,9 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   const { show } = options;
   let state: DashboardState = { status: "loading" };
   const listeners = new Set<() => void>();
+  const noticeListeners = new Set<(notice: Notice) => void>();
+  // How many times round the script has gone, so each round's notices are new ones.
+  let round = 1;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let script: ReturnType<typeof setInterval> | undefined;
   let running = false;
@@ -170,8 +181,14 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
     if (frame === 0) {
       // The scripted run starts over, and waits for its approval again.
       forgetRun(edits, SCRIPTED_RUN);
+      round++;
     }
     setState(ready(state.status === "ready" && state.refreshing, frameAt));
+    for (const notice of demoNotices(frame, round)) {
+      for (const listener of [...noticeListeners]) {
+        listener(notice);
+      }
+    }
   }
 
   function stop(): void {
@@ -202,11 +219,17 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
       return () => listeners.delete(listener);
     },
 
+    onNotice(listener) {
+      noticeListeners.add(listener);
+      return () => noticeListeners.delete(listener);
+    },
+
     start() {
       if (running) {
         return;
       }
       running = true;
+      round = 1;
       base = Date.now();
       frame = FIRST_FRAME;
       frameAt = base;

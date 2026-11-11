@@ -160,6 +160,29 @@ export type DashboardState =
     }
   | { status: "failed"; problem: string };
 
+/**
+ * The kinds of thing that need attention, as the relay names them: a pull request merged, changes requested on one,
+ * checks failed on one, a release run finished, a release run waiting for approval.
+ */
+export const NOTICE_TYPES = ["merged", "changes", "checks", "release", "waiting"] as const;
+export type NoticeType = (typeof NOTICE_TYPES)[number];
+
+/**
+ * Something that needs attention, as the relay tells the open pages for their desktop notifications: the same things
+ * it sends to Telegram while no page is open.
+ */
+export type Notice = {
+  type: NoticeType;
+  /** What makes another notice a repeat of this one: GitHub delivering again, another check failing on a commit. */
+  key: string;
+  /** `owner/name`. */
+  repo: string;
+  /** One line, such as `Merged owner/name#7: its title`. */
+  headline: string;
+  /** The thing on github.com. */
+  url: string;
+};
+
 /** Where the page gets its data. `web/src/github/` makes the real one; tests and the demo can make their own. */
 export type Dashboard = {
   state(): DashboardState;
@@ -176,6 +199,8 @@ export type Dashboard = {
    * itself merged a pull request. `kind` is a webhook's name and the rest says where, as in the relay's events.
    */
   changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number }): void;
+  /** Calls `listener` with each notice that arrives while started; returns how to stop. Left out, none ever do. */
+  onNotice?(listener: (notice: Notice) => void): () => void;
 };
 
 /**

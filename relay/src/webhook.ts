@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { validWebhookSignature } from "./crypto.ts";
 import type { Change, Hub } from "./events.ts";
+import { noticeFrom, pageNotice } from "./notices.ts";
 import { commit, isRecord, pullNumbers, record, text, wholeNumber } from "./payload.ts";
 
 /** What may look at a signed webhook's whole payload besides `changeFrom` (see `webhookRoutes`). */
@@ -21,7 +22,8 @@ const DELIVERY = /^[0-9A-Za-z-]{1,64}$/;
 
 /**
  * The webhook endpoint, mounted at /api/github: `POST /webhook` takes the GitHub App's webhooks and publishes a
- * minimal notice of each (see `changeFrom`) for the open pages. Nothing of a webhook is kept once it is answered.
+ * minimal notice of each (see `changeFrom`) for the open pages, and for one that needs attention a notice the page
+ * can show as a desktop notification (see notices.ts). Nothing of a webhook is kept once it is answered.
  *
  * Anyone can reach this path (GitHub can't sign in at the reverse proxy), so the signature made with the webhook
  * secret is the only thing that tells GitHub from anyone else, and it is checked against the bytes as they came,
@@ -82,11 +84,18 @@ export function webhookRoutes(options: {
     }
     hub.publish(changeFrom(kind, payload));
 
+    const id = c.req.header("X-GitHub-Delivery") ?? "";
+    const delivery = DELIVERY.test(id) ? id : undefined;
+    // What needs attention also goes to the open pages as a notice, for their desktop notifications. The pages tell
+    // repeats apart themselves, so the relay remembers nothing for this.
+    const notice = noticeFrom(kind, payload, delivery);
+    if (notice) {
+      hub.announce(pageNotice(notice));
+    }
+
     const { onWebhook } = options;
     if (onWebhook) {
       const whole = payload;
-      const id = c.req.header("X-GitHub-Delivery") ?? "";
-      const delivery = DELIVERY.test(id) ? id : undefined;
       // In a later turn, so the answer never waits for it, and caught, so its failing never reaches the answer.
       void Promise.resolve()
         .then(() => onWebhook(kind, whole, delivery))

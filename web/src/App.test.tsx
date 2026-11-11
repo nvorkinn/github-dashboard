@@ -195,6 +195,48 @@ test("the actions it is given reach the pull requests, and without them there ar
   expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
 });
 
+test("the settings page is a link away, and back", async () => {
+  stubBackend(signedIn);
+  render(<App auth={createAuth()} dashboard={fakeDashboard(ready({ pulls: [pull({ title: "Somebody's work" })] }))} />);
+  expect(await screen.findByText("Somebody's work")).toBeTruthy();
+
+  history.replaceState(null, "", "/#settings");
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  expect(await screen.findByRole("heading", { name: "Notifications" })).toBeTruthy();
+  expect(screen.queryByText("Somebody's work")).toBeNull();
+
+  history.replaceState(null, "", "/#dashboard");
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  expect(await screen.findByText("Somebody's work")).toBeTruthy();
+
+  // Picking a view from the settings page goes back to the dashboard.
+  history.replaceState(null, "", "/#settings");
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await screen.findByRole("heading", { name: "Notifications" });
+  fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: "Notifications" })).toBeNull());
+  localStorage.clear();
+});
+
+test("a notice from the dashboard goes to the notifier while signed in", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard();
+  const notifier = { notify: vi.fn(), test: vi.fn() };
+  render(<App auth={createAuth()} dashboard={dashboard} notifier={notifier} />);
+  await screen.findByText("Loading your projects…");
+  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
+  const notice = {
+    type: "checks" as const,
+    key: "checks:octo/app:1",
+    repo: "octo/app",
+    headline: "Checks failed in octo/app",
+    url: "https://github.com/octo/app/pull/1",
+  };
+  dashboard.notice(notice);
+  expect(notifier.notify).toHaveBeenCalledWith(notice);
+});
+
 test("the header's switch shows the projects as lanes, and back", async () => {
   stubBackend(signedIn);
   const dashboard = fakeDashboard(ready({ pulls: [pull({ title: "First" })], projects: [project()] }));

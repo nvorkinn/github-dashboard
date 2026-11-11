@@ -5,6 +5,7 @@ import type {
   DashboardData,
   DashboardState,
   Job,
+  Notice,
   Project,
   PullRequest,
   ReleaseRun,
@@ -102,11 +103,22 @@ export function ready(
 export function fakeDashboard(initial: DashboardState = { status: "loading" }) {
   let state = initial;
   const listeners = new Set<() => void>();
+  const noticeListeners = new Set<(notice: Notice) => void>();
   return {
     state: () => state,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    onNotice(listener: (notice: Notice) => void) {
+      noticeListeners.add(listener);
+      return () => noticeListeners.delete(listener);
+    },
+    /** Hands `notice` to whoever listens, as one from the relay. */
+    notice(notice: Notice) {
+      for (const listener of noticeListeners) {
+        listener(notice);
+      }
     },
     start: vi.fn(),
     refresh: vi.fn(async () => {}),
@@ -118,5 +130,5 @@ export function fakeDashboard(initial: DashboardState = { status: "loading" }) {
         listener();
       }
     },
-  } satisfies Dashboard & { set(next: DashboardState): void };
+  } satisfies Dashboard & { set(next: DashboardState): void; notice(notice: Notice): void };
 }

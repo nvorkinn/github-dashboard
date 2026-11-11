@@ -24,7 +24,8 @@ export function useNow(everyMs = 1000): number {
 /** Where the browser keeps which projects are hidden: their `owner/name`, as a JSON list. A preference, nothing more. */
 export const HIDDEN_PROJECTS_KEY = "github-dashboard:hidden-projects";
 
-function readHidden(): Set<string> {
+/** The projects hidden in this browser, as kept: for what isn't drawn from `useHiddenProjects`, such as notifications. */
+export function readHidden(): Set<string> {
   try {
     const kept: unknown = JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "[]");
     return new Set(Array.isArray(kept) ? kept.filter((one): one is string => typeof one === "string") : []);

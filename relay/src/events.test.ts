@@ -121,6 +121,56 @@ test("a webhook reaches a connected reader as a change event", async () => {
   expect(hub.listeners()).toBe(0);
 });
 
+test("a webhook that needs attention also reaches a connected reader as a notice, after its change", async () => {
+  const hub = createHub();
+  const app = createApp({ staticRoot, webhookSecret: SECRET, hub });
+  const reader = reading(await app.request("/api/events"));
+  await reader.until("event: hello\ndata: {}\n\n");
+
+  const body = JSON.stringify({
+    action: "closed",
+    repository: { full_name: "nvorkinn/github-dashboard" },
+    pull_request: { number: 7, merged: true, title: "Add notices", head: { sha: "b".repeat(40) } },
+  });
+  await app.request("/api/github/webhook", {
+    method: "POST",
+    headers: { "X-GitHub-Event": "pull_request", "X-Hub-Signature-256": webhookSignature(SECRET, Buffer.from(body)) },
+    body,
+  });
+
+  const notice = {
+    type: "merged",
+    key: "merged:nvorkinn/github-dashboard#7",
+    repo: "nvorkinn/github-dashboard",
+    headline: "Merged nvorkinn/github-dashboard#7: Add notices",
+    url: "https://github.com/nvorkinn/github-dashboard/pull/7",
+  };
+  const text = await reader.until("event: notice");
+  expect(text.indexOf("event: change")).toBeGreaterThan(0);
+  expect(text.indexOf("event: change")).toBeLessThan(text.indexOf("event: notice"));
+  await reader.until(`event: notice\ndata: ${JSON.stringify(notice)}\n\n`);
+
+  await reader.leave();
+});
+
+test("a notice goes only to listeners that asked for notices, and one that throws doesn't stop the rest", () => {
+  const hub = createHub();
+  const seen: string[] = [];
+  hub.subscribe(() => {});
+  hub.subscribe(
+    () => {},
+    () => {
+      throw new Error("no");
+    },
+  );
+  hub.subscribe(
+    () => {},
+    (notice) => seen.push(notice.key),
+  );
+  hub.announce({ type: "checks", key: "checks:a/b:1", repo: "a/b", headline: "Checks failed in a/b", url: "u" });
+  expect(seen).toEqual(["checks:a/b:1"]);
+});
+
 test("a quiet stream sends a comment line at the interval, and stops when the reader leaves", async () => {
   vi.useFakeTimers();
   const hub = createHub();

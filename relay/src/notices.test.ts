@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { isReleaseName, noticeFrom } from "./notices.ts";
+import { isReleaseName, noticeFrom, pageNotice } from "./notices.ts";
 
 // The cases come from countdown-server's tests/services/test_github_notify.py, with the same texts.
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -10,6 +10,10 @@ const MERGED = { action: "closed", repository, pull_request: { ...pull, merged: 
 
 test("a merge is named with its link", () => {
   expect(noticeFrom("pull_request", MERGED)).toEqual({
+    type: "merged",
+    repo: "nvorkinn/countdown",
+    headline: "Merged nvorkinn/countdown#7: Add parcels",
+    url: PULL_URL,
     key: "merged:nvorkinn/countdown#7",
     text: `Merged nvorkinn/countdown#7: Add parcels\n${PULL_URL}`,
   });
@@ -23,6 +27,10 @@ test("a closed pull request that didn't merge, and other actions, are quiet", ()
 test("requested changes are sent but approvals are not", () => {
   const review = { action: "submitted", repository, pull_request: pull };
   expect(noticeFrom("pull_request_review", { ...review, review: { id: 55, state: "changes_requested" } })).toEqual({
+    type: "changes",
+    repo: "nvorkinn/countdown",
+    headline: "Changes requested on nvorkinn/countdown#7: Add parcels",
+    url: PULL_URL,
     key: "changes:nvorkinn/countdown#7:55",
     text: `Changes requested on nvorkinn/countdown#7: Add parcels\n${PULL_URL}`,
   });
@@ -47,6 +55,10 @@ test.each([
     if (sent) {
       // A suite and a run on the same commit have the same key, so the second is a repeat.
       expect(notice, kind).toEqual({
+        type: "checks",
+        repo: "nvorkinn/countdown",
+        headline: "Checks failed in nvorkinn/countdown",
+        url: PULL_URL,
         key: `checks:nvorkinn/countdown:${SHA}`,
         text: `Checks failed in nvorkinn/countdown\n${PULL_URL}`,
       });
@@ -66,6 +78,10 @@ test("failed checks with no pull request, or not completed, are quiet", () => {
 test("failed checks list each pull request the commit is at", () => {
   const suite = { conclusion: "failure", pull_requests: [{ number: 7 }, { number: "8" }, { number: 9 }] };
   expect(noticeFrom("check_suite", { action: "completed", repository, check_suite: suite })).toEqual({
+    type: "checks",
+    repo: "nvorkinn/countdown",
+    headline: "Checks failed in nvorkinn/countdown",
+    url: PULL_URL,
     key: "checks:nvorkinn/countdown:7,9",
     text: `Checks failed in nvorkinn/countdown\n${PULL_URL}\nhttps://github.com/nvorkinn/countdown/pull/9`,
   });
@@ -75,6 +91,10 @@ test("a finished release says how it went, but other runs are quiet", () => {
   const run = { id: 1, name: "Release", conclusion: "failure", run_attempt: 2, html_url: "https://example.com/" };
   const payload = { action: "completed", repository, workflow_run: run };
   expect(noticeFrom("workflow_run", payload)).toEqual({
+    type: "release",
+    repo: "nvorkinn/countdown",
+    headline: "Release in nvorkinn/countdown: failure",
+    url: "https://github.com/nvorkinn/countdown/actions/runs/1",
     key: "finished:nvorkinn/countdown:1:2",
     text: "Release in nvorkinn/countdown: failure\nhttps://github.com/nvorkinn/countdown/actions/runs/1",
   });
@@ -90,6 +110,10 @@ test("a release waiting for approval repeats by run, not by job, and links its r
   const job = { id: 5, workflow_name: "Release", run_id: 99, run_attempt: 1, html_url: "https://example.com/" };
   const run = "https://github.com/nvorkinn/countdown/actions/runs/99";
   const expected = {
+    type: "waiting",
+    repo: "nvorkinn/countdown",
+    headline: "A release in nvorkinn/countdown is waiting for your approval",
+    url: run,
     key: "waiting:nvorkinn/countdown:99:1",
     text: `A release in nvorkinn/countdown is waiting for your approval\n${run}`,
     review: run,
@@ -105,6 +129,17 @@ test("a release waiting for approval repeats by run, not by job, and links its r
   const test = { ...job, workflow_name: "Test" };
   expect(noticeFrom("workflow_job", { action: "waiting", repository, workflow_job: test })).toBeUndefined();
   expect(noticeFrom("deployment_review", { ...review, action: "approved" })).toBeUndefined();
+});
+
+test("a page is told only what its desktop notification shows", () => {
+  const notice = noticeFrom("pull_request", MERGED, undefined, "https://github.vorkinn.org");
+  expect(notice && pageNotice(notice)).toEqual({
+    type: "merged",
+    key: "merged:nvorkinn/countdown#7",
+    repo: "nvorkinn/countdown",
+    headline: "Merged nvorkinn/countdown#7: Add parcels",
+    url: PULL_URL,
+  });
 });
 
 test("the dashboard's address goes on a last line when it is known", () => {

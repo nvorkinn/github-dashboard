@@ -143,7 +143,12 @@ data: {"kind":"pull_request","repo":"nvorkinn/github-dashboard","action":"synchr
 - `hello` comes once, on connecting. A page that sees it after a break knows it may have missed changes.
 - `change` comes once per webhook. `kind` is the webhook's event name (`X-GitHub-Event`) and is always there. The
   rest is there when the webhook has it: `repo` (the repository's full name), `action`, `pull` (the pull request's
-  number), `sha` (the head commit) and `run` (the workflow run's id). Nothing else from the webhook is passed on.
+  number), `sha` (the head commit) and `run` (the workflow run's id). Nothing else from the webhook is passed on in a `change`.
+- `notice` comes after the `change` of a webhook that needs attention, the same ones Telegram is told about (see
+  "Telegram"), for the page's desktop notifications (see "Desktop notifications"):
+  `{"type":"merged","key":"merged:owner/name#7","repo":"owner/name","headline":"Merged owner/name#7: its title","url":"https://github.com/owner/name/pull/7"}`.
+  `type` is `merged`, `changes`, `checks`, `release` or `waiting`, and `key` tells a repeat (GitHub delivering again,
+  another failed check on the same commit), which the page then doesn't show twice.
 - `: ping` is a comment line, sent every 20 seconds to keep the connection open. `EventSource` ignores it.
 
 GitHub's own `ping` webhook, sent when the webhook is set up, is answered and not passed on.
@@ -198,6 +203,18 @@ To set it up:
 2. Send your new bot any message (a bot can't write to someone who hasn't), or add it to the group it should write in.
 3. Open `https://api.telegram.org/bot<token>/getUpdates` in a browser: `"chat":{"id":...}` in the answer is the chat
    id.
+
+## Desktop notifications
+
+While the dashboard is open, what Telegram would be told shows instead as a notification from the browser, which on a
+Mac lands in Notification Center. Clicking one opens the thing on github.com. They are the two halves of one thing:
+the page closes its event stream while its tab is in the background, so 30 seconds later Telegram takes over.
+
+**Settings** in the header (`#settings`) asks the browser for its permission, sends a test, and picks which of the five
+kinds show: a pull request merged, changes requested, checks failed, a release finished, a release waiting for
+approval. The choice is kept in the browser's local storage, like the hidden projects, and a hidden project's notices
+show nothing. It doesn't change what goes to Telegram. If nothing shows on a Mac, look at System Settings,
+Notifications, for the browser, and at Focus.
 
 ## Previews
 
