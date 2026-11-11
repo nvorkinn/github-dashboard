@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/pr
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
-import { fakeDashboard, pull, ready } from "./components/testing.ts";
+import { fakeDashboard, project, pull, ready } from "./components/testing.ts";
 import type { Call } from "./testing.ts";
 import { stubBackend, tokenAnswer } from "./testing.ts";
 
@@ -185,4 +185,17 @@ test("the actions it is given reach the pull requests, and without them there ar
   render(<App auth={createAuth()} dashboard={dashboard} />);
   expect(await screen.findByText("Ready one")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+});
+
+test("the header's switch shows the projects as lanes, and back", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard(ready({ pulls: [pull({ title: "First" })], projects: [project()] }));
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  expect(await screen.findByRole("heading", { level: 2, name: "Pull requests 1" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
+  expect(screen.queryByRole("heading", { level: 2, name: "Pull requests 1" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "weather-station" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Stage" }));
+  expect(screen.getByRole("heading", { level: 2, name: "Pull requests 1" })).toBeTruthy();
+  localStorage.clear();
 });
