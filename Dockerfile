@@ -12,6 +12,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY relay/src relay/src
+COPY shared shared
 COPY --from=build /app/dist dist
 # The node user, by number so a host can check it without the image's /etc/passwd.
 USER 1000

@@ -5,6 +5,7 @@ import { authRoutes } from "./auth.ts";
 import type { AuthConfig, TelegramConfig } from "./config.ts";
 import type { Hub } from "./events.ts";
 import { createHub, eventStream } from "./events.ts";
+import { createStatusCache } from "./status.ts";
 import { telegramNotifier } from "./telegram.ts";
 import { webhookRoutes } from "./webhook.ts";
 
@@ -15,7 +16,8 @@ const PING_MS = 20_000;
  * The relay: serves the built page, signs in to the GitHub App and refreshes its token (see auth.ts), and passes a
  * minimal notice of each GitHub webhook (see webhook.ts) on to the open pages over Server-Sent Events (see
  * events.ts). It keeps no database, stores no tokens and remembers no events; the one thing it holds on to is which
- * Telegram notices it sent lately, so as not to send them twice (see telegram.ts).
+ * Telegram notices it sent lately, so as not to send them twice (see telegram.ts), and a minute of public GitHub
+ * service status (see status.ts).
  *
  * Without `auth` the sign-in endpoints answer 503, and without `webhookSecret` the webhook endpoint does. With
  * `telegram`, webhooks that need attention are also sent to a Telegram chat while no page is open (see telegram.ts),
@@ -64,6 +66,13 @@ export function createApp(options: {
   const onWebhook = options.telegram
     ? telegramNotifier({ config: options.telegram, hub, dashboard: options.auth?.publicOrigin, fetch: fetcher })
     : undefined;
+
+  const readStatus = createStatusCache({ fetch: fetcher });
+  app.get("/api/github/status", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const snapshot = await readStatus();
+    return c.json(snapshot, snapshot.data ? 200 : 503);
+  });
 
   app.route("/api/auth", authRoutes({ config: options.auth, fetch: fetcher }));
   app.route("/api/github", webhookRoutes({ secret: options.webhookSecret, hub, onWebhook }));

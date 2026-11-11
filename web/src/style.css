@@ -2028,3 +2028,172 @@ h1 .home {
     margin: 0 0 0 auto;
   }
 }
+
+/* Public GitHub health uses the dashboard's existing state colours and surfaces. */
+.service-control {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  position: relative;
+}
+.service-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  border-color: currentColor;
+  background: var(--panel);
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.service-operational {
+  color: var(--done);
+}
+.service-degraded {
+  color: var(--waiting);
+}
+.service-outage {
+  color: var(--failed);
+}
+.service-maintenance {
+  color: light-dark(#7144b8, #c4a5ff);
+}
+.service-unknown {
+  color: var(--quiet);
+}
+.service-symbol {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.service-popover {
+  position: absolute;
+  z-index: 65;
+  top: calc(100% + 0.65rem);
+  left: 0;
+  width: min(29rem, calc(100vw - 1.5rem));
+  max-height: min(42rem, calc(100dvh - 6rem));
+  overflow: auto;
+  padding: 1rem;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 22px 70px rgb(0 0 0 / 0.5);
+}
+.service-heading,
+.service-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.service-heading h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.service-popover h3 {
+  font-size: 0.9rem;
+  margin: 1.1rem 0 0.5rem;
+}
+.service-banner {
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 7%, var(--panel));
+}
+.service-banner p {
+  margin: 0.35rem 0 0;
+  color: var(--text);
+}
+.service-components {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.service-component {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.service-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.service-components .service-label {
+  text-align: right;
+  text-transform: capitalize;
+}
+.service-incident {
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.service-incident-title {
+  font-weight: 650;
+}
+.service-incident p {
+  margin: 0.4rem 0;
+}
+.service-update {
+  white-space: pre-wrap;
+}
+.service-timestamp {
+  font-size: 0.75rem;
+}
+.service-incident summary {
+  cursor: pointer;
+  color: var(--link);
+  font-size: 0.85rem;
+}
+.service-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+.service-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 0.8rem;
+}
+.service-summary > button {
+  margin-left: auto;
+}
+@media (max-width: 700px) {
+  .top:has(.service-popover) {
+    backdrop-filter: none;
+  }
+  .service-prefix {
+    display: none;
+  }
+  .service-popover {
+    position: fixed;
+    inset: 0.75rem 0.75rem auto;
+    width: auto;
+    max-height: calc(100dvh - 1.5rem);
+  }
+  .service-summary {
+    gap: 0.5rem;
+  }
+}
