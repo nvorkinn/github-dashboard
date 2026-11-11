@@ -21,11 +21,24 @@ npm ci
 npm run build   # build the page into dist/web
 npm start       # the relay on http://localhost:8080, serving the built page
 npm run dev     # or: Vite's dev server for the page, passing /api and /healthz to the relay
+npm run build:demo  # the demo: the page on sample data, into dist/demo
 npm run check   # Biome (lint, format, imports) and the type check
 npm test        # Vitest
 ```
 
 `docker build -t github-dashboard .` builds the image that gets deployed; it listens on `PORT` (8080).
+
+## Previews
+
+The demo is the page running on built-in sample data (`web/src/demo.ts`), with no relay, sign-in or GitHub behind it.
+The Preview workflow publishes it to GitHub Pages from the `gh-pages` branch:
+
+- each pull request's at `https://nvorkinn.github.io/github-dashboard/pr-<number>/`, linked from the pull request as
+  a deployment ("View deployment"), and removed when the pull request closes;
+- main's at `https://nvorkinn.github.io/github-dashboard/`.
+
+When the page learns something new to show, give the demo sample data for it, so the preview shows it too. Pull
+requests from forks and from Dependabot get no preview.
 
 ## Pull requests
 
