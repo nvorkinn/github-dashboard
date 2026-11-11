@@ -1345,6 +1345,9 @@ h1 .home {
   display: grid;
   gap: 1rem;
   padding: 0.875rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .permission {
