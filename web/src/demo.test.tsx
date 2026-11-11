@@ -81,7 +81,8 @@ test("the page on the demo shows the sample dashboard", async () => {
 
   expect(await screen.findByText("Show wind gusts on the hourly chart")).toBeTruthy();
   expect(screen.getByText("Bump vite from 8.3.6 to 8.3.7")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "v2.5.0" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Calibrate the rain gauge per station (#212)" })).toBeTruthy();
+  expect(screen.getByTitle("Releasing v2.5.0").textContent).toBe("v2.5.0");
   expect(screen.getByText("no release yet")).toBeTruthy();
   expect(screen.getByText("Private")).toBeTruthy();
   expect(screen.getByText("Live")).toBeTruthy();

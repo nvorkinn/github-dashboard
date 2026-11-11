@@ -221,3 +221,19 @@ test("without actions the cards only show", () => {
   expect(screen.queryByRole("button")).toBeNull();
   expect(screen.getByText("production waits for its required reviewers")).toBeTruthy();
 });
+
+test("a run that says which release it is shows its tag, folded too", () => {
+  const { container } = render(
+    <ReleaseList
+      now={NOW}
+      runs={[
+        run({ id: 1, title: "Fix the wind direction (#207)", tag: "v2.4.1" }),
+        run({ id: 2, title: "Release", tag: undefined, state: "running", finishedAt: undefined }),
+      ]}
+    />,
+  );
+  const [going, folded] = [...container.querySelectorAll(".release")] as HTMLElement[];
+  expect(folded?.classList.contains("release-folded")).toBe(true);
+  expect(folded?.querySelector(".release-tag")?.textContent).toBe("v2.4.1");
+  expect(going?.querySelector(".release-tag")).toBeNull();
+});

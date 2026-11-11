@@ -60,6 +60,10 @@ type RawRun = {
   id: number;
   name: string | null;
   display_title?: string;
+  /** The branch or tag it ran on: the tag, for a run started by pushing one or by publishing a release. */
+  head_branch?: string | null;
+  /** What started it, such as `push`, `release` or `workflow_dispatch`. */
+  event?: string;
   html_url: string;
   status: string | null;
   conclusion: string | null;
@@ -654,6 +658,7 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
     id: run.id,
     workflow: workflow.name,
     title: run.display_title ?? run.name ?? workflow.name,
+    tag: releaseTag(run),
     url: run.html_url,
     state,
     actor: (run.triggering_actor ?? run.actor)?.login,
@@ -663,6 +668,29 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
     graph: definitions && jobGraph(definitions, jobs),
     approvals,
   };
+}
+
+// A tag that is a version, such as v1.2.3, 2.0 or v3.0.0-rc.1.
+const VERSION_TAG = /^v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.+-]+)?$/;
+// A version named in a run's title, such as the one in "Promote v1.2.3": three parts, so a date or a decimal isn't one.
+const VERSION_IN_TITLE = /(?:^|[\s(@/])(v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]*[0-9A-Za-z])?)(?=$|[\s),:;])/;
+
+/**
+ * The release tag or version a run is releasing, from what its run says:
+ *
+ * - A run started by pushing a tag or publishing a release runs on that tag, which is its `head_branch`.
+ * - A run started by hand, or by another workflow, runs on a branch; its title is its `run-name`, such as
+ *   "Promote v1.2.3", so a version in it is the one it releases. A pushed commit's title is its subject, which can
+ *   name any version (a dependency bump, say), so it isn't read for one.
+ */
+export function releaseTag(run: Pick<RawRun, "head_branch" | "event" | "display_title">): string | undefined {
+  if (run.head_branch && VERSION_TAG.test(run.head_branch)) {
+    return run.head_branch;
+  }
+  if (run.event === "push" || run.event === "pull_request" || !run.display_title) {
+    return undefined;
+  }
+  return VERSION_IN_TITLE.exec(run.display_title)?.[1];
 }
 
 /**

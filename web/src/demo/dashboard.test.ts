@@ -406,7 +406,7 @@ test("a release works out the next tag, then adds the release and a run of it", 
   expect(after.releases.at(-1)).toMatchObject({
     repo: project.repo,
     workflow: "Release",
-    title: "v2.5.0",
+    tag: "v2.5.0",
     state: "running",
     finishedAt: undefined,
   });
@@ -421,7 +421,12 @@ test("promoting adds a run of the Promote workflow", async () => {
   const tag = promoteTag(project) as string;
   expect(tag).toBe("v1.12.3");
   await acted(runs(dashboard).promote(project, tag));
-  expect(data(dashboard).releases.at(-1)).toMatchObject({ workflow: "Promote", title: tag, state: "running" });
+  expect(data(dashboard).releases.at(-1)).toMatchObject({
+    workflow: "Promote",
+    title: `Promote ${tag}`,
+    tag,
+    state: "running",
+  });
   dashboard.stop();
 });
 

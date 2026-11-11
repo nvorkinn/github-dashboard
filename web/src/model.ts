@@ -60,6 +60,11 @@ export type ReleaseRun = {
   workflow: string;
   /** What the run is of: its display title on GitHub, such as the tag or the commit's subject. */
   title: string;
+  /**
+   * The release tag or version it is releasing, such as `v1.2.3`: the tag that started it, or the version its title
+   * names when it was started by hand. Unset when the run doesn't say, such as one that makes its tag as it goes.
+   */
+  tag?: string | undefined;
   url: string;
   state: CheckState;
   /** Who started it. */

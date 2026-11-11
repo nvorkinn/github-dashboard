@@ -87,7 +87,14 @@ export function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
         <span class="repo-label" title={run.repo}>
           {shortName(run.repo)} <span aria-hidden="true">·</span> {run.workflow}
         </span>
-        <StateChip state={run.state} />
+        <span class="release-badges">
+          {run.tag && (
+            <span class="badge release-tag" title={`Releasing ${run.tag}`}>
+              {run.tag}
+            </span>
+          )}
+          <StateChip state={run.state} />
+        </span>
       </div>
       <ExternalLink class="release-title" href={run.url}>
         {run.title}
