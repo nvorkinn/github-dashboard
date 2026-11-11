@@ -233,14 +233,17 @@ export function createNotifier(options: {
 }
 
 /**
- * The favicon as a PNG, which notifications take more widely than SVG. Under the page's base, so the demo (served
- * from a subfolder) finds it too. Some systems show their own icon for the browser instead, such as macOS.
+ * The favicon as a PNG, which notifications take more widely than SVG, as an absolute URL because Safari on macOS
+ * doesn't take a relative one. Resolved against the page's address rather than its origin, since the demo's base is
+ * "./" and it is served from a subfolder. Some systems show their own icon for the browser instead.
  */
-export const NOTIFICATION_ICON = `${import.meta.env.BASE_URL}apple-touch-icon.png`;
+export function notificationIcon(): string {
+  return new URL(`${import.meta.env.BASE_URL}apple-touch-icon.png`, document.baseURI).href;
+}
 
 function browserShow(title: string, options: { body: string; tag: string }) {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
     return null;
   }
-  return new Notification(title, { ...options, icon: NOTIFICATION_ICON });
+  return new Notification(title, { ...options, icon: notificationIcon() });
 }
