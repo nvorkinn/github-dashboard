@@ -71,11 +71,75 @@ export function sortPulls(pulls: PullRequest[], order: PullOrder): PullRequest[]
 export type PullColumn = "ready" | "progress" | "attention";
 type PullFilter = "all" | PullColumn;
 
+type SavedPullView = { id: string; status: PullFilter; author: string };
+
+const SAVED_VIEWS_KEY = "github-dashboard:pull-views";
+const MAX_SAVED_VIEWS = 8;
+
 const COLUMNS: { value: PullColumn; label: string }[] = [
   { value: "ready", label: "Ready to merge" },
   { value: "progress", label: "In progress" },
   { value: "attention", label: "Needs attention" },
 ];
+
+function isPullFilter(value: unknown): value is PullFilter {
+  return value === "all" || COLUMNS.some((column) => column.value === value);
+}
+
+function savedViewId(status: PullFilter, author: string): string {
+  return `${status}:${encodeURIComponent(author)}`;
+}
+
+function readSavedViews(): SavedPullView[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(SAVED_VIEWS_KEY) ?? "[]");
+    if (!Array.isArray(stored)) {
+      return [];
+    }
+    const found = new Map<string, SavedPullView>();
+    for (const item of stored) {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        !isPullFilter((item as Record<string, unknown>).status) ||
+        typeof (item as Record<string, unknown>).author !== "string"
+      ) {
+        continue;
+      }
+      const status = (item as { status: PullFilter }).status;
+      const author = (item as { author: string }).author.trim();
+      if (!author) {
+        continue;
+      }
+      const id = savedViewId(status, author);
+      if (!found.has(id)) {
+        found.set(id, { id, status, author });
+      }
+    }
+    return [...found.values()].slice(0, MAX_SAVED_VIEWS);
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedViews(views: SavedPullView[]): void {
+  try {
+    localStorage.setItem(SAVED_VIEWS_KEY, JSON.stringify(views.map(({ status, author }) => ({ status, author }))));
+  } catch {
+    // The view still lasts until this page closes.
+  }
+}
+
+function savedViewLabel(view: Pick<SavedPullView, "status" | "author">): string {
+  const status = view.status === "all" ? undefined : COLUMNS.find((column) => column.value === view.status)?.label;
+  if (status && view.author !== "all") {
+    return `${status} · ${view.author}`;
+  }
+  if (status) {
+    return status;
+  }
+  return view.author === "all" ? "All pull requests" : `By ${view.author}`;
+}
 
 export function columnOf(pull: PullRequest): PullColumn {
   const checks = summarize(pull.checks);
@@ -96,6 +160,7 @@ export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]
   const [order, setOrder] = useState(rememberedOrder);
   const [status, setStatus] = useState<PullFilter>("all");
   const [author, setAuthor] = useState("all");
+  const [savedViews, setSavedViews] = useState(readSavedViews);
   const sorted = sortPulls(pulls, order);
   const authors = [...new Set(pulls.map((pull) => pull.author))].sort((a, b) => a.localeCompare(b));
   const effectiveAuthor = author === "all" || authors.includes(author) ? author : "all";
@@ -106,6 +171,24 @@ export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]
           (effectiveAuthor === "all" || pull.author === effectiveAuthor),
       )
     : sorted;
+  const matchingSavedView = savedViews.find((view) => view.status === status && view.author === effectiveAuthor);
+
+  function keepSavedViews(next: SavedPullView[]): void {
+    setSavedViews(next);
+    writeSavedViews(next);
+  }
+
+  function saveCurrentView(): void {
+    if ((status === "all" && effectiveAuthor === "all") || matchingSavedView) {
+      return;
+    }
+    const saved = {
+      id: savedViewId(status, effectiveAuthor),
+      status,
+      author: effectiveAuthor,
+    };
+    keepSavedViews([saved, ...savedViews].slice(0, MAX_SAVED_VIEWS));
+  }
 
   useEffect(() => {
     if (author !== effectiveAuthor) {
@@ -144,6 +227,47 @@ export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]
                   ))}
                 </select>
               </label>
+              <div class="pull-saved-views">
+                <label class="pull-filter">
+                  <span class="quiet">Saved</span>
+                  <select
+                    aria-label="Apply saved PR view"
+                    value=""
+                    onChange={(event) => {
+                      const saved = savedViews.find((view) => view.id === event.currentTarget.value);
+                      if (saved) {
+                        setStatus(saved.status);
+                        setAuthor(saved.author);
+                      }
+                    }}
+                  >
+                    <option value="">Saved views ({savedViews.length})</option>
+                    {savedViews.map((view) => (
+                      <option key={view.id} value={view.id}>
+                        {savedViewLabel(view)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  class="action secondary pull-save-view"
+                  disabled={(status === "all" && effectiveAuthor === "all") || matchingSavedView !== undefined}
+                  onClick={saveCurrentView}
+                >
+                  Save view
+                </button>
+                {matchingSavedView && (
+                  <button
+                    type="button"
+                    class="action secondary pull-remove-view"
+                    aria-label={`Remove saved view ${savedViewLabel(matchingSavedView)}`}
+                    onClick={() => keepSavedViews(savedViews.filter((view) => view.id !== matchingSavedView.id))}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
             </>
           )}
           <label class="order">

@@ -283,6 +283,56 @@ test("filters the compact queue by status and author without changing the board"
   expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(3);
 });
 
+test("saves, reapplies, and removes compact PR views", () => {
+  const pulls = [
+    pull({ number: 1, title: "Ready by Alice", author: "alice", checks: checks("passed") }),
+    pull({ number: 2, title: "Broken by Bob", author: "bob", checks: checks("failed") }),
+  ];
+  render(<PullList now={NOW} pulls={pulls} compact />);
+
+  fireEvent.change(screen.getByLabelText("Status"), { target: { value: "attention" } });
+  fireEvent.change(screen.getByLabelText("Author"), { target: { value: "bob" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save view" }));
+  const saved = screen.getByLabelText("Apply saved PR view") as HTMLSelectElement;
+  expect([...saved.options].map((option) => option.textContent)).toEqual(["Saved views (1)", "Needs attention · bob"]);
+  expect((screen.getByRole("button", { name: "Save view" }) as HTMLButtonElement).disabled).toBe(true);
+
+  cleanup();
+  render(<PullList now={NOW} pulls={pulls} compact />);
+  const remembered = screen.getByLabelText("Apply saved PR view") as HTMLSelectElement;
+  const option = [...remembered.options].find((one) => one.textContent === "Needs attention · bob");
+  fireEvent.change(remembered, { target: { value: option?.value } });
+  expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("attention");
+  expect((screen.getByLabelText("Author") as HTMLSelectElement).value).toBe("bob");
+  expect(screen.getByText("Broken by Bob")).toBeTruthy();
+  expect(screen.queryByText("Ready by Alice")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove saved view Needs attention · bob" }));
+  expect(
+    [...(screen.getByLabelText("Apply saved PR view") as HTMLSelectElement).options].map((one) => one.textContent),
+  ).toEqual(["Saved views (0)"]);
+  expect(JSON.parse(localStorage.getItem("github-dashboard:pull-views") ?? "null")).toEqual([]);
+});
+
+test("ignores malformed saved PR views, deduplicates them, and caps how many it keeps", () => {
+  localStorage.setItem(
+    "github-dashboard:pull-views",
+    JSON.stringify([
+      ...Array.from({ length: 10 }, (_, index) => ({ status: "ready", author: `person-${index}` })),
+      { status: "ready", author: "person-0" },
+      { status: "sideways", author: "nobody" },
+      { status: "attention", author: 7 },
+    ]),
+  );
+  render(<PullList now={NOW} pulls={MIXED} compact />);
+  expect((screen.getByLabelText("Apply saved PR view") as HTMLSelectElement).options).toHaveLength(9);
+
+  cleanup();
+  localStorage.setItem("github-dashboard:pull-views", "{broken");
+  render(<PullList now={NOW} pulls={MIXED} compact />);
+  expect((screen.getByLabelText("Apply saved PR view") as HTMLSelectElement).options).toHaveLength(1);
+});
+
 test("falls back to the newest first when what was remembered makes no sense", () => {
   localStorage.setItem("github-dashboard:pull-order", "sideways");
   render(<PullList now={NOW} pulls={MIXED} />);

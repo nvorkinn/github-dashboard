@@ -203,6 +203,230 @@ button:disabled {
   opacity: 0.65;
 }
 
+.header-icon-button,
+.notification-trigger {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0.45rem;
+}
+
+.notification-control {
+  position: relative;
+}
+
+.notification-trigger {
+  grid-template-columns: auto auto;
+  gap: 0.25rem;
+}
+
+.notification-unread {
+  display: grid;
+  place-items: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding-inline: 0.25rem;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 750;
+  line-height: 1;
+  background: var(--problem);
+  border-radius: 999px;
+}
+
+.notification-centre {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  width: min(29rem, calc(100vw - 1.5rem));
+  max-height: min(38rem, calc(100dvh - 6rem));
+  overflow: hidden;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 22px 70px rgb(0 0 0 / 0.5);
+}
+
+.notification-centre-head,
+.notification-centre-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.notification-centre-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.notification-list {
+  display: grid;
+  max-height: min(29rem, calc(100dvh - 13rem));
+  overflow-y: auto;
+}
+
+.notification-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.75rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 var(--notice-tone, var(--link));
+}
+
+.notification-checks,
+.notification-changes {
+  --notice-tone: var(--failed);
+}
+
+.notification-waiting {
+  --notice-tone: var(--waiting);
+}
+
+.notification-merged,
+.notification-release {
+  --notice-tone: var(--done);
+}
+
+.notification-type {
+  color: var(--notice-tone, var(--link));
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.notification-repo {
+  color: var(--quiet);
+  font-size: 0.7rem;
+}
+
+.notification-headline {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notification-centre-foot {
+  justify-content: flex-end;
+}
+
+.command-palette-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  padding: min(12vh, 7rem) 1rem 1rem;
+  background: rgb(2 6 12 / 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.command-palette-dismiss {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.command-palette {
+  position: relative;
+  width: min(44rem, 100%);
+  max-height: min(42rem, calc(100dvh - 2rem));
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 30px 100px rgb(0 0 0 / 0.65);
+}
+
+.command-palette-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.command-palette-search {
+  display: block;
+  padding: 0.85rem 1rem;
+}
+
+.command-palette-search input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.75rem;
+  color: var(--text);
+  font: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.command-palette-search input:focus {
+  border-color: var(--link);
+  outline: 2px solid color-mix(in srgb, var(--link) 60%, white);
+  outline-offset: 2px;
+}
+
+.command-palette-results {
+  max-height: min(31rem, calc(100dvh - 14rem));
+  padding: 0 0.65rem 0.75rem;
+  overflow-y: auto;
+}
+
+.command-palette-empty {
+  padding: 1.5rem 0.5rem;
+  color: var(--quiet);
+  text-align: center;
+}
+
+.command-palette-group {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.45rem 0;
+  border: 0;
+}
+
+.command-palette-group legend {
+  padding: 0.35rem 0.5rem;
+  color: var(--quiet);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-palette-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  min-height: 2.6rem;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+
+.command-palette-option[aria-selected="true"] {
+  background: color-mix(in srgb, var(--link) 13%, var(--surface));
+  border-color: color-mix(in srgb, var(--link) 55%, var(--border));
+}
+
+.command-palette-option kbd {
+  color: var(--quiet);
+  font-size: 0.7rem;
+}
+
 .quiet {
   color: var(--quiet);
 }
@@ -276,6 +500,11 @@ h2 {
   font-size: 1.375rem;
   font-weight: 650;
   letter-spacing: -0.02em;
+}
+
+.command-palette-head h2,
+.notification-centre-head h2 {
+  font-size: 1rem;
 }
 
 .heading-note {
@@ -1393,6 +1622,29 @@ button.action.secondary {
 
   .top-controls {
     flex: 1 1 100%;
+  }
+
+  .notification-centre {
+    position: fixed;
+    inset: 4.75rem 0.75rem auto;
+    width: auto;
+    max-height: calc(100dvh - 5.5rem);
+  }
+
+  .notification-list {
+    max-height: calc(100dvh - 12.5rem);
+  }
+
+  .command-palette-backdrop {
+    padding: 0.75rem;
+  }
+
+  .command-palette {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .command-palette-results {
+    max-height: calc(100dvh - 12rem);
   }
 
   /* The badges move under the text, where a phone has the room. */

@@ -2,10 +2,15 @@
 import { afterEach, expect, test, vi } from "vitest";
 import type { Notice } from "./model.ts";
 import {
+  addNotificationHistory,
+  clearNotificationHistory,
   createNotifier,
   DEFAULT_SETTINGS,
+  MAX_NOTIFICATION_HISTORY,
   MAX_SEEN,
+  NOTIFICATION_HISTORY_KEY,
   NOTIFICATIONS_KEY,
+  readNotificationHistory,
   readSettings,
   type Show,
   writeSettings,
@@ -118,4 +123,58 @@ test("settings default to every kind, and keep what was chosen in this browser",
   expect(readSettings()).toEqual({ ...DEFAULT_SETTINGS, waiting: false });
   localStorage.setItem(NOTIFICATIONS_KEY, "{oops");
   expect(readSettings()).toEqual(DEFAULT_SETTINGS);
+});
+
+test("notification history keeps newest notices first and refreshes a repeated key", () => {
+  const checks: Notice = {
+    type: "checks",
+    key: "checks:octo/app#8",
+    repo: "octo/app",
+    headline: "Checks failed for octo/app#8",
+    url: "https://github.com/octo/app/pull/8",
+  };
+  expect(addNotificationHistory(merged)).toEqual([merged]);
+  expect(addNotificationHistory(checks)).toEqual([checks, merged]);
+  const updated = { ...merged, headline: "Merged octo/app#7 after review" };
+  expect(addNotificationHistory(updated)).toEqual([updated, checks]);
+  expect(readNotificationHistory()).toEqual([updated, checks]);
+});
+
+test("notification history is bounded and discards malformed, repeated, and extra fields", () => {
+  const kept = [
+    { ...merged, extra: "not kept" },
+    { ...merged, headline: "older duplicate" },
+    { type: "unknown", key: "bad-type", repo: "octo/app", headline: "Bad" },
+    { type: "checks", key: "bad-url", repo: "octo/app", headline: "Bad", url: 7 },
+    null,
+    ...Array.from({ length: MAX_NOTIFICATION_HISTORY + 4 }, (_, index) => ({
+      ...merged,
+      key: `notice-${index}`,
+    })),
+  ];
+  localStorage.setItem(NOTIFICATION_HISTORY_KEY, JSON.stringify(kept));
+
+  const history = readNotificationHistory();
+  expect(history).toHaveLength(MAX_NOTIFICATION_HISTORY);
+  expect(history[0]).toEqual(merged);
+  expect(history.some((notice) => notice.key === "bad-type" || notice.key === "bad-url")).toBe(false);
+  expect(Object.keys(history[0] ?? {})).toEqual(["type", "key", "repo", "headline", "url"]);
+});
+
+test("notification history tolerates unavailable or corrupt storage and can be cleared", () => {
+  localStorage.setItem(NOTIFICATION_HISTORY_KEY, "{oops");
+  expect(readNotificationHistory()).toEqual([]);
+  localStorage.setItem(NOTIFICATION_HISTORY_KEY, JSON.stringify({ notice: merged }));
+  expect(readNotificationHistory()).toEqual([]);
+
+  addNotificationHistory(merged);
+  clearNotificationHistory();
+  expect(readNotificationHistory()).toEqual([]);
+
+  const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw new Error("Storage disabled");
+  });
+  expect(readNotificationHistory()).toEqual([]);
+  expect(addNotificationHistory(merged)).toEqual([merged]);
+  get.mockRestore();
 });

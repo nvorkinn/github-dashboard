@@ -10,6 +10,7 @@ import { stubBackend, tokenAnswer } from "./testing.ts";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  localStorage.clear();
   history.replaceState(null, "", "/");
 });
 
@@ -236,6 +237,50 @@ test("a notice from the dashboard goes to the notifier while signed in", async (
   };
   dashboard.notice(notice);
   expect(notifier.notify).toHaveBeenCalledWith(notice);
+});
+
+test("keeps streamed notices in the in-app notification centre", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard(ready());
+  const notifier = { notify: vi.fn(), test: vi.fn() };
+  render(<App auth={createAuth()} dashboard={dashboard} notifier={notifier} />);
+  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
+  const notice = {
+    type: "waiting" as const,
+    key: "waiting:octo/app:1",
+    repo: "octo/app",
+    headline: "Production waits for approval",
+    url: "https://github.com/octo/app/actions/runs/1",
+  };
+
+  dashboard.notice(notice);
+  const trigger = await screen.findByRole("button", { name: "Notifications, 1 unread" });
+  fireEvent.click(trigger);
+  expect(screen.getByRole("dialog", { name: /Notifications/ })).toBeTruthy();
+  expect(screen.getByRole("link", { name: notice.headline }).getAttribute("href")).toBe(notice.url);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Notifications, 0 unread" })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
+  expect(screen.getByText("No notifications yet.")).toBeTruthy();
+});
+
+test("opens the command palette by keyboard and can enter a repository workspace", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard(ready({ projects: [project()] }));
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  await screen.findByRole("button", { name: "Refresh" });
+  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
+
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+  const palette = screen.getByRole("dialog", { name: "Command palette" });
+  expect(palette).toBeTruthy();
+  fireEvent.input(screen.getByRole("searchbox", { name: "Search commands" }), {
+    target: { value: "weather-station" },
+  });
+  fireEvent.click(screen.getByRole("option", { name: "Open weather-station" }));
+
+  expect(await screen.findByRole("heading", { name: "weather-station" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Workspace" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
 });
 
 test("the header's switch shows the projects as lanes, and back", async () => {
