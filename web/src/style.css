@@ -344,12 +344,24 @@ h2 {
   border-color: color-mix(in srgb, var(--waiting) 60%, var(--border));
 }
 
-/* The pull request board: three columns where they fit, each under a heading underlined in its colour. */
+/* The pull request board: its three columns side by side where all three fit, each under a heading underlined in
+   its colour; where they don't, one under the other, never two and one. */
+.pulls {
+  container: pulls / inline-size;
+}
+
 .board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem 1rem;
   align-items: start;
+}
+
+/* Three columns of 17rem and the two gaps between them. */
+@container pulls (min-width: 53rem) {
+  .board {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .board-column {
