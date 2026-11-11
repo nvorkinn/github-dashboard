@@ -69,6 +69,7 @@ test("without actions it only shows, and lets a project be hidden", () => {
     />,
   );
   expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+    "Details of #1 in weather-station",
     "Hide weather-station",
   ]);
 });

@@ -115,7 +115,7 @@ test("the page on the demo can act on its pull requests, and shows one action fa
   await waitFor(() => expect(row("Rework the elevation profile").queryByText("Behind base")).toBeNull(), {
     timeout: 3000,
   });
-  expect(row("Rework the elevation profile").getByText("Running", { selector: "summary .chip" })).toBeTruthy();
+  expect(row("Rework the elevation profile").getByText("Running", { selector: ".checks .chip" })).toBeTruthy();
   unmount();
 });
 
