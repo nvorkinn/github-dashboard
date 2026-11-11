@@ -116,26 +116,26 @@ export function ProjectActions({ project, actions }: { project: Project; actions
     <>
       <RunAction<string>
         label="Release"
-        name={`Release ${project.name}`}
-        title="Publish the next minor release of the default branch, with notes GitHub writes"
-        busy="Releasing…"
+        name={`Release ${project.repo}`}
+        title={`Publish the next minor release of ${project.repo}'s default branch, with notes GitHub writes`}
+        busy={`Releasing ${project.name}…`}
         prepare={() => actions.nextRelease(project)}
-        ask={(tag) => `Release ${tag}?`}
+        ask={(tag) => `Release ${project.repo} as ${tag} from its default branch?`}
         run={async (tag) => {
           await actions.release(project, tag);
-          return `Released ${tag}.`;
+          return `Released ${project.repo} as ${tag}.`;
         }}
       />
       {promote && (
         <RunAction
           label={`Promote ${promote}`}
-          name={`Promote ${project.name} ${promote}`}
-          title={`Deploy ${promote} to production with the Promote workflow, once it is approved there`}
-          busy="Starting…"
-          ask={() => `Promote ${promote}?`}
+          name={`Promote ${project.repo} ${promote} to production`}
+          title={`Deploy ${project.repo} ${promote} to production with Promote workflow ${project.promoteWorkflow}, once it is approved there`}
+          busy={`Promoting ${project.name}…`}
+          ask={() => `Promote ${project.repo} ${promote} to production?`}
           run={async () => {
             await actions.promote(project, promote);
-            return `Promote of ${promote} started.`;
+            return `Promotion of ${project.repo} ${promote} to production started.`;
           }}
         />
       )}

@@ -5,6 +5,7 @@ import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
 import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
+import { Icon, type IconName } from "./components/Icon.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { useLaneColumns, useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import { type Dashboard, type DashboardState, summarize } from "./model.ts";
@@ -129,11 +130,16 @@ function SignedIn({
   const commandCentre = view === "workspace" && page === "dashboard";
   return (
     <>
+      {commandCentre && (
+        <a class="skip-link" href="#workspace-content">
+          Skip to dashboard content
+        </a>
+      )}
       <header class={commandCentre ? "top command-top" : "top"}>
         <div class={commandCentre ? "command-brand" : undefined}>
           {commandCentre && (
-            <span class="command-mark" aria-hidden="true">
-              ⌘
+            <span class="command-mark">
+              <Icon name="command" size={22} />
             </span>
           )}
           <h1>
@@ -199,18 +205,18 @@ function CommandSummary({ state }: { state: DashboardState }) {
       (run) =>
         run.state === "failed" || run.state === "cancelled" || run.state === "waiting" || run.approvals.length > 0,
     ).length;
-  const metrics = [
-    { label: "Open PRs", value: state.data.pulls.length, icon: "⌁", tone: "done" },
-    { label: "Running", value: active, icon: "▶", tone: "running" },
-    { label: "Ready PRs", value: ready, icon: "✓", tone: "done" },
-    { label: "Attention", value: attention, icon: "!", tone: attention ? "waiting" : "done" },
+  const metrics: { label: string; value: number; icon: IconName; tone: string }[] = [
+    { label: "Open PRs", value: state.data.pulls.length, icon: "pull-request", tone: "done" },
+    { label: "Running", value: active, icon: "workflow", tone: "running" },
+    { label: "Ready PRs", value: ready, icon: "check", tone: "done" },
+    { label: "Attention", value: attention, icon: "attention", tone: attention ? "waiting" : "done" },
   ];
   return (
     <section class="command-summary" aria-label="Global dashboard summary">
       {metrics.map((metric) => (
         <div key={metric.label} class={`command-stat command-stat-${metric.tone}`}>
           <span class="command-stat-icon" aria-hidden="true">
-            {metric.icon}
+            <Icon name={metric.icon} size={17} />
           </span>
           <strong>{metric.value}</strong>
           <span>{metric.label}</span>

@@ -21,22 +21,48 @@ export type JobsProps = {
  */
 export function Jobs(props: JobsProps) {
   const { run, now, rerunOf, onNotice } = props;
-  if (run.graph && (run.graph.nodes.length > 0 || run.graph.unplaced.length > 0)) {
-    return <Graph {...props} graph={run.graph} />;
-  }
-  if (run.jobs.length === 0) {
-    return null;
-  }
+  const [selectedId, setSelectedId] = useState<number | undefined>(undefined);
+  const selected = run.jobs.find((job) => job.id === selectedId);
+  const select = (job: Job) => setSelectedId((current) => (current === job.id ? undefined : job.id));
+  const content = (() => {
+    if (run.graph && (run.graph.nodes.length > 0 || run.graph.unplaced.length > 0)) {
+      return <Graph {...props} graph={run.graph} selectedId={selectedId} onSelect={select} />;
+    }
+    if (run.jobs.length === 0) {
+      return null;
+    }
+    return (
+      <ul class="jobs" aria-label="Jobs">
+        {run.jobs.map((job) => (
+          <JobChip key={job.id} job={job} now={now} run={run} selected={selectedId === job.id} onSelect={select} />
+        ))}
+      </ul>
+    );
+  })();
   return (
-    <ul class="jobs" aria-label="Jobs">
-      {run.jobs.map((job) => (
-        <JobChip key={job.id} job={job} now={now} run={run} rerun={rerunOf(job)} onNotice={onNotice} />
-      ))}
-    </ul>
+    <>
+      {content}
+      {selected && (
+        <JobDetails
+          job={selected}
+          run={run}
+          now={now}
+          rerun={rerunOf(selected)}
+          onNotice={onNotice}
+          onClose={() => setSelectedId(undefined)}
+        />
+      )}
+    </>
   );
 }
 
-function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobGraph }) {
+function Graph({
+  run,
+  now,
+  graph,
+  selectedId,
+  onSelect,
+}: JobsProps & { graph: JobGraph; selectedId: number | undefined; onSelect: (job: Job) => void }) {
   const layout = layoutGraph(graph);
   const { stages, edges } = layout;
   const outer = useRef<HTMLDivElement>(null);
@@ -119,8 +145,8 @@ function Graph({ run, now, rerunOf, onNotice, graph }: JobsProps & { graph: JobG
                     run={run}
                     now={now}
                     finished={finished}
-                    rerunOf={rerunOf}
-                    onNotice={onNotice}
+                    selectedId={selectedId}
+                    onSelect={onSelect}
                   />
                 ))}
               </ul>
@@ -161,20 +187,27 @@ function GraphCard({
   run,
   now,
   finished,
-  rerunOf,
-  onNotice,
+  selectedId,
+  onSelect,
 }: {
   card: Card;
   run: ReleaseRun;
   now: number;
   finished: boolean;
-  rerunOf: JobsProps["rerunOf"];
-  onNotice: JobsProps["onNotice"];
+  selectedId: number | undefined;
+  onSelect: (job: Job) => void;
 }) {
   switch (card.kind) {
     case "job":
       return (
-        <JobChip job={card.job} now={now} run={run} rerun={rerunOf(card.job)} onNotice={onNotice} card={card.key} />
+        <JobChip
+          job={card.job}
+          now={now}
+          run={run}
+          selected={selectedId === card.job.id}
+          onSelect={onSelect}
+          card={card.key}
+        />
       );
     case "pending": {
       // A job the run never got to, once it has finished.
@@ -207,8 +240,8 @@ function GraphCard({
                 job={job}
                 now={now}
                 run={run}
-                rerun={rerunOf(job)}
-                onNotice={onNotice}
+                selected={selectedId === job.id}
+                onSelect={onSelect}
                 compact
                 matrix={card.name}
               />
@@ -254,8 +287,8 @@ function JobChip({
   job,
   now,
   run,
-  rerun,
-  onNotice,
+  selected,
+  onSelect,
   card,
   compact = false,
   matrix,
@@ -263,9 +296,8 @@ function JobChip({
   job: Job;
   now: number;
   run: ReleaseRun;
-  /** Set where the job can be re-run. */
-  rerun: RunActions | undefined;
-  onNotice: (notice: Notice | undefined) => void;
+  selected: boolean;
+  onSelect: (job: Job) => void;
   /** Its key on the graph, for the lines to find it. */
   card?: string;
   /** In a matrix's grid: one line, even while it runs. */
@@ -278,41 +310,105 @@ function JobChip({
   const live = isLive(job.state);
   const look = live ? " job-live" : isTick(job.state) ? " job-tick" : "";
   const text = <JobName name={job.name} matrix={matrix} />;
-  const name = job.url ? <ExternalLink href={job.url}>{text}</ExternalLink> : <span>{text}</span>;
+  const detailsId = jobDetailsId(run, job);
   return (
     <li class={`job tone-${tone}${look}`} title={labelOf(job.state)} {...(card ? { "data-card": card } : {})}>
-      <ToneIcon tone={tone} />
-      {live && !compact ? (
-        // The step to look at says what it is doing in words, not only in its colour.
-        <span class="job-text">
-          {name}
-          <span class="job-state">
-            <span class="visually-hidden">: </span>
-            {labelOf(job.state)}
-            {time && ` · ${time}`}
+      <button
+        type="button"
+        class="job-inspect"
+        aria-label={`Inspect ${job.name}`}
+        aria-expanded={selected}
+        aria-controls={detailsId}
+        onClick={() => onSelect(job)}
+      >
+        <ToneIcon tone={tone} />
+        {live && !compact ? (
+          // The step to look at says what it is doing in words, not only in its colour.
+          <span class="job-text">
+            <span>{text}</span>
+            <span class="job-state">
+              <span class="visually-hidden">: </span>
+              {labelOf(job.state)}
+              {time && ` · ${time}`}
+            </span>
           </span>
-        </span>
-      ) : (
-        <>
-          {name}
-          {/* The chip's colour and shape, in words, for who can't see them. */}
-          <span class="visually-hidden">: {labelOf(job.state)}</span>
-          {time && <span class="job-time">{time}</span>}
-        </>
-      )}
-      {rerun && (
-        <RunAction
-          label="Re-run"
-          name={`Re-run ${job.name}`}
-          title="Re-run this job, and the jobs that need it"
-          busy="Starting…"
-          onNotice={onNotice}
-          run={async () => {
-            await rerun.rerunJob(run, job);
-            return `Re-run of ${job.name} started.`;
-          }}
-        />
-      )}
+        ) : (
+          <>
+            <span>{text}</span>
+            {/* The chip's colour and shape, in words, for who can't see them. */}
+            <span class="visually-hidden">: {labelOf(job.state)}</span>
+            {time && <span class="job-time">{time}</span>}
+          </>
+        )}
+      </button>
     </li>
+  );
+}
+
+function jobDetailsId(run: ReleaseRun, job: Job): string {
+  return `job-details-${run.repo.replace(/[^a-z0-9]+/gi, "-")}-${run.id}-${job.id}`;
+}
+
+function JobDetails({
+  job,
+  run,
+  now,
+  rerun,
+  onNotice,
+  onClose,
+}: {
+  job: Job;
+  run: ReleaseRun;
+  now: number;
+  rerun: RunActions | undefined;
+  onNotice: (notice: Notice | undefined) => void;
+  onClose: () => void;
+}) {
+  const time = jobTime(job, now);
+  return (
+    <section id={jobDetailsId(run, job)} class="job-inspector" aria-label={`Job details: ${job.name}`}>
+      <div class="job-inspector-head">
+        <h3>{job.name}</h3>
+        <button type="button" class="secondary" aria-label={`Close details for ${job.name}`} onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <dl class="job-inspector-facts">
+        <div>
+          <dt>Status</dt>
+          <dd>{labelOf(job.state)}</dd>
+        </div>
+        {job.startedAt && (
+          <div>
+            <dt>Started</dt>
+            <dd>
+              <time dateTime={job.startedAt}>{new Date(job.startedAt).toLocaleString()}</time>
+            </dd>
+          </div>
+        )}
+        {time && (
+          <div>
+            <dt>Duration</dt>
+            <dd>{time}</dd>
+          </div>
+        )}
+      </dl>
+      <div class="job-inspector-actions">
+        {job.url && <ExternalLink href={job.url}>Open logs for {job.name} on GitHub</ExternalLink>}
+        {rerun && (
+          <RunAction
+            label="Re-run"
+            name={`Re-run ${job.name}`}
+            title="Re-run this job, and the jobs that need it"
+            busy="Starting…"
+            onNotice={onNotice}
+            run={async () => {
+              await rerun.rerunJob(run, job);
+              return `Re-run of ${job.name} started.`;
+            }}
+          />
+        )}
+      </div>
+    </section>
   );
 }

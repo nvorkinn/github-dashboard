@@ -919,6 +919,70 @@ button.action-confirm:hover:not(:disabled) {
   border-radius: 6px;
 }
 
+.job-inspect {
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+}
+
+.job-inspect:hover {
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+}
+
+.job-inspect:focus-visible {
+  outline: 2px solid var(--tone);
+  outline-offset: 3px;
+}
+
+.job-inspector {
+  margin-top: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.job-inspector-head,
+.job-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.job-inspector-head h3 {
+  margin: 0;
+}
+
+.job-inspector-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.25rem;
+  margin-block: 0.7rem;
+}
+
+.job-inspector-facts div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.job-inspector-facts dt {
+  color: var(--quiet);
+}
+
+.job-inspector-facts dd {
+  margin: 0;
+}
+
 .job a,
 .job > span {
   color: var(--text);

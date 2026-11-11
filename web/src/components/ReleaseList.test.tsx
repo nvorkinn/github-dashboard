@@ -117,7 +117,10 @@ test("draws a run under way with its jobs", () => {
     "job tone-skipped job-tick",
     "job tone-failed",
   ]);
-  expect(within(card).getByRole("link", { name: "build" }).getAttribute("href")).toBe("https://x/1");
+  fireEvent.click(within(card).getByRole("button", { name: "Inspect build" }));
+  expect(within(card).getByRole("link", { name: "Open logs for build on GitHub" }).getAttribute("href")).toBe(
+    "https://x/1",
+  );
 });
 
 test("puts runs still going first, then the newest", () => {
@@ -184,15 +187,15 @@ test("a finished run that failed offers to re-run its failed jobs, and each fail
   const actions = fakeRunActions();
   actions.rerunJob.mockRejectedValueOnce(new Error("Only a failed or cancelled job can be re-run."));
   withActions([failed], actions);
-  expect(
-    screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent),
-  ).toEqual(["Re-run sign", "Re-run notify", "Re-run failed jobs"]);
+  expect(screen.getByRole("button", { name: "Inspect sign" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Inspect notify" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Re-run sign" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Re-run failed jobs" }));
   expect(actions.rerunFailed).toHaveBeenCalledWith(failed);
   expect((await screen.findByRole("status")).textContent).toBe("Re-run of the failed jobs started.");
 
-  // A job's chip has no room for what came of it: that goes under the jobs.
+  fireEvent.click(screen.getByRole("button", { name: "Inspect sign" }));
   fireEvent.click(screen.getByRole("button", { name: "Re-run sign" }));
   expect(actions.rerunJob).toHaveBeenCalledWith(failed, failed.jobs[1]);
   const alert = await screen.findByRole("alert");
@@ -205,7 +208,7 @@ test("a run still going, or one that passed, offers no re-run", () => {
     run({ id: 1, state: "running", finishedAt: undefined, jobs: [job({ id: 1, state: "failed" })] }),
     run({ id: 2, state: "passed", jobs: [job({ id: 2, state: "passed" })] }),
   ]);
-  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Re-run/ })).toBeNull();
 });
 
 test("without actions the cards only show", () => {
