@@ -5,7 +5,7 @@ export type Call = { method: string; url: string; headers: Headers };
 
 /**
  * Replaces `fetch` with a fake relay and GitHub for a test. `answer` gets each request, with the relay's addresses
- * shortened to their path (`/api/auth/token`), and what it returns is the response; throwing stands for a network
+ * shortened to their path and query (`/api/auth/token`), and what it returns is the response; throwing stands for a network
  * failure. Returns the calls made so far.
  */
 export function stubBackend(answer: (call: Call) => Response): Call[] {
@@ -14,7 +14,7 @@ export function stubBackend(answer: (call: Call) => Response): Call[] {
     const address = new URL(input instanceof Request ? input.url : input, location.href);
     const call = {
       method: init?.method ?? "GET",
-      url: address.origin === location.origin ? address.pathname : address.href,
+      url: address.origin === location.origin ? address.pathname + address.search : address.href,
       headers: new Headers(init?.headers),
     };
     calls.push(call);

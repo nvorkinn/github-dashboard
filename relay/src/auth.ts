@@ -6,9 +6,13 @@ import { codeChallenge, open, randomToken, sameString, seal } from "./crypto.ts"
 import type { Grant, GrantResult } from "./github_oauth.ts";
 import { authorizeUrl, errorCode, exchangeCode, refreshGrant } from "./github_oauth.ts";
 
-// Both cookies go only to the sign-in endpoints, never with the page or its files.
+// The cookies go only to the sign-in endpoints, never with the page or its files.
 const COOKIE_PATH = "/api/auth";
 const REFRESH_COOKIE = "refresh";
+const ACCESS_COOKIE = "access";
+// An access token with less than this left is refreshed rather than handed out again. More than the page's own
+// margin (it asks five minutes before its token runs out), so that a page asking for that reason gets a new one.
+export const FRESH_ENOUGH_MS = 10 * 60_000;
 const STATE_COOKIE = "signin_state";
 const STATE_SECONDS = 600;
 
@@ -17,8 +21,10 @@ const STATE_SECONDS = 600;
  * GitHub App's client secret and GitHub's token endpoint doesn't allow cross-origin calls: trading the sign-in code
  * for tokens, and refreshing them.
  *
- * The access token goes to the page and is never kept here. The refresh token lives in an encrypted cookie that
- * scripts can't read, so the relay stores nothing. There is no list of allowed users: the reverse proxy decides who
+ * The tokens are never kept here: both live in encrypted cookies that scripts can't read, so the relay stores
+ * nothing. The refresh token's cookie is the sign-in. The access token's is there so that a page that loads again
+ * gets the token it had, without a call to GitHub, for as long as that token lasts; the page itself keeps it only
+ * in memory. There is no list of allowed users: the reverse proxy decides who
  * reaches the relay at all.
  */
 export function authRoutes(options: { config: AuthConfig | undefined; fetch: typeof fetch }) {
@@ -48,11 +54,34 @@ export function authRoutes(options: { config: AuthConfig | undefined; fetch: typ
   // Lax, not Strict: the callback is reached by a redirect from github.com and needs this cookie.
   const stateCookie = { path: COOKIE_PATH, httpOnly: true, secure: config.secureCookies, sameSite: "Lax" } as const;
 
-  const keepRefreshToken = (c: Context, grant: Grant) => {
+  const keepTokens = (c: Context, grant: Grant) => {
     setCookie(c, REFRESH_COOKIE, seal(config.cookieKey, REFRESH_COOKIE, grant.refreshToken), {
       ...refreshCookie,
       maxAge: grant.refreshTokenSeconds,
     });
+    const access = JSON.stringify({ token: grant.accessToken, expiresAt: grant.expiresAt });
+    setCookie(c, ACCESS_COOKIE, seal(config.cookieKey, ACCESS_COOKIE, access), {
+      ...refreshCookie,
+      maxAge: Math.max(Math.floor((grant.expiresAt - Date.now()) / 1000), 0),
+    });
+  };
+
+  /** The access token in the request's cookie, if it is ours and has a while left. */
+  const keptAccessToken = (c: Context): { token: string; expiresAt: number } | undefined => {
+    const cookie = getCookie(c, ACCESS_COOKIE);
+    const opened = cookie && open(config.cookieKey, ACCESS_COOKIE, cookie);
+    if (!opened) {
+      return undefined;
+    }
+    try {
+      const kept: unknown = JSON.parse(opened);
+      const { token, expiresAt } = kept as { token?: unknown; expiresAt?: unknown };
+      return typeof token === "string" && typeof expiresAt === "number" && expiresAt - Date.now() > FRESH_ENOUGH_MS
+        ? { token, expiresAt }
+        : undefined;
+    } catch {
+      return undefined;
+    }
   };
 
   routes.use("/*", async (c, next) => {
@@ -100,14 +129,15 @@ export function authRoutes(options: { config: AuthConfig | undefined; fetch: typ
     if (!result.ok) {
       return fail(`code exchange ${result.kind}: ${result.reason}`);
     }
-    // Only the refresh token is kept, in its cookie. The page asks /token for an access token once it has loaded.
-    keepRefreshToken(c, result.grant);
+    // Both tokens go into their cookies. The page asks /token for the access token once it has loaded.
+    keepTokens(c, result.grant);
     return c.redirect("/");
   });
 
   routes.post("/token", async (c) => {
     const signedOut = () => {
       deleteCookie(c, REFRESH_COOKIE, refreshCookie);
+      deleteCookie(c, ACCESS_COOKIE, refreshCookie);
       return c.json({ error: "signed_out" }, 401);
     };
 
@@ -115,6 +145,13 @@ export function authRoutes(options: { config: AuthConfig | undefined; fetch: typ
     const refreshToken = cookie && open(config.cookieKey, REFRESH_COOKIE, cookie);
     if (!cookie || !refreshToken) {
       return signedOut();
+    }
+
+    // The token this browser was given last, while it has a while left: no call to GitHub. A page that found GitHub
+    // no longer takes that token asks for a fresh one, and gets what GitHub says.
+    const kept = c.req.query("fresh") === undefined ? keptAccessToken(c) : undefined;
+    if (kept) {
+      return c.json({ access_token: kept.token, expires_at: kept.expiresAt });
     }
 
     let pending = refreshing.get(cookie);
@@ -125,7 +162,7 @@ export function authRoutes(options: { config: AuthConfig | undefined; fetch: typ
     const result = await pending;
 
     if (result.ok) {
-      keepRefreshToken(c, result.grant);
+      keepTokens(c, result.grant);
       return c.json({ access_token: result.grant.accessToken, expires_at: result.grant.expiresAt });
     }
     if (result.kind === "refused" && result.reason === "bad_refresh_token") {
@@ -140,6 +177,7 @@ export function authRoutes(options: { config: AuthConfig | undefined; fetch: typ
 
   routes.post("/logout", (c) => {
     deleteCookie(c, REFRESH_COOKIE, refreshCookie);
+    deleteCookie(c, ACCESS_COOKIE, refreshCookie);
     return c.body(null, 204);
   });
 
