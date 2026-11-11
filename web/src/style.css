@@ -1332,6 +1332,33 @@ button.action-confirm:hover:not(:disabled) {
   stroke-width: 1.5;
 }
 
+/* A line to a later stage runs behind the cards of the stages between, so a card on the graph is filled: its tint
+   over `--job-bg`, and nothing of the line shows through it. */
+.graph {
+  --job-bg: var(--panel);
+}
+
+.graph .graph-stage .job {
+  background: color-mix(in srgb, var(--tone) 9%, var(--job-bg));
+}
+
+.graph .graph-stage .job.job-tick {
+  background: var(--job-bg);
+}
+
+.graph .graph-stage .job.job-live {
+  background: color-mix(in srgb, var(--tone) 14%, var(--job-bg));
+}
+
+.graph .graph-stage .job-matrix {
+  background: color-mix(in srgb, var(--tone) 6%, var(--job-bg));
+}
+
+/* Inside a matrix's box, which is filled already. */
+.graph .graph-stage .job-matrix .job.job-tick {
+  background: transparent;
+}
+
 .graph-stages {
   position: relative;
   display: flex;

@@ -881,6 +881,8 @@ body:has(.workspace) {
 }
 
 .workspace .graph {
+  --job-bg: #0c1623;
+
   margin: 1rem -0.85rem 0.65rem;
   padding: 1.4rem 0.85rem;
   background-color: #09111c;
