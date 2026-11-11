@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { componentTone, type ServiceTone, type StatusIncident, summaryTone } from "../../../shared/status.ts";
 import { type ServiceStatusState, serviceStatus } from "../service_status.ts";
 import { ExternalLink } from "./ExternalLink.tsx";
-import { Icon } from "./Icon.tsx";
 
 const LABELS: Record<ServiceTone, string> = {
   operational: "Operational",
@@ -243,33 +242,5 @@ function Incident({ item }: { item: StatusIncident }) {
         </details>
       )}
     </article>
-  );
-}
-
-export function ServiceStatusSummary({ state, onOpen }: { state: ServiceStatusState; onOpen: () => void }) {
-  const { tone, label, suffix } = presentation(state);
-  return (
-    <section class="service-summary" aria-label="GitHub service summary">
-      <span class={`service-label service-${state.stale ? "unknown" : tone}`}>
-        <Icon name={tone === "operational" ? "check" : "attention"} />{" "}
-        <strong>
-          GitHub: {label}
-          {suffix}
-          {state.stale && state.data ? " · Stale" : ""}
-        </strong>
-      </span>
-      <span class="quiet">
-        {state.data
-          ? state.data.incidents.length
-            ? `${state.data.incidents.length} active incident${state.data.incidents.length === 1 ? "" : "s"}`
-            : state.stale
-              ? "Last known status"
-              : "No active incidents"
-          : "Public service status"}
-      </span>
-      <button class="secondary" type="button" onClick={onOpen}>
-        View status details →
-      </button>
-    </section>
   );
 }

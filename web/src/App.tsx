@@ -8,7 +8,7 @@ import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Icon, type IconName } from "./components/Icon.tsx";
 import { NotificationCentre } from "./components/NotificationCentre.tsx";
-import { ServiceStatus, ServiceStatusSummary, useServiceStatus } from "./components/ServiceStatus.tsx";
+import { ServiceStatus, useServiceStatus } from "./components/ServiceStatus.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { useLaneColumns, useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import { navigateWorkspace, type WorkspaceDestination } from "./components/Workspace.tsx";
@@ -320,7 +320,6 @@ function SignedIn({
         </div>
       </header>
       <main class={commandCentre ? "command-main" : undefined}>
-        {page === "dashboard" && <ServiceStatusSummary state={status} onOpen={openStatus} />}
         {page === "settings" ? (
           <Settings notifier={notifier} laneColumns={laneColumns} onLaneColumns={setLaneColumns} />
         ) : (

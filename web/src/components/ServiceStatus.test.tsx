@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { parseServiceSummary } from "../../../shared/status.ts";
 import type { ServiceStatusState } from "../service_status.ts";
 import { incidentFixture, summaryFixture } from "../service_status_fixtures.ts";
-import { ServiceStatus, ServiceStatusSummary } from "./ServiceStatus.tsx";
+import { ServiceStatus } from "./ServiceStatus.tsx";
 
 afterEach(cleanup);
 function ready(): ServiceStatusState {
@@ -68,14 +68,12 @@ test("outside pointer and tabbing away dismiss the popover", () => {
   expect(onClose).toHaveBeenCalledTimes(2);
   outside.remove();
 });
-test("summary card opens details and exposes maintenance in text", () => {
+test("status pill and details expose maintenance in text", () => {
   const fixture = summaryFixture();
   fixture.scheduled_maintenances = [
     { ...incidentFixture(), status: "in_progress", scheduled_for: "2026-11-11T12:00:00Z" },
   ];
-  const onOpen = vi.fn();
-  render(<ServiceStatusSummary state={{ ...ready(), data: parseServiceSummary(fixture) }} onOpen={onOpen} />);
-  expect(screen.getByText("GitHub: Maintenance")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "View status details →" }));
-  expect(onOpen).toHaveBeenCalledOnce();
+  show({ ...ready(), data: parseServiceSummary(fixture) });
+  expect(screen.getByRole("button", { name: /GitHub: Maintenance/ })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Scheduled maintenance" })).toBeTruthy();
 });
