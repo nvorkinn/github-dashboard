@@ -5,12 +5,28 @@ import { useActions } from "./actions.tsx";
 import { Jobs } from "./Jobs.tsx";
 import { shortName } from "./PullList.tsx";
 import { type Notice, RunAction } from "./RunAction.tsx";
-import { Legend, StateChip } from "./state.tsx";
-import { duration } from "./time.ts";
+import { StateChip } from "./state.tsx";
+import { countdown, duration } from "./time.ts";
 
 const ACTIVE: CheckState[] = ["running", "waiting", "queued"];
 // What a job or run ends in when GitHub's re-run of the failed jobs runs it again.
 const RERUNNABLE: CheckState[] = ["failed", "cancelled"];
+
+/** How long a run that finished stays on the page, folded, before it leaves. */
+export const KEEP_FINISHED_MS = 5 * 60_000;
+
+/** When a run ended, for one that is over; undefined while it goes on. */
+function endOf(run: ReleaseRun): number | undefined {
+  return run.finishedAt !== undefined && !ACTIVE.includes(run.state) ? Date.parse(run.finishedAt) : undefined;
+}
+
+/** The runs the page shows: those still going, and for five minutes those that just finished. */
+export function shownRuns(runs: ReleaseRun[], now: number): ReleaseRun[] {
+  return runs.filter((run) => {
+    const end = endOf(run);
+    return end === undefined || now - end < KEEP_FINISHED_MS;
+  });
+}
 
 /** Runs still going first, then the newest. */
 export function sortRuns(runs: ReleaseRun[]): ReleaseRun[] {
@@ -20,21 +36,24 @@ export function sortRuns(runs: ReleaseRun[]): ReleaseRun[] {
   );
 }
 
-/** The release workflows' runs, one card per row: a run gets the panel's whole width, never half of it. */
+/**
+ * The release workflows' runs that are going, one card per row, and under them the ones that just finished, each
+ * folded to a few lines until it leaves.
+ */
 export function ReleaseList({ runs, now }: { runs: ReleaseRun[]; now: number }) {
+  const shown = sortRuns(shownRuns(runs, now));
   return (
     <section class="panel" aria-labelledby="releases-heading">
       <div class="panel-heading">
         <h2 id="releases-heading">
-          Release workflows <span class="count">{runs.length}</span>
+          Release workflows <span class="count">{shown.length}</span>
         </h2>
       </div>
-      <Legend />
-      {runs.length === 0 ? (
-        <p class="empty">No release runs</p>
+      {shown.length === 0 ? (
+        <p class="empty">Nothing running</p>
       ) : (
         <ul class="rows">
-          {sortRuns(runs).map((run) => (
+          {shown.map((run) => (
             <ReleaseCard key={`${run.repo}:${run.id}`} run={run} now={now} />
           ))}
         </ul>
@@ -43,17 +62,26 @@ export function ReleaseList({ runs, now }: { runs: ReleaseRun[]; now: number }) 
   );
 }
 
-function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
+export function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
   const actions = useActions()?.runs;
   // What a job's re-run came to: said under the jobs, as a chip has no room for it.
   const [jobNotice, setJobNotice] = useState<Notice | undefined>(undefined);
   const started = Date.parse(run.startedAt);
   // GitHub re-runs jobs only of a run that has finished.
-  const finished = run.finishedAt !== undefined && !ACTIVE.includes(run.state);
+  const end = endOf(run);
+  const finished = end !== undefined;
   const rerunFailed = finished && RERUNNABLE.includes(run.state) ? actions : undefined;
   const waiting = run.finishedAt === undefined ? run.approvals : [];
+  const jobs = (
+    <Jobs
+      run={run}
+      now={now}
+      rerunOf={(job) => (finished && RERUNNABLE.includes(job.state) ? actions : undefined)}
+      onNotice={setJobNotice}
+    />
+  );
   return (
-    <li class="release">
+    <li class={finished ? "release release-folded" : "release"}>
       <div class="release-top">
         <span class="repo-label" title={run.repo}>
           {shortName(run.repo)} <span aria-hidden="true">·</span> {run.workflow}
@@ -63,23 +91,29 @@ function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
       <a class="release-title" href={run.url}>
         {run.title}
       </a>
-      <p class="meta">
-        {run.actor && <span>started by {run.actor}</span>}
-        <span>
-          <Ago at={run.startedAt} now={now} />
-        </span>
-        <span>
-          {run.finishedAt
-            ? `took ${duration(Date.parse(run.finishedAt) - started)}`
-            : `going for ${duration(now - started)}`}
-        </span>
-      </p>
-      <Jobs
-        run={run}
-        now={now}
-        rerunOf={(job) => (finished && RERUNNABLE.includes(job.state) ? actions : undefined)}
-        onNotice={setJobNotice}
-      />
+      {end === undefined ? (
+        <p class="meta">
+          {run.actor && <span>started by {run.actor}</span>}
+          <span>
+            <Ago at={run.startedAt} now={now} />
+          </span>
+          <span>
+            {run.finishedAt
+              ? `took ${duration(Date.parse(run.finishedAt) - started)}`
+              : `going for ${duration(now - started)}`}
+          </span>
+        </p>
+      ) : (
+        <Leaving end={end} took={end - started} now={now} />
+      )}
+      {end === undefined
+        ? jobs
+        : run.jobs.length > 0 && (
+            <details class="folded-jobs">
+              <summary>Jobs</summary>
+              {jobs}
+            </details>
+          )}
       {jobNotice && (
         <p class={jobNotice.failed ? "action-problem" : "action-done"} role={jobNotice.failed ? "alert" : "status"}>
           {jobNotice.text}
@@ -104,6 +138,20 @@ function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
         </div>
       )}
     </li>
+  );
+}
+
+/** A finished run's last line: how long it took, and how long until it leaves the page, also as a bar that empties. */
+function Leaving({ end, took, now }: { end: number; took: number; now: number }) {
+  const left = Math.max(0, KEEP_FINISHED_MS - (now - end));
+  return (
+    <>
+      <p class="meta">
+        <span>took {duration(took)}</span>
+        <span class="leaves">leaves in {countdown(left)}</span>
+      </p>
+      <progress class="leaves-bar" max={KEEP_FINISHED_MS} value={left} aria-hidden="true" />
+    </>
   );
 }
 

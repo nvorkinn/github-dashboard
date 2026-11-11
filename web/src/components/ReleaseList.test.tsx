@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/pre
 import { afterEach, expect, test } from "vitest";
 import type { Approval, Job, ReleaseRun } from "../model.ts";
 import { ActionsContext } from "./actions.tsx";
-import { ReleaseList, sortRuns } from "./ReleaseList.tsx";
+import { KEEP_FINISHED_MS, ReleaseList, shownRuns, sortRuns } from "./ReleaseList.tsx";
 import { before, fakeRunActions, NOW, run } from "./testing.ts";
 
 afterEach(cleanup);
@@ -18,34 +18,58 @@ const job = (fields: Partial<Job>): Job => ({
   ...fields,
 });
 
-test("says so when there are none, and explains the colours", () => {
+test("says so when nothing runs, and has no legend", () => {
   render(<ReleaseList runs={[]} now={NOW} />);
-  expect(screen.getByText("No release runs")).toBeTruthy();
-  const legend = screen.getByRole("list", { name: "Legend" });
-  expect(
-    within(legend)
-      .getAllByRole("listitem")
-      .map((item) => item.textContent),
-  ).toEqual(["Done", "Running", "Waiting for approval", "Not started", "Failed", "Skipped"]);
+  expect(screen.getByText("Nothing running")).toBeTruthy();
+  expect(screen.queryByRole("list")).toBeNull();
 });
 
-test("draws a finished run", () => {
+test("folds a run that just finished, with its jobs behind Jobs, and counts down to when it leaves", () => {
   const { container } = render(
     <ReleaseList
       now={NOW}
-      runs={[run({ title: "v2.4.1", startedAt: before(3_600_000), finishedAt: before(3_600_000 - 252_000) })]}
+      runs={[
+        run({
+          title: "v2.4.1",
+          startedAt: before(360_000),
+          finishedAt: before(108_000),
+          jobs: [job({ id: 1, name: "build" })],
+        }),
+      ]}
     />,
   );
   const card = container.querySelector(".release") as HTMLElement;
+  expect(card.classList.contains("release-folded")).toBe(true);
   expect(card.querySelector(".repo-label")?.textContent).toBe("weather-station · Release");
   expect(within(card).getByRole("link", { name: "v2.4.1" }).getAttribute("href")).toBe(
     "https://github.com/octocat/weather-station/actions/runs/1",
   );
-  expect(card.textContent).toContain("started by octocat");
-  expect(card.textContent).toContain("1h ago");
-  expect(card.textContent).toContain("took 4m 12s");
   expect(card.querySelector(".chip")?.textContent).toBe("Done");
-  expect(card.querySelector(".chip")?.classList.contains("tone-done")).toBe(true);
+  expect(card.querySelector(".meta")?.textContent).toBe("took 4m 12sleaves in 3:12");
+  const bar = card.querySelector("progress") as HTMLProgressElement;
+  expect([bar.value, bar.max]).toEqual([192_000, KEEP_FINISHED_MS]);
+  const jobs = card.querySelector("details") as HTMLDetailsElement;
+  expect(jobs.open).toBe(false);
+  expect(jobs.querySelector("summary")?.textContent).toBe("Jobs");
+  expect(jobs.querySelector(".job")?.textContent).toBe("build: Done");
+});
+
+test("shows runs still going and those that finished within five minutes, failed ones too", () => {
+  const runs = [
+    run({ id: 1, state: "running", startedAt: before(7_200_000), finishedAt: undefined }),
+    run({ id: 2, state: "waiting", finishedAt: undefined }),
+    run({ id: 3, state: "queued", finishedAt: undefined }),
+    run({ id: 4, state: "passed", finishedAt: before(KEEP_FINISHED_MS - 1000) }),
+    run({ id: 5, state: "failed", finishedAt: before(KEEP_FINISHED_MS - 1000) }),
+    run({ id: 6, state: "passed", finishedAt: before(KEEP_FINISHED_MS) }),
+    run({ id: 7, state: "failed", finishedAt: before(3_600_000) }),
+  ];
+  expect(shownRuns(runs, NOW).map((one) => one.id)).toEqual([1, 2, 3, 4, 5]);
+  // A second later the two that were about to leave have left.
+  expect(shownRuns(runs, NOW + 1000).map((one) => one.id)).toEqual([1, 2, 3]);
+
+  render(<ReleaseList now={NOW} runs={runs} />);
+  expect(screen.getByRole("heading").textContent).toBe("Release workflows 5");
 });
 
 test("draws a run under way with its jobs", () => {

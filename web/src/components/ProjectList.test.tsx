@@ -116,3 +116,28 @@ test("draws a row per project, by name", () => {
   expect(within(weather).getByText("3d ago")).toBeTruthy();
   expect(within(weather).getByText("Reads the roof sensors")).toBeTruthy();
 });
+
+test("a hidden project leaves the rows and waits under them to be shown again", () => {
+  const toggled: string[] = [];
+  render(
+    <ProjectList
+      now={NOW}
+      projects={[project(), project({ repo: "octocat/home-ledger", name: "home-ledger" })]}
+      hidden={new Set(["octocat/home-ledger"])}
+      onToggle={(repo) => toggled.push(repo)}
+    />,
+  );
+  expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+    "Projects & releases 1",
+    "Hidden 1",
+  ]);
+  expect(screen.queryByRole("link", { name: "home-ledger" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show home-ledger" }));
+  fireEvent.click(screen.getByRole("button", { name: "Hide weather-station" }));
+  expect(toggled).toEqual(["octocat/home-ledger", "octocat/weather-station"]);
+});
+
+test("says so when every project is hidden", () => {
+  render(<ProjectList now={NOW} projects={[project()]} hidden={new Set(["octocat/weather-station"])} />);
+  expect(screen.getByText("Every project is hidden")).toBeTruthy();
+});

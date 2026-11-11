@@ -3,9 +3,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import type { DashboardState } from "../model.ts";
 import { DashboardView, Freshness, useRefresh } from "./DashboardView.tsx";
+import { HIDDEN_PROJECTS_KEY } from "./hooks.ts";
 import { fakeDashboard, NOW, project, pull, ready, run } from "./testing.ts";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 test("says that it is loading", () => {
   render(<DashboardView state={{ status: "loading" }} now={NOW} refresh={() => {}} />);
@@ -40,7 +44,7 @@ test("draws the three lists", () => {
 test("says what there is none of", () => {
   render(<DashboardView state={ready()} now={NOW} refresh={() => {}} />);
   expect(screen.getByText("No open pull requests")).toBeTruthy();
-  expect(screen.getByText("No release runs")).toBeTruthy();
+  expect(screen.getByText("Nothing running")).toBeTruthy();
   expect(screen.getByText("No projects")).toBeTruthy();
 });
 
@@ -56,7 +60,7 @@ test("keeps the data up under a problem", () => {
   expect(screen.getByText("Still here")).toBeTruthy();
 });
 
-test("is read-only", () => {
+test("without actions it only shows, and lets a project be hidden", () => {
   render(
     <DashboardView
       state={ready({ pulls: [pull()], releases: [run()], projects: [project()] })}
@@ -64,7 +68,46 @@ test("is read-only", () => {
       refresh={() => {}}
     />,
   );
-  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+    "Hide weather-station",
+  ]);
+});
+
+test("a hidden project takes its pull requests and runs off the page, until it is shown again", () => {
+  const ledger = "octocat/home-ledger";
+  const state = ready({
+    pulls: [pull({ title: "Stays" }), pull({ repo: ledger, number: 2, title: "Goes" })],
+    releases: [run({ title: "v1.0.0" }), run({ repo: ledger, id: 2, title: "v9.9.9" })],
+    projects: [project(), project({ repo: ledger, name: "home-ledger" })],
+  });
+  const view = render(<DashboardView state={state} now={NOW} refresh={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Hide home-ledger" }));
+  expect(screen.queryByText("Goes")).toBeNull();
+  expect(screen.queryByRole("link", { name: "v9.9.9" })).toBeNull();
+  expect(screen.getByText("Stays")).toBeTruthy();
+  expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+    "Open pull requests 1",
+    "Release workflows 1",
+    "Projects & releases 1",
+    "Hidden 1",
+  ]);
+  expect(JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "")).toEqual([ledger]);
+
+  // The browser remembers it for the next visit.
+  view.unmount();
+  render(<DashboardView state={state} now={NOW} refresh={() => {}} />);
+  expect(screen.queryByText("Goes")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Show home-ledger" }));
+  expect(screen.getByText("Goes")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "v9.9.9" })).toBeTruthy();
+  expect(JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "")).toEqual([]);
+});
+
+test("what is kept under the key but is no list of names hides nothing", () => {
+  localStorage.setItem(HIDDEN_PROJECTS_KEY, "{not json");
+  render(<DashboardView state={ready({ projects: [project()] })} now={NOW} refresh={() => {}} />);
+  expect(screen.getByRole("link", { name: "weather-station" })).toBeTruthy();
 });
 
 function freshness(state: DashboardState, pending = false) {

@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
+import { useHiddenProjects } from "./hooks.ts";
 import { ProjectList } from "./ProjectList.tsx";
 import { PullList } from "./PullList.tsx";
 import { ReleaseList } from "./ReleaseList.tsx";
@@ -71,8 +72,9 @@ function Liveness({ live }: { live: boolean }) {
   );
 }
 
-/** The dashboard itself: read-only, drawn from the state and nothing else. */
+/** The dashboard itself: drawn from the state, less the projects the user has hidden. */
 export function DashboardView({ state, now, refresh }: { state: DashboardState; now: number; refresh: () => void }) {
+  const { hidden, toggle } = useHiddenProjects();
   if (state.status === "loading") {
     return <p class="quiet">Loading your projects…</p>;
   }
@@ -89,6 +91,9 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
     );
   }
   const { data } = state;
+  // A hidden project's pull requests and runs go with it.
+  const pulls = data.pulls.filter((pull) => !hidden.has(pull.repo));
+  const releases = data.releases.filter((run) => !hidden.has(run.repo));
   return (
     <>
       {state.problem && (
@@ -97,10 +102,10 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
         </p>
       )}
       <div class="overview">
-        <PullList pulls={data.pulls} now={now} />
+        <PullList pulls={pulls} now={now} />
         <div class="activity">
-          <ReleaseList runs={data.releases} now={now} />
-          <ProjectList projects={data.projects} now={now} />
+          <ReleaseList runs={releases} now={now} />
+          <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
         </div>
       </div>
     </>

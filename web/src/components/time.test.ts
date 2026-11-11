@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ago, duration } from "./time.ts";
+import { ago, countdown, duration } from "./time.ts";
 
 const NOW = Date.parse("2026-03-01T12:00:00Z");
 const S = 1000;
@@ -43,4 +43,11 @@ test("gives a duration in its two largest units", () => {
   expect(duration(H + 5 * M + 30 * S)).toBe("1h 5m");
   expect(duration(2 * D + 3 * H)).toBe("2d 3h");
   expect(duration(-5 * S)).toBe("0s");
+});
+
+test("counts down in minutes and seconds", () => {
+  expect(countdown(5 * M)).toBe("5:00");
+  expect(countdown(3 * M + 11 * S + 1)).toBe("3:12");
+  expect(countdown(9 * S)).toBe("0:09");
+  expect(countdown(-S)).toBe("0:00");
 });

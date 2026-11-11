@@ -1,12 +1,12 @@
 import type { CheckState } from "../model.ts";
 
 /**
- * The six looks a state can have, which are the legend's entries. Each has its own colour and its own shape, and is
- * always shown with words, so colour is never the only way to tell them apart.
+ * The six looks a state can have. Each has its own colour and its own shape, and is always shown with words, so
+ * colour is never the only way to tell them apart.
  */
 export type Tone = "done" | "running" | "waiting" | "queued" | "failed" | "skipped";
 
-/** The legend, in the order it is shown. */
+/** The six, with their words. */
 export const TONES: { tone: Tone; label: string }[] = [
   { tone: "done", label: "Done" },
   { tone: "running", label: "Running" },
@@ -68,19 +68,5 @@ export function StateChip({ state, label }: { state: CheckState; label?: string 
       <ToneIcon tone={tone} />
       {label ?? labelOf(state)}
     </span>
-  );
-}
-
-/** What the colours and shapes mean. */
-export function Legend() {
-  return (
-    <ul class="legend" aria-label="Legend">
-      {TONES.map(({ tone, label }) => (
-        <li key={tone} class={`tone-${tone}`}>
-          <ToneIcon tone={tone} />
-          {label}
-        </li>
-      ))}
-    </ul>
   );
 }
