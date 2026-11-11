@@ -1,0 +1,156 @@
+.pull-review {
+  width: 90vw;
+  height: 88dvh;
+  max-width: none;
+  max-height: 94dvh;
+  padding: 0;
+  border: 1px solid #586174;
+  border-radius: 12px;
+  background: #151b26;
+  color: #e4e8ef;
+  box-shadow: 0 24px 100px #0009;
+}
+.pull-review[open] {
+  display: flex;
+  flex-direction: column;
+}
+.pull-review::backdrop {
+  background: #080c16bb;
+}
+.review-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #374151;
+  flex-shrink: 0;
+}
+.review-header h2 {
+  font-size: 1.1rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.review-header p {
+  margin: 8px 0;
+}
+.review-controls,
+.review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pull-review button {
+  color: inherit;
+  background: #252f40;
+  border: 1px solid #526077;
+  border-radius: 5px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.pull-review button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pull-review button:focus-visible {
+  outline: 2px solid #8bbaff;
+  outline-offset: 2px;
+}
+.pull-review button[aria-pressed="true"],
+.review-tree button[aria-current="true"] {
+  background: #254779;
+}
+.pull-review a {
+  color: #9ec7ff;
+}
+.pull-review > p {
+  margin: 8px 20px;
+}
+.review-info {
+  padding: 10px 20px;
+  border-bottom: 1px solid #374151;
+  max-height: 28vh;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.review-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review-toolbar {
+  padding: 10px 20px;
+  flex-shrink: 0;
+}
+.review-toolbar span {
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.review-body {
+  display: grid;
+  grid-template-columns: clamp(220px, 18vw, 360px) minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+}
+.review-no-tree {
+  grid-template-columns: minmax(0, 1fr);
+}
+.review-tree {
+  overflow: auto;
+  border-right: 1px solid #374151;
+  padding: 8px;
+}
+.review-tree button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 4px;
+  background: transparent;
+  border-color: transparent;
+  overflow-wrap: anywhere;
+}
+.review-tree small {
+  display: block;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+.review-code {
+  overflow: auto;
+  min-width: 0;
+  background: #fff;
+  color: #20252d;
+}
+.review-diff {
+  min-width: 650px;
+}
+.review-diff .d2h-wrapper {
+  margin: 0;
+}
+.review-diff .d2h-file-header {
+  display: none;
+}
+.review-diff .d2h-code-line-ctn {
+  color: #20252d;
+}
+@media (max-width: 800px) {
+  .pull-review {
+    width: 97vw;
+    height: 94dvh;
+  }
+  .review-body {
+    grid-template-columns: 170px minmax(0, 1fr);
+  }
+  .review-no-tree {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .review-header {
+    padding: 10px;
+  }
+  .review-toolbar {
+    padding: 8px;
+  }
+}
+.review-folder {
+  padding-left: 12px;
+}
+.review-tree summary {
+  cursor: pointer;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}

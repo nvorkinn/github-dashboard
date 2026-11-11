@@ -227,6 +227,7 @@ export type PullActions = {
 
 /** One file a pull request changes. `status` is GitHub's word: added, modified, removed, renamed and the like. */
 export type ChangedFile = {
+  patch?: string;
   path: string;
   /** Where a renamed or copied file was before. */
   previousPath: string | undefined;
