@@ -453,3 +453,16 @@ test("the scripted run waits for its approval again each time round, and stoppin
   expect(byId(data(dashboard), FAILED_RUN).state).toBe("failed");
   dashboard.stop();
 });
+
+test("the script's release tells the page when it waits and when it finishes, anew each time round", () => {
+  const dashboard = started();
+  const notices: string[] = [];
+  dashboard.onNotice?.((notice) => notices.push(`${notice.type} ${notice.key}`));
+  // From the first frame (5, where it already waits) round to it again.
+  vi.advanceTimersByTime(FRAMES * 1000);
+  expect(notices).toEqual([
+    `release finished:octocat/weather-station:${SCRIPTED_RUN}:1`,
+    `waiting waiting:octocat/weather-station:${SCRIPTED_RUN}:2`,
+  ]);
+  dashboard.stop();
+});

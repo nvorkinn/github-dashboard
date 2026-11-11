@@ -1,9 +1,11 @@
 import type { Context } from "hono";
+import type { PageNotice } from "./notices.ts";
 
 /**
  * What an open page is told about a webhook: that something changed, and just enough to know what to fetch again.
  * The page gets the content itself from api.github.com with its own token, so nothing here is worth protecting
- * beyond what the reverse proxy already does, and nothing else from the webhook's payload is passed on.
+ * beyond what the reverse proxy already does, and nothing else from the webhook's payload is passed on in a change. A
+ * notice (see notices.ts) carries a one-line headline too, such as a pull request's title, for a desktop notification.
  */
 export type Change = {
   /** The webhook's event name, such as `pull_request` or `workflow_run`. */
@@ -23,8 +25,16 @@ export type Change = {
 export type Hub = {
   /** Hands a change to everyone listening now. With nobody listening it is dropped: nothing is kept for later. */
   publish(change: Change): void;
-  /** Starts listening. The function returned stops it; calling that twice does no harm. */
-  subscribe(listener: (change: Change) => void): () => void;
+  /**
+   * Hands a notice (see notices.ts) to everyone listening now, for the page's desktop notifications. Dropped, like a
+   * change, with nobody listening; the Telegram notices cover that case.
+   */
+  announce(notice: PageNotice): void;
+  /**
+   * Starts listening, to changes and, given `onNotice`, to notices. The function returned stops it; calling that
+   * twice does no harm.
+   */
+  subscribe(listener: (change: Change) => void, onNotice?: (notice: PageNotice) => void): () => void;
   /** How many are listening now. */
   listeners(): number;
   /**
@@ -36,7 +46,10 @@ export type Hub = {
 
 export function createHub(): Hub {
   // One entry per call to subscribe, so the same function subscribed twice is two listeners.
-  const listeners = new Set<{ listener: (change: Change) => void }>();
+  const listeners = new Set<{
+    listener: (change: Change) => void;
+    onNotice?: ((notice: PageNotice) => void) | undefined;
+  }>();
   // A restart counts as everyone having just left: open pages connect again within seconds.
   let idleSince: number | undefined = Date.now();
   return {
@@ -49,8 +62,17 @@ export function createHub(): Hub {
         }
       }
     },
-    subscribe(listener) {
-      const entry = { listener };
+    announce(notice) {
+      for (const entry of [...listeners]) {
+        try {
+          entry.onNotice?.(notice);
+        } catch {
+          // As for a change.
+        }
+      }
+    },
+    subscribe(listener, onNotice) {
+      const entry = { listener, onNotice };
       listeners.add(entry);
       idleSince = undefined;
       return () => {
@@ -70,8 +92,8 @@ const MAX_UNREAD = 256;
 
 /**
  * `GET /api/events`: the stream of changes for one open page, as Server-Sent Events. It sends `hello` on connecting,
- * `change` for each change published while it is open, and a comment line every `pingMs` so proxies keep the
- * connection. A page that connects later learns nothing of what it missed; it reads the state from api.github.com.
+ * `change` for each change published while it is open, `notice` for each notice announced, and a comment line every
+ * `pingMs` so proxies keep the connection. A page that connects later learns nothing of what it missed; it reads the state from api.github.com.
  *
  * The stream ends when the client goes away or `closing` fires, and then leaves no listener or timer behind.
  */
@@ -97,8 +119,9 @@ export function eventStream(options: { hub: Hub; pingMs: number; closing?: Abort
           controller.enqueue(encoder.encode(text));
         };
 
-        const unsubscribe = options.hub.subscribe((change) =>
-          send(`event: change\ndata: ${JSON.stringify(change)}\n\n`),
+        const unsubscribe = options.hub.subscribe(
+          (change) => send(`event: change\ndata: ${JSON.stringify(change)}\n\n`),
+          (notice) => send(`event: notice\ndata: ${JSON.stringify(notice)}\n\n`),
         );
         const ping = setInterval(() => send(": ping\n\n"), options.pingMs);
 

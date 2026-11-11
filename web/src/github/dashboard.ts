@@ -1,5 +1,5 @@
 import type { Auth } from "../auth.ts";
-import type { Dashboard, DashboardData, DashboardState, PullRequest } from "../model.ts";
+import type { Dashboard, DashboardData, DashboardState, Notice, PullRequest } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import { type Change, type Connect, createEvents } from "./events.ts";
 import { type Plan, planFor, readChanged, readDashboard } from "./read.ts";
@@ -55,7 +55,8 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   const unsettled = new Map<string, number>();
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
-  const events = createEvents({ connect: options.connect, onLive, onChange });
+  const noticeListeners = new Set<(notice: Notice) => void>();
+  const events = createEvents({ connect: options.connect, onLive, onChange, onNotice });
 
   function setState(next: DashboardState): void {
     state = next;
@@ -103,6 +104,15 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     // just was.
     const fresh = reading?.all || Date.now() - allReadAt < JUST_READ_MS;
     schedule(fresh ? fallbackMs() : 0);
+  }
+
+  function onNotice(notice: Notice): void {
+    if (!started) {
+      return;
+    }
+    for (const listener of [...noticeListeners]) {
+      listener(notice);
+    }
   }
 
   function onChange(change: Change): void {
@@ -260,6 +270,11 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+
+    onNotice(listener) {
+      noticeListeners.add(listener);
+      return () => noticeListeners.delete(listener);
     },
 
     start() {

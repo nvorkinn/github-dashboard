@@ -1,10 +1,12 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
-import { useDashboardState, useNow } from "./components/hooks.ts";
+import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
+import { Settings } from "./components/Settings.tsx";
 import type { Dashboard } from "./model.ts";
+import { createNotifier, type Notifier } from "./notifications.ts";
 
 /** The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. */
 export function App({
@@ -12,11 +14,14 @@ export function App({
   dashboard,
   actions,
   demo = false,
+  notifier,
 }: {
   auth: Auth;
   dashboard: Dashboard;
   actions?: Actions | undefined;
   demo?: boolean;
+  /** Shows the desktop notifications. Left out, the browser's, as the settings page sets them. */
+  notifier?: Notifier | undefined;
 }) {
   const state = useAuthState(auth);
   const signedIn = state.status === "signedIn";
@@ -42,7 +47,7 @@ export function App({
         </p>
       )}
       {signedIn ? (
-        <SignedIn auth={auth} dashboard={dashboard} actions={actions} />
+        <SignedIn auth={auth} dashboard={dashboard} actions={actions} notifier={notifier} />
       ) : (
         <>
           <header class="top">
@@ -75,26 +80,70 @@ export function App({
   );
 }
 
-function SignedIn({ auth, dashboard, actions }: { auth: Auth; dashboard: Dashboard; actions: Actions | undefined }) {
+function SignedIn({
+  auth,
+  dashboard,
+  actions,
+  notifier: given,
+}: {
+  auth: Auth;
+  dashboard: Dashboard;
+  actions: Actions | undefined;
+  notifier: Notifier | undefined;
+}) {
   const state = useDashboardState(dashboard);
   const now = useNow();
   const { refresh, pending } = useRefresh(dashboard);
+  const page = usePage();
+  const notifier = useMemo(() => given ?? createNotifier({ hidden: readHidden }), [given]);
+
+  // What needs attention shows as a desktop notification, for as long as the dashboard runs.
+  useEffect(() => dashboard.onNotice?.((notice) => notifier.notify(notice)), [dashboard, notifier]);
+
   return (
     <>
       <header class="top">
-        <h1>GitHub dashboard</h1>
+        <h1>
+          <a class="home" href="#dashboard">
+            GitHub dashboard
+          </a>
+        </h1>
         <div class="top-controls">
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
+          <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
+            Settings
+          </a>
           <Account auth={auth} />
         </div>
       </header>
       <main>
-        <ActionsContext.Provider value={actions}>
-          <DashboardView state={state} now={now} refresh={refresh} />
-        </ActionsContext.Provider>
+        {page === "settings" ? (
+          <Settings notifier={notifier} />
+        ) : (
+          <ActionsContext.Provider value={actions}>
+            <DashboardView state={state} now={now} refresh={refresh} />
+          </ActionsContext.Provider>
+        )}
       </main>
     </>
   );
+}
+
+type Page = "dashboard" | "settings";
+
+/** Which page the address names: `#settings` the settings, anything else the dashboard. Back and forward work. */
+function usePage(): Page {
+  const read = (): Page =>
+    typeof location !== "undefined" && location.hash === "#settings" ? "settings" : "dashboard";
+  const [page, setPage] = useState(read);
+  useEffect(() => {
+    const onHash = () => setPage(read());
+    // Read again too, for a change between drawing and listening.
+    onHash();
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  return page;
 }
 
 function useAuthState(auth: Auth): AuthState {
