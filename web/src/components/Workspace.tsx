@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type { Project, PullRequest, ReleaseRun } from "../model.ts";
 import { summarize } from "../model.ts";
 import { useActions } from "./actions.tsx";
@@ -13,6 +13,21 @@ type Scope = string | undefined;
 type WorkspaceTab = "all" | "pulls" | "ready" | "workflows" | "releases" | "attention";
 type VisibleTab = Exclude<WorkspaceTab, "ready">;
 
+export type WorkspaceSection = "overview" | "pulls" | "workflows" | "releases" | "attention";
+export type WorkspaceDestination = {
+  /** A visible owner/repository, `null` for the all-repository overview, or omitted to keep the current scope. */
+  repo?: string | null;
+  /** A section in the current scope. Selecting a repository always opens its overview first. */
+  section?: WorkspaceSection;
+};
+
+export const WORKSPACE_NAVIGATE_EVENT = "github-dashboard:workspace-navigate";
+
+/** Lets application-level controls, such as the command palette, navigate the mounted Workspace. */
+export function navigateWorkspace(destination: WorkspaceDestination): void {
+  window.dispatchEvent(new CustomEvent<WorkspaceDestination>(WORKSPACE_NAVIGATE_EVENT, { detail: destination }));
+}
+
 const TAB_ICONS: Record<VisibleTab, IconName> = {
   all: "overview",
   pulls: "pull-request",
@@ -22,6 +37,35 @@ const TAB_ICONS: Record<VisibleTab, IconName> = {
 };
 
 const ACTIVE_RUNS = new Set(["running", "waiting", "queued"]);
+const SECTIONS: Record<WorkspaceSection, VisibleTab> = {
+  overview: "all",
+  pulls: "pulls",
+  workflows: "workflows",
+  releases: "releases",
+  attention: "attention",
+};
+
+function destinationOf(event: Event): WorkspaceDestination | undefined {
+  const detail: unknown = (event as CustomEvent<unknown>).detail;
+  if (typeof detail !== "object" || detail === null) {
+    return undefined;
+  }
+  const { repo, section } = detail as Record<string, unknown>;
+  if (repo !== undefined && repo !== null && typeof repo !== "string") {
+    return undefined;
+  }
+  if (section !== undefined && (typeof section !== "string" || !(section in SECTIONS))) {
+    return undefined;
+  }
+  const destination: WorkspaceDestination = {};
+  if (repo !== undefined) {
+    destination.repo = repo as string | null;
+  }
+  if (section !== undefined) {
+    destination.section = section as WorkspaceSection;
+  }
+  return destination;
+}
 
 function active(run: ReleaseRun): boolean {
   return ACTIVE_RUNS.has(run.state) && !run.finishedAt;
@@ -55,6 +99,32 @@ export function Workspace({
   const [tab, setTab] = useState<WorkspaceTab>("all");
   const [filter, setFilter] = useState("");
   const shown = projects.filter((project) => !hidden.has(project.repo));
+
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const destination = destinationOf(event);
+      if (!destination) {
+        return;
+      }
+      if (destination.repo !== undefined) {
+        if (destination.repo !== null && !projects.some((project) => project.repo === destination.repo)) {
+          return;
+        }
+        if (destination.repo !== null && hidden.has(destination.repo)) {
+          return;
+        }
+        setScope(destination.repo ?? undefined);
+        setTab("all");
+        return;
+      }
+      if (destination.section) {
+        setTab(SECTIONS[destination.section]);
+      }
+    };
+    window.addEventListener(WORKSPACE_NAVIGATE_EVENT, navigate);
+    return () => window.removeEventListener(WORKSPACE_NAVIGATE_EVENT, navigate);
+  }, [projects, hidden]);
+
   const selected = shown.find((project) => project.repo === scope);
   const currentScope = selected?.repo;
   const visiblePulls = selected ? pulls.filter((pull) => pull.repo === selected.repo) : pulls;

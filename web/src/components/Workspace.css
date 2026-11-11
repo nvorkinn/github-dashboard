@@ -691,6 +691,18 @@ body:has(.workspace) {
   gap: 0.45rem;
 }
 
+.workspace .pull-saved-views {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.workspace .pull-save-view,
+.workspace .pull-remove-view {
+  min-height: 1.8rem;
+}
+
 .workspace .pull-filter,
 .workspace .order {
   display: flex;

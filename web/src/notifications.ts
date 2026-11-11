@@ -84,6 +84,95 @@ export type Show = (
 /** Remembers this many notices as shown, so a repeat shows nothing. */
 export const MAX_SEEN = 500;
 
+/** Where this browser keeps the recent in-app notification history. */
+export const NOTIFICATION_HISTORY_KEY = "github-dashboard:notification-history";
+/** A bounded history is enough to recover recent context without growing browser storage forever. */
+export const MAX_NOTIFICATION_HISTORY = 100;
+
+/**
+ * Recent notices kept by this browser, newest first. Only the public fields already present on `Notice` are read;
+ * malformed entries and repeated keys are ignored.
+ */
+export function readNotificationHistory(): Notice[] {
+  try {
+    const kept: unknown = JSON.parse(localStorage.getItem(NOTIFICATION_HISTORY_KEY) ?? "[]");
+    if (!Array.isArray(kept)) {
+      return [];
+    }
+    const notices: Notice[] = [];
+    const keys = new Set<string>();
+    for (const value of kept) {
+      const notice = storedNotice(value);
+      if (!notice || keys.has(notice.key)) {
+        continue;
+      }
+      notices.push(notice);
+      keys.add(notice.key);
+      if (notices.length === MAX_NOTIFICATION_HISTORY) {
+        break;
+      }
+    }
+    return notices;
+  } catch {
+    return [];
+  }
+}
+
+/** Adds or refreshes one notice in the local history and returns the resulting newest-first list. */
+export function addNotificationHistory(notice: Notice): Notice[] {
+  const stored = storedNotice(notice);
+  if (!stored) {
+    return readNotificationHistory();
+  }
+  const history = [stored, ...readNotificationHistory().filter((existing) => existing.key !== stored.key)].slice(
+    0,
+    MAX_NOTIFICATION_HISTORY,
+  );
+  try {
+    localStorage.setItem(NOTIFICATION_HISTORY_KEY, JSON.stringify(history));
+  } catch {
+    // It still serves this update to the caller when storage is unavailable.
+  }
+  return history;
+}
+
+/** Clears the in-app notification history kept by this browser. */
+export function clearNotificationHistory(): void {
+  try {
+    localStorage.removeItem(NOTIFICATION_HISTORY_KEY);
+  } catch {
+    // Already effectively clear when storage is unavailable.
+  }
+}
+
+function storedNotice(value: unknown): Notice | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const fields = value as Record<string, unknown>;
+  if (
+    typeof fields.type !== "string" ||
+    !NOTICE_TYPES.includes(fields.type as NoticeType) ||
+    typeof fields.key !== "string" ||
+    fields.key.length === 0 ||
+    typeof fields.repo !== "string" ||
+    fields.repo.length === 0 ||
+    typeof fields.headline !== "string" ||
+    fields.headline.length === 0 ||
+    typeof fields.url !== "string" ||
+    fields.url.length === 0
+  ) {
+    return undefined;
+  }
+  return {
+    type: fields.type as NoticeType,
+    key: fields.key,
+    repo: fields.repo,
+    headline: fields.headline,
+    url: fields.url,
+  };
+}
+
 export type Notifier = {
   /** Shows `notice` as a desktop notification, unless it is a repeat, its kind is off, or its project is hidden. */
   notify(notice: Notice): void;
