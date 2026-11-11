@@ -2,7 +2,8 @@ import type { Auth } from "../auth.ts";
 import type { Dashboard, DashboardData, DashboardState, Notice, PullRequest } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import { type Change, type Connect, createEvents } from "./events.ts";
-import { type Plan, planFor, readChanged, readDashboard } from "./read.ts";
+import { readEverything, type Shape } from "./graphql.ts";
+import { type Plan, planFor, type ReadResult, readChanged } from "./read.ts";
 import { forgetWorkflowFiles } from "./workflow_graph.ts";
 
 // How often everything is read again while the relay's events don't arrive: as often as before there were any.
@@ -28,11 +29,19 @@ export type DashboardOptions = {
   parallel?: number;
   /** Opens the relay's stream of events, in place of the browser's `EventSource`. */
   connect?: Connect;
+  /** The projects (`owner/name`) the user has hidden, as they are now: only their rows are read. */
+  hidden?: () => ReadonlySet<string>;
+  /**
+   * Keeps which workflows a read asks about between visits, so that the first read of the next visit is one request
+   * too. Only names of projects and workflow files; without it, a visit's first read takes a few requests.
+   */
+  shape?: { load(): Shape | undefined; save(shape: Shape): void };
 };
 
 /**
  * The dashboard's data, read from api.github.com as the signed-in user. Everything is read at the start and then
- * every so often; in between, the relay's events say what changed, and only that is read again.
+ * every so often, in one GraphQL request (graphql.ts); in between, the relay's events say what changed, and only
+ * that is read again, through the REST API (read.ts).
  */
 export function createDashboard(auth: Auth, options: DashboardOptions = {}): Dashboard {
   const refreshMs = options.refreshMs ?? REFRESH_MS;
@@ -53,6 +62,9 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   // How often each pull request whose merge state is unknown was asked about again.
   const unsettled = new Map<string, number>();
+  // Which workflows a read of everything asks about: what the last one found, or what the last visit kept.
+  let shape: Shape | undefined;
+  const hiddenProjects = (): ReadonlySet<string> => options.hidden?.() ?? new Set();
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const noticeListeners = new Set<(notice: Notice) => void>();
@@ -139,7 +151,8 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     if (!started || reading || changes.length === 0) {
       return;
     }
-    const plan = missed || hidden() || state.status !== "ready" ? "everything" : planFor(changes, state.data);
+    const plan =
+      missed || hidden() || state.status !== "ready" ? "everything" : planFor(changes, state.data, hiddenProjects());
     changes = [];
     if (plan === "everything") {
       missed = true;
@@ -206,14 +219,17 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       setState({ ...state, refreshing: true });
     }
     try {
-      const api = createApi(auth, {
-        signal: controller.signal,
-        ...(options.parallel ? { parallel: options.parallel } : {}),
-      });
       const result =
         plan === "everything" || !previous
-          ? await readDashboard(api, previous)
-          : await readChanged(api, plan, previous);
+          ? await readAllOf(controller.signal, previous)
+          : await readChanged(
+              createApi(auth, {
+                signal: controller.signal,
+                ...(options.parallel ? { parallel: options.parallel } : {}),
+              }),
+              plan,
+              previous,
+            );
       // Stopped while reading: this is no longer wanted, and may be another user's by now.
       if (controller.signal.aborted) {
         return;
@@ -240,6 +256,33 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       missed = true;
       const problem = describe(error);
       setState(state.status === "ready" ? { ...state, refreshing: false, problem } : { status: "failed", problem });
+    }
+  }
+
+  async function readAllOf(signal: AbortSignal, previous: DashboardData | undefined): Promise<ReadResult> {
+    const result = await readEverything(auth, {
+      previous,
+      hidden: hiddenProjects(),
+      shape: shape ?? load(),
+      signal,
+      parallel: options.parallel,
+    });
+    if (!signal.aborted) {
+      shape = result.shape;
+      try {
+        options.shape?.save(result.shape);
+      } catch {
+        // Not kept, then: the next visit's first read takes a few requests.
+      }
+    }
+    return result;
+  }
+
+  function load(): Shape | undefined {
+    try {
+      return options.shape?.load();
+    } catch {
+      return undefined;
     }
   }
 
@@ -317,6 +360,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       allReadAt = Number.NEGATIVE_INFINITY;
       changes = [];
       unsettled.clear();
+      shape = undefined;
       if (state.status !== "loading") {
         setState({ status: "loading" });
       }

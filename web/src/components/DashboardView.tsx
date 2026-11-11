@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
@@ -89,6 +89,15 @@ export function DashboardView({
   laneColumns?: LaneColumns | undefined;
 }) {
   const { hidden, toggle } = useHiddenProjects();
+  // Nothing of a hidden project is read but its row, so one that is shown again has to be read.
+  const wasHidden = useRef(hidden);
+  useEffect(() => {
+    const shownAgain = [...wasHidden.current].some((repo) => !hidden.has(repo));
+    wasHidden.current = hidden;
+    if (shownAgain) {
+      refresh();
+    }
+  }, [hidden, refresh]);
   if (state.status === "loading") {
     return <p class="quiet">Loading your projects…</p>;
   }
@@ -118,7 +127,7 @@ export function DashboardView({
       {view === "lanes" ? (
         <LanesView
           projects={data.projects}
-          pulls={data.pulls}
+          pulls={pulls}
           runs={releases}
           now={now}
           hidden={hidden}
@@ -128,7 +137,7 @@ export function DashboardView({
       ) : (
         // Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side.
         <div class="stage">
-          <PullList pulls={pulls} now={now} hiddenCount={data.pulls.length - pulls.length} />
+          <PullList pulls={pulls} now={now} />
           <ReleaseList runs={releases} now={now} />
           <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
         </div>

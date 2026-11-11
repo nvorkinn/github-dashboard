@@ -239,14 +239,13 @@ test("puts each pull request in the column of what it needs", () => {
 });
 
 test("draws the board's three columns, each with its count, and says None in an empty one", () => {
-  render(<PullList now={NOW} pulls={MIXED.slice(0, 3)} hiddenCount={2} />);
+  render(<PullList now={NOW} pulls={MIXED.slice(0, 3)} />);
   expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual([
     "Ready to merge 1",
     "In progress 2",
     "Needs attention 0",
   ]);
   expect(screen.getByText("None")).toBeTruthy();
-  expect(screen.getByText("2 more in hidden projects")).toBeTruthy();
 });
 
 test("falls back to the newest first when what was remembered makes no sense", () => {

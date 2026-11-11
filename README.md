@@ -175,10 +175,33 @@ name: Release
 # dashboard: release
 ```
 
-The page reads the mark from the files in `.github/workflows` on the default branch. A repository that marks none of
+The page reads the mark from the files in `.github/workflows` on the default branch (only the files directly in it). A repository that marks none of
 its workflows goes by their names instead: the ones that say release, promote or deploy. Once one file is marked,
 names no longer count there. A workflow GitHub runs by itself, such as "pages build and deployment", has no file and
 is never shown.
+
+## Reading GitHub
+
+Everything on the page is read in one request to GitHub's GraphQL API (`web/src/github/graphql.ts`): at the start,
+on **Refresh**, every minute while the relay's events don't arrive, and every five minutes while they do. In between,
+an event from the relay reads only what it names, through the REST API (`web/src/github/read.ts`). Both end in the
+same code, so a pull request reads the same either way.
+
+The one request asks for every repository the signed-in user reaches (what its row shows), and for the pull
+requests, checks, workflow files and release runs of the projects that aren't hidden. Of a hidden project nothing
+but its row is read; showing it again reads it. A new repository is in the list of the next read, and so shows on
+the page by itself, within those one to five minutes or at once when GitHub's `repository` event arrives.
+
+GraphQL has no list of a repository's workflows: a workflow is asked for by its file, so the page has to know the
+release workflows' files before it asks. It learns them from each read and keeps them in the browser's local storage
+(names of projects and of workflow files, nothing else), which is what makes a reload one request as well. A first
+visit takes three, and a read that finds a new project, a new release workflow or a changed workflow file asks once
+or twice more for just that. More than 50 open pull requests in a project, 100 checks on a pull request or 100 jobs
+in a run don't fit into the answer and are read through the REST API.
+
+GraphQL counts against its own rate limit, 5,000 points an hour, and a read costs about one point per two shown
+projects. It doesn't say when a later attempt of a run started, so a run that was re-run shows the time it was first
+started.
 
 ## Telegram
 

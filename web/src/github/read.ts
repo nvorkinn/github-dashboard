@@ -11,7 +11,7 @@ import type {
 } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
-import { jobGraph, markedReleaseFiles, WORKFLOWS_FOLDER, workflowFile } from "./workflow_graph.ts";
+import { jobGraph, markedReleaseFiles, WORKFLOWS_FOLDER, type WorkflowJob, workflowFile } from "./workflow_graph.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
 // as a newer release replaces it.
@@ -20,8 +20,7 @@ export const RECENT_RELEASES = 5;
 export const PROMOTE_WORKFLOW = ".github/workflows/promote.yml";
 
 // The parts of GitHub's answers that are used. Everything else in them is ignored.
-type RawInstallation = { id: number };
-type RawRepo = {
+export type RawRepo = {
   full_name: string;
   name: string;
   description: string | null;
@@ -36,8 +35,8 @@ type RawRepo = {
   allow_rebase_merge?: boolean;
   allow_auto_merge?: boolean;
 };
-type RawRelease = { tag_name: string; html_url: string; published_at: string | null; created_at: string };
-type RawPull = {
+export type RawRelease = { tag_name: string; html_url: string; published_at: string | null; created_at: string };
+export type RawPull = {
   number: number;
   state: string;
   title: string;
@@ -53,10 +52,10 @@ type RawPull = {
   auto_merge?: object | null;
   node_id: string;
 };
-type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
-type RawStatus = { context: string; state: string; target_url: string | null };
-type RawWorkflow = { id: number; name: string; state: string; path?: string };
-type RawRun = {
+export type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
+export type RawStatus = { context: string; state: string; target_url: string | null };
+export type RawWorkflow = { id: number; name: string; state: string; path?: string };
+export type RawRun = {
   id: number;
   name: string | null;
   display_title?: string;
@@ -76,7 +75,7 @@ type RawRun = {
   /** Its workflow file, such as `.github/workflows/release.yml`. */
   path?: string;
 };
-type RawJob = {
+export type RawJob = {
   id: number;
   name: string;
   status: string;
@@ -96,34 +95,6 @@ export type ReadResult = {
   problem: string | undefined;
 };
 
-/**
- * Reads everything the dashboard shows. A project whose pull requests, releases or latest release can't be read
- * doesn't take the others down: that part stays as it was in `previous` (or empty on a first read) and `problem`
- * says so. A rate limit, a sign-in GitHub no longer accepts or a failing network is thrown instead, as every other
- * call would fail the same way.
- */
-export async function readDashboard(api: Api, previous?: DashboardData): Promise<ReadResult> {
-  const repos = await repositories(api);
-  const failed = new Set<string>();
-  const read = await Promise.all(
-    repos.map(async (repo) => {
-      const [parts, settings] = await Promise.all([
-        readRepo(api, repo.full_name, ALL_OF_IT, previous, failed),
-        mergeSettings(api, repo, previous),
-      ]);
-      return { ...parts, project: project(repo, parts.latestRelease, settings, parts.promoteWorkflow) };
-    }),
-  );
-  return {
-    data: {
-      projects: read.map((one) => one.project),
-      pulls: read.flatMap((one) => one.pulls),
-      releases: read.flatMap((one) => one.releases),
-    },
-    problem: problemOf(failed),
-  };
-}
-
 /** What to read again of one repository. */
 export type RepoPlan = {
   /** `all`: the list of open pull requests and each one on it. Otherwise only the ones with these numbers. */
@@ -135,8 +106,6 @@ export type RepoPlan = {
 
 /** What to read again: everything, or these parts of these repositories (`owner/name`). */
 export type Plan = "everything" | Map<string, RepoPlan>;
-
-const ALL_OF_IT: RepoPlan = { pulls: "all", releases: true, latestRelease: true };
 
 // The kinds of change that can add, remove or rename a project: all of it is read again.
 const WHICH_PROJECTS = new Set(["repository", "installation", "installation_repositories"]);
@@ -170,11 +139,13 @@ const SHOWN = new Set([
  * The pull request a change is about is the one it numbers, or else the ones whose head is its commit: none for a
  * check on the default branch, which is most of them. A change that names neither is about all of the repository's.
  *
+ * A change in a project that is `hidden` reads nothing, as nothing of such a project is read.
+ *
  * The kinds that change which repositories there are (`repository`, `installation`, `installation_repositories`)
  * read everything, and so does one of the kinds above that names no repository or one that isn't known. Any other
  * kind reads nothing.
  */
-export function planFor(changes: Change[], known: DashboardData): Plan {
+export function planFor(changes: Change[], known: DashboardData, hidden: ReadonlySet<string> = new Set()): Plan {
   const plan = new Map<string, RepoPlan>();
   for (const change of changes) {
     if (WHICH_PROJECTS.has(change.kind)) {
@@ -185,6 +156,10 @@ export function planFor(changes: Change[], known: DashboardData): Plan {
       continue;
     }
     const name = change.repo;
+    // Nothing of a hidden project is read, so nothing of it is read again.
+    if (name !== undefined && hidden.has(name) && known.projects.some(of(name))) {
+      continue;
+    }
     // A project the page doesn't know yet.
     if (name === undefined || !known.projects.some(of(name))) {
       return "everything";
@@ -266,11 +241,11 @@ export async function readChanged(api: Api, plan: Map<string, RepoPlan>, previou
   };
 }
 
-function of(repo: string): (one: { repo: string }) => boolean {
+export function of(repo: string): (one: { repo: string }) => boolean {
   return (one) => one.repo === repo;
 }
 
-function problemOf(failed: Set<string>): string | undefined {
+export function problemOf(failed: Set<string>): string | undefined {
   const names = [...failed];
   return names.length === 0
     ? undefined
@@ -331,51 +306,12 @@ async function readRepo(
   return { latestRelease, pulls, releases: releases.runs, promoteWorkflow: releases.promoteWorkflow };
 }
 
-/**
- * The repositories the GitHub App is installed on and the user can reach, the last pushed first. A user token of a
- * GitHub App sees repositories through the app's installations; `user/repos` isn't for it.
- */
-async function repositories(api: Api): Promise<RawRepo[]> {
-  const installations = await api.list<RawInstallation>("user/installations", "installations");
-  const lists = await Promise.all(
-    installations.map((installation) =>
-      api.list<RawRepo>(`user/installations/${installation.id}/repositories`, "repositories"),
-    ),
-  );
-  const repos = new Map<string, RawRepo>();
-  for (const repo of lists.flat()) {
-    if (!repo.archived) {
-      repos.set(repo.full_name, repo);
-    }
-  }
-  return [...repos.values()].sort((a, b) => (b.pushed_at ?? "").localeCompare(a.pushed_at ?? ""));
-}
-
-type MergeSettings = Pick<Project, "mergeMethod" | "autoMergeAllowed">;
+export type MergeSettings = Pick<Project, "mergeMethod" | "autoMergeAllowed">;
 
 const MERGE_SETTINGS = ["allow_merge_commit", "allow_squash_merge", "allow_rebase_merge", "allow_auto_merge"] as const;
 
-/**
- * How the repository's pull requests are merged. The list of repositories may carry its settings; if it doesn't,
- * they are on the repository's own page, which is one request more per repository (and mostly a 304, which GitHub
- * doesn't count). Settings that can't be read are what they were, or else count as allowed: GitHub's refusal then
- * says what isn't, when the user acts. Nothing on the page shows them, so they are no problem for it.
- */
-async function mergeSettings(api: Api, repo: RawRepo, previous: DashboardData | undefined): Promise<MergeSettings> {
-  if (MERGE_SETTINGS.every((key) => typeof repo[key] === "boolean")) {
-    return settingsOf(repo);
-  }
-  try {
-    return settingsOf(await api.get<RawRepo>(`repos/${repo.full_name}`));
-  } catch (error) {
-    if (!refused(error)) {
-      throw error;
-    }
-    return previous?.projects.find(of(repo.full_name)) ?? settingsOf({});
-  }
-}
-
-function settingsOf(repo: Partial<RawRepo>): MergeSettings {
+/** How the repository's pull requests are merged. A setting that isn't known counts as allowed: GitHub then says. */
+export function settingsOf(repo: Partial<RawRepo>): MergeSettings {
   return { mergeMethod: mergeMethod(repo), autoMergeAllowed: repo.allow_auto_merge !== false };
 }
 
@@ -397,11 +333,11 @@ export function mergeMethod(repo: Partial<Pick<RawRepo, (typeof MERGE_SETTINGS)[
 }
 
 /** Whether `error` is GitHub refusing one read, rather than something that fails every call. */
-function refused(error: unknown): boolean {
+export function refused(error: unknown): boolean {
   return error instanceof GitHubError && error.retryAt === undefined && error.status !== 401;
 }
 
-function project(
+export function project(
   repo: RawRepo,
   latestRelease: Project["latestRelease"],
   settings: MergeSettings,
@@ -424,7 +360,10 @@ function project(
 
 async function latest(api: Api, repo: string): Promise<Project["latestRelease"]> {
   // GitHub answers 404 for a repository without a published release.
-  const release = await unlessGone(api.get<RawRelease>(`repos/${repo}/releases/latest`));
+  return latestOf(await unlessGone(api.get<RawRelease>(`repos/${repo}/releases/latest`)));
+}
+
+export function latestOf(release: RawRelease | undefined): Project["latestRelease"] {
   return (
     release && {
       tag: release.tag_name,
@@ -446,7 +385,7 @@ async function unlessGone<T>(reading: Promise<T>): Promise<T | undefined> {
 }
 
 /** Every open pull request with its checks, leaving out any that closed while being read. */
-async function pullRequests(api: Api, repo: string): Promise<PullRequest[]> {
+export async function pullRequests(api: Api, repo: string): Promise<PullRequest[]> {
   const open = await api.list<RawPull>(`repos/${repo}/pulls?state=open`);
   const pulls = await Promise.all(open.map((pull) => pullRequest(api, repo, pull.number)));
   return pulls.filter((pull) => pull !== undefined);
@@ -486,6 +425,11 @@ export async function pullRequest(api: Api, repo: string, number: number): Promi
     api.list<RawCheckRun>(`repos/${repo}/commits/${sha}/check-runs?filter=latest`, "check_runs"),
     api.list<RawStatus>(`repos/${repo}/commits/${sha}/statuses`),
   ]);
+  return pullOf(repo, pull, checkRuns, statuses);
+}
+
+/** An open pull request as GitHub gives it, with its head commit's check runs and statuses, in the model's words. */
+export function pullOf(repo: string, pull: RawPull, checkRuns: RawCheckRun[], statuses: RawStatus[]): PullRequest {
   return {
     repo,
     number: pull.number,
@@ -496,7 +440,7 @@ export async function pullRequest(api: Api, repo: string, number: number): Promi
     draft: pull.draft ?? false,
     head: pull.head.ref,
     base: pull.base.ref,
-    sha,
+    sha: pull.head.sha,
     createdAt: pull.created_at,
     updatedAt: pull.updated_at,
     mergeState: mergeState(pull),
@@ -663,20 +607,43 @@ export function shownRuns<T extends { id: number; status: string | null }>(runs:
 async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: RawRun): Promise<ReleaseRun> {
   const path = run.path ?? workflow.path;
   const [rawJobs, definitions] = await Promise.all([
-    // Without `filter`, GitHub gives the jobs of the run's latest attempt.
-    api.list<RawJob>(`repos/${repo}/actions/runs/${run.id}/jobs`, "jobs"),
+    runJobs(api, repo, run.id),
     // Which job waits for which, from the workflow file as it was at the run's commit.
     path && run.head_sha ? workflowFile(api, repo, path, run.head_sha) : undefined,
   ]);
   const jobs = rawJobs.map(job);
-  let state = checkState(run.status, run.conclusion);
-  // A run with one job waiting for approval and another running is "in progress" to GitHub, but what it needs is
-  // the approval.
-  if (run.status !== "completed" && jobs.some((one) => one.state === "waiting")) {
-    state = "waiting";
-  }
   // Only a run that waits has anything to approve, so only such a run costs the request.
-  const approvals = state === "waiting" ? await pendingApprovals(api, repo, run.id) : [];
+  const approvals = runState(run, jobs) === "waiting" ? await pendingApprovals(api, repo, run.id) : [];
+  return runOf(repo, workflow, run, jobs, definitions, approvals);
+}
+
+/** The jobs of a run's latest attempt, which is what GitHub gives without `filter`. */
+export function runJobs(api: Api, repo: string, run: number): Promise<RawJob[]> {
+  return api.list<RawJob>(`repos/${repo}/actions/runs/${run}/jobs`, "jobs");
+}
+
+/**
+ * How a run stands, given its jobs. A run with one job waiting for approval and another running is "in progress" to
+ * GitHub, but what it needs is the approval.
+ */
+export function runState(run: Pick<RawRun, "status" | "conclusion">, jobs: Job[]): CheckState {
+  return run.status !== "completed" && jobs.some((one) => one.state === "waiting")
+    ? "waiting"
+    : checkState(run.status, run.conclusion);
+}
+
+/**
+ * A run of a release workflow as GitHub gives it, in the model's words: with its `jobs`, its workflow file's
+ * `definitions` at its commit if they could be had, and the `approvals` it waits for.
+ */
+export function runOf(
+  repo: string,
+  workflow: Pick<RawWorkflow, "name">,
+  run: RawRun,
+  jobs: Job[],
+  definitions: WorkflowJob[] | undefined,
+  approvals: Approval[],
+): ReleaseRun {
   return {
     repo,
     id: run.id,
@@ -684,7 +651,7 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
     title: run.display_title ?? run.name ?? workflow.name,
     tag: releaseTag(run),
     url: run.html_url,
-    state,
+    state: runState(run, jobs),
     actor: (run.triggering_actor ?? run.actor)?.login,
     startedAt: run.run_started_at ?? run.created_at,
     finishedAt: run.status === "completed" ? run.updated_at : undefined,
@@ -743,7 +710,7 @@ export function approval(raw: RawPendingDeployment): Approval {
   };
 }
 
-function job(raw: RawJob): Job {
+export function job(raw: RawJob): Job {
   const state = checkState(raw.status, raw.conclusion);
   return {
     id: raw.id,

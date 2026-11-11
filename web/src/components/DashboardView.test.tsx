@@ -91,7 +91,6 @@ test("a hidden project takes its pull requests and runs off the page, until it i
     "Running now 1",
     "Projects & releases 1",
   ]);
-  expect(screen.getByText("1 more in hidden projects")).toBeTruthy();
   expect(JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "")).toEqual([ledger]);
 
   // The browser remembers it for the next visit.

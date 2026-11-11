@@ -10,6 +10,7 @@ export type SentRequest = { method: string; path: string; body: unknown };
 /**
  * An `Auth` whose `github` answers from `routes`, keyed by the path as asked for (query included) or, failing that,
  * the path without its query; a write is keyed by its method and path, such as `PUT repos/o/r/pulls/1/merge`.
+ * A GraphQL query (`POST graphql`) without a route of its own is answered from the REST routes, see `answerQuery`.
  * Anything else is a 404. `calls` are the paths asked for so far, `requests` everything about each, and `peak` the
  * most requests that were under way at once.
  */
@@ -17,8 +18,11 @@ export function fakeGitHub(routes: Routes): {
   auth: Auth;
   calls: string[];
   requests: SentRequest[];
+  /** The GraphQL queries the fake answered from `routes`, as text. */
+  queries: string[];
   peak: () => number;
 } {
+  const queries: string[] = [];
   const calls: string[] = [];
   const requests: SentRequest[] = [];
   let running = 0;
@@ -37,6 +41,12 @@ export function fakeGitHub(routes: Routes): {
       try {
         const key = method === "GET" ? path : `${method} ${path}`;
         const route = key in routes ? routes[key] : routes[key.split("?")[0] ?? key];
+        const query = (requests.at(-1)?.body as { query?: unknown } | undefined)?.query;
+        if (route === undefined && key === "POST graphql" && typeof query === "string" && query.startsWith("query")) {
+          queries.push(query);
+          await new Promise((resolve) => setImmediate(resolve));
+          return await answerQuery(routes, query);
+        }
         if (route === undefined) {
           return Response.json({ message: "Not Found" }, { status: 404 });
         }
@@ -48,7 +58,280 @@ export function fakeGitHub(routes: Routes): {
       }
     },
   };
-  return { auth, calls, requests, peak: () => peak };
+  return { auth, calls, requests, queries, peak: () => peak };
+}
+
+/** Ends the answering of a query with an HTTP answer of its own, as GitHub does for what fails every call. */
+class Whole {
+  response: Response;
+  constructor(response: Response) {
+    this.response = response;
+  }
+}
+
+/** Fails one field of a query, as GitHub does for what it won't say of one repository. */
+class Refused {}
+
+const hex = (text: string) => Buffer.from(text, "utf8").toString("hex");
+const upper = (word: unknown) => (typeof word === "string" ? word.toUpperCase() : null);
+
+/**
+ * Answers the dashboard's GraphQL query (graphql.ts) from the same `routes` as the REST API's, so that a test's
+ * account is the same whichever way it is read. A route that fails with a rate limit or a 401 fails the whole
+ * query with that answer, and so does anything wrong with the list of installations; any other failure fails the
+ * field of its repository or workflow. A workflow file's id is its text in hex.
+ */
+async function answerQuery(routes: Routes, query: string): Promise<Response> {
+  // biome-ignore lint/suspicious/noExplicitAny: answers shaped like GitHub's, as loosely typed as its JSON.
+  type Json = any;
+  /** A route's JSON; undefined for one that isn't there. */
+  async function get(path: string, whole = false): Promise<Json> {
+    const route = path in routes ? routes[path] : routes[path.split("?")[0] ?? path];
+    if (route === undefined) {
+      return undefined;
+    }
+    if (typeof route !== "function") {
+      return route;
+    }
+    const response: Response = await route(path);
+    if (response.ok) {
+      return response.json();
+    }
+    const limited = response.headers.has("retry-after") || response.headers.get("x-ratelimit-remaining") === "0";
+    if (whole || response.status === 401 || response.status === 429 || limited) {
+      throw new Whole(response);
+    }
+    throw new Refused();
+  }
+  const text = (blob: Json): string =>
+    blob?.encoding === "base64" ? Buffer.from(String(blob.content), "base64").toString("utf8") : "";
+  const blobOf = (content: string, withText: boolean) => ({
+    oid: hex(content),
+    ...(withText ? { object: { text: content } } : {}),
+  });
+
+  async function listed(): Promise<Json> {
+    const installations = (await get("user/installations", true))?.installations ?? [];
+    const repos = new Map<string, Json>();
+    for (const installation of installations) {
+      for (const one of (await get(`user/installations/${installation.id}/repositories`, true))?.repositories ?? []) {
+        if (!one.archived) {
+          repos.set(one.full_name, one);
+        }
+      }
+    }
+    const nodes = [];
+    for (const one of repos.values()) {
+      const own = typeof routes[`repos/${one.full_name}`] === "function" ? {} : routes[`repos/${one.full_name}`];
+      const settings: Json = { ...(own as object), ...one };
+      const release = await get(`repos/${one.full_name}/releases/latest`).catch(() => undefined);
+      nodes.push({
+        nameWithOwner: one.full_name,
+        name: one.name,
+        description: one.description,
+        url: one.html_url,
+        isPrivate: one.private,
+        pushedAt: one.pushed_at,
+        defaultBranchRef: one.default_branch ? { name: one.default_branch } : null,
+        mergeCommitAllowed: settings.allow_merge_commit ?? true,
+        squashMergeAllowed: settings.allow_squash_merge ?? true,
+        rebaseMergeAllowed: settings.allow_rebase_merge ?? true,
+        autoMergeAllowed: settings.allow_auto_merge ?? true,
+        latestRelease: release
+          ? {
+              tagName: release.tag_name,
+              url: release.html_url,
+              publishedAt: release.published_at,
+              createdAt: release.created_at,
+            }
+          : null,
+      });
+    }
+    nodes.sort((a, b) => (b.pushedAt ?? "").localeCompare(a.pushedAt ?? ""));
+    return { repositories: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } };
+  }
+
+  async function pullOf(repo: string, number: number): Promise<Json> {
+    const one = await get(`repos/${repo}/pulls/${number}`);
+    if (one?.state !== "open") {
+      return undefined;
+    }
+    const checkRuns = (await get(`repos/${repo}/commits/${one.head.sha}/check-runs`))?.check_runs ?? [];
+    const seen = new Set<string>();
+    const statuses = ((await get(`repos/${repo}/commits/${one.head.sha}/statuses`)) ?? []).filter(
+      (status: Json) => !seen.has(status.context) && seen.add(status.context),
+    );
+    const bot = typeof one.user?.login === "string" && one.user.login.endsWith("[bot]");
+    return {
+      id: one.node_id,
+      number: one.number,
+      title: one.title,
+      url: one.html_url,
+      isDraft: one.draft ?? false,
+      headRefName: one.head.ref,
+      baseRefName: one.base.ref,
+      headRefOid: one.head.sha,
+      createdAt: one.created_at,
+      updatedAt: one.updated_at,
+      mergeable: one.mergeable == null ? "UNKNOWN" : one.mergeable ? "MERGEABLE" : "CONFLICTING",
+      mergeStateStatus: one.mergeable_state === "draft" ? "BLOCKED" : (upper(one.mergeable_state) ?? "UNKNOWN"),
+      autoMergeRequest: one.auto_merge ? { enabledAt: "2026-11-02T09:00:00Z" } : null,
+      author: one.user && {
+        __typename: bot ? "Bot" : "User",
+        login: bot ? one.user.login.slice(0, -"[bot]".length) : one.user.login,
+        avatarUrl: one.user.avatar_url,
+      },
+      statusCheckRollup: {
+        contexts: {
+          pageInfo: { hasNextPage: false },
+          nodes: [
+            ...checkRuns.map((run: Json) => ({
+              __typename: "CheckRun",
+              databaseId: run.id ?? null,
+              name: run.name,
+              status: upper(run.status),
+              conclusion: upper(run.conclusion),
+              permalink: run.html_url,
+            })),
+            ...statuses.map((status: Json) => ({
+              __typename: "StatusContext",
+              context: status.context,
+              state: upper(status.state),
+              targetUrl: status.target_url,
+            })),
+          ],
+        },
+      },
+    };
+  }
+
+  /** The repository's workflow files: the folder as listed if a test listed it, else a file per workflow. */
+  async function entries(repo: string, withText: boolean): Promise<Json[] | undefined> {
+    const folder = await get(`repos/${repo}/contents/.github/workflows`).catch(() => undefined);
+    if (Array.isArray(folder)) {
+      return Promise.all(
+        folder.map(async (entry: Json) => ({
+          path: entry.path,
+          type: entry.type === "file" ? "blob" : "tree",
+          ...blobOf(text(await get(`repos/${repo}/git/blobs/${entry.sha}`)), withText),
+        })),
+      );
+    }
+    const workflows: Json[] = (await get(`repos/${repo}/actions/workflows`))?.workflows ?? [];
+    const files = workflows.filter((one) => String(one.path).startsWith(".github/workflows/"));
+    return files.length === 0
+      ? undefined
+      : files.map((one) => ({ path: one.path, type: "blob", ...blobOf(`name: ${one.name}\n`, withText) }));
+  }
+
+  async function details(repo: string, withText: boolean): Promise<Json> {
+    const open: Json[] = (await get(`repos/${repo}/pulls`)) ?? [];
+    const pulls = await Promise.all(open.map((one) => pullOf(repo, one.number)));
+    const files = await entries(repo, withText);
+    return {
+      workflows: files ? { entries: files } : null,
+      pullRequests: { pageInfo: { hasNextPage: false }, nodes: pulls.filter((one) => one !== undefined) },
+    };
+  }
+
+  async function workflow(repo: string, path: string, withText: boolean): Promise<Json> {
+    const workflows: Json[] = (await get(`repos/${repo}/actions/workflows`))?.workflows ?? [];
+    const found = workflows.find((one) => one.path === path);
+    if (!found) {
+      return null;
+    }
+    const runs: Json[] = (await get(`repos/${repo}/actions/workflows/${found.id}/runs`))?.workflow_runs ?? [];
+    const nodes = await Promise.all(
+      runs.slice(0, 5).map(async (run) => {
+        const jobs: Json[] = (await get(`repos/${repo}/actions/runs/${run.id}/jobs`))?.jobs ?? [];
+        const pending: Json[] =
+          (await get(`repos/${repo}/actions/runs/${run.id}/pending_deployments`).catch((error) => {
+            if (error instanceof Whole) {
+              throw error;
+            }
+            return [];
+          })) ?? [];
+        const file = run.head_sha
+          ? await get(`repos/${repo}/contents/${path}?ref=${run.head_sha}`).catch(() => undefined)
+          : undefined;
+        const actor = run.triggering_actor ?? run.actor;
+        return {
+          databaseId: run.id,
+          displayTitle: run.display_title ?? null,
+          event: run.event,
+          url: run.html_url,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+          pendingDeploymentRequests: {
+            nodes: pending.map((one) => ({
+              currentUserCanApprove: one.current_user_can_approve,
+              environment: { databaseId: one.environment.id, name: one.environment.name },
+            })),
+          },
+          checkSuite: {
+            status: upper(run.status),
+            conclusion: upper(run.conclusion),
+            branch: run.head_branch ? { name: run.head_branch } : null,
+            creator: actor ? { __typename: "User", login: actor.login } : null,
+            commit: { oid: run.head_sha ?? `head${run.id}`, file: file ? blobOf(text(file), withText) : null },
+            checkRuns: {
+              pageInfo: { hasNextPage: false },
+              nodes: jobs.map((one) => ({
+                databaseId: one.id,
+                name: one.name,
+                status: upper(one.status),
+                conclusion: upper(one.conclusion),
+                permalink: one.html_url,
+                startedAt: one.started_at,
+                completedAt: one.completed_at,
+              })),
+            },
+          },
+        };
+      }),
+    );
+    return { databaseId: found.id, name: found.name, state: upper(found.state), runs: { nodes } };
+  }
+
+  const data: Record<string, unknown> = {};
+  const errors: unknown[] = [];
+  async function field(name: string, answer: () => Promise<unknown>): Promise<void> {
+    try {
+      data[name] = await answer();
+    } catch (error) {
+      if (!(error instanceof Refused)) {
+        throw error;
+      }
+      data[name] = null;
+      errors.push({ type: "SERVICE_UNAVAILABLE", path: [name], message: "Something went wrong" });
+    }
+  }
+  try {
+    if (/^\s*viewer \{/m.test(query)) {
+      data.viewer = await listed();
+    }
+    const treeText = query.includes("entries { path type oid object");
+    for (const [, alias, owner, name] of query.matchAll(
+      /^\s*(r\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{\s*workflows:/gm,
+    )) {
+      await field(alias ?? "", () => details(`${owner}/${name}`, treeText));
+    }
+    for (const [, alias, repo, file, more] of query.matchAll(
+      /^\s*(w\d+): resource\(url: "https:\/\/github\.com\/([^/"]+\/[^/"]+)\/actions\/workflows\/([^"]+)"\)([\s\S]*?)\n {2}\} \}/gm,
+    )) {
+      const path = `.github/workflows/${decodeURIComponent(file ?? "")}`;
+      await field(alias ?? "", () => workflow(repo ?? "", path, (more ?? "").includes("{ oid object")));
+    }
+    for (const [, alias, oid] of query.matchAll(/^\s*(b\d+): repository\([^)]*\) \{ object\(oid: "([0-9a-f]*)"\)/gm)) {
+      data[alias ?? ""] = { object: { text: Buffer.from(oid ?? "", "hex").toString("utf8") } };
+    }
+  } catch (error) {
+    if (error instanceof Whole) {
+      return error.response;
+    }
+    throw error;
+  }
+  return Response.json(errors.length > 0 ? { data, errors } : { data });
 }
 
 // Answers shaped like GitHub's, cut down to what the dashboard reads plus a little it must ignore.

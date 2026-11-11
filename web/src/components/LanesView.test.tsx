@@ -59,13 +59,13 @@ test("a project with nothing going on shrinks to one thin lane", () => {
   expect(lane("home-ledger").classList.contains("lane-quiet")).toBe(false);
 });
 
-test("hiding a project moves it to the dock, which counts its pull requests and brings it back", () => {
+test("hiding a project moves it to the dock, which brings it back", () => {
   lanes();
   fireEvent.click(screen.getByRole("button", { name: "Hide home-ledger" }));
   expect(screen.queryByRole("region", { name: "home-ledger" })).toBeNull();
   expect(screen.queryByText("Split")).toBeNull();
   const dock = screen.getByRole("region", { name: "Hidden 1" });
-  expect(within(dock).getByRole("button", { name: "Show home-ledger" }).textContent).toBe("home-ledger2 pull requests");
+  expect(within(dock).getByRole("button", { name: "Show home-ledger" }).textContent).toBe("home-ledger");
   expect(JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "")).toEqual([LEDGER]);
 
   fireEvent.click(within(dock).getByRole("button", { name: "Show home-ledger" }));
