@@ -66,6 +66,20 @@ export type ReleaseRun = {
   /** Unset while it runs. */
   finishedAt: string | undefined;
   jobs: Job[];
+  /**
+   * While it waits for an approval: the environments waiting for one, such as production. Read only for runs that
+   * wait, so empty for every other run.
+   */
+  approvals: Approval[];
+};
+
+/** One protected environment a waiting run needs approved before its job goes on. */
+export type Approval = {
+  environmentId: number;
+  /** The environment's name, such as "production". */
+  environment: string;
+  /** Whether the signed-in user is one of its required reviewers, and so may approve or reject it. */
+  canApprove: boolean;
 };
 
 export type Project = {
@@ -80,6 +94,8 @@ export type Project = {
   pushedAt: string | undefined;
   /** The newest published release, if there is one. */
   latestRelease: { tag: string; url: string; publishedAt: string } | undefined;
+  /** The id of its active Promote workflow (`PROMOTE_WORKFLOW`), when it has one. */
+  promoteWorkflow: number | undefined;
 };
 
 /** Everything on the page at one moment. The lists are complete: something missing from them is gone. */
@@ -119,6 +135,11 @@ export type Dashboard = {
   refresh(): Promise<void>;
   /** Stops keeping it fresh and forgets what was read, such as on sign-out. */
   stop(): void;
+  /**
+   * Reads again soon what `change` names, as if GitHub had sent it: for an action the page just took, whose own
+   * webhook may take a moment. Its fields are those of the relay's events (see web/src/github/events.ts).
+   */
+  changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number }): void;
 };
 
 /** A pull request's checks in one word: the worst that is true of them. `none` when it has no checks. */
@@ -137,4 +158,33 @@ export function summarize(checks: Check[]): "none" | "failed" | "waiting" | "run
     return "running";
   }
   return "passed";
+}
+
+/**
+ * What the page can do to release runs and projects. Each one checks again on GitHub that it still applies, and
+ * fails with an `Error` whose message says why in words for the user. On success the dashboard reads again what
+ * changed. The real ones are in web/src/github/run_actions.ts; the demo has its own.
+ */
+export type RunActions = {
+  /** Approves or rejects one environment a waiting run needs. */
+  review(run: ReleaseRun, approval: Approval, verdict: "approved" | "rejected"): Promise<void>;
+  /** Re-runs a finished run's failed and cancelled jobs, with the jobs that need them. */
+  rerunFailed(run: ReleaseRun): Promise<void>;
+  /** Re-runs one failed or cancelled job of a finished run, with the jobs that need it. */
+  rerunJob(run: ReleaseRun, job: Job): Promise<void>;
+  /** The tag the project's next release would get, once it is known that no such tag exists yet. */
+  nextRelease(project: Project): Promise<string>;
+  /** Publishes a release of the default branch with this tag and the notes GitHub writes for it. */
+  release(project: Project, tag: string): Promise<void>;
+  /** Starts the project's Promote workflow for this release tag. */
+  promote(project: Project, tag: string): Promise<void>;
+};
+
+/** A release tag that Promote takes: a plain version with its `v`, such as v1.2.3. */
+export const RELEASE_TAG = /^v\d+\.\d+\.\d+$/;
+
+/** The release the project's Promote button offers: its latest, if it has a Promote workflow and such a tag. */
+export function promoteTag(project: Project): string | undefined {
+  const tag = project.latestRelease?.tag;
+  return project.promoteWorkflow !== undefined && tag !== undefined && RELEASE_TAG.test(tag) ? tag : undefined;
 }

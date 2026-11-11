@@ -1,5 +1,6 @@
-import type { Dashboard, DashboardState } from "../model.ts";
-import { FIRST_FRAME, FRAMES, NOTHING, sampleData } from "./data.ts";
+import type { Dashboard, DashboardState, RunActions } from "../model.ts";
+import { applyEdits, clearEdits, demoRunActions, forgetRun, noEdits } from "./actions.ts";
+import { FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
 
 export type DemoOptions = {
   /** How long each frame of the script stays up. */
@@ -12,14 +13,22 @@ export type DemoOptions = {
   show?: string | undefined;
 };
 
+/** The demo's dashboard, with actions that work on its sample data. */
+export type DemoDashboard = Dashboard & { runActions: RunActions };
+
+export function isDemoDashboard(dashboard: Dashboard): dashboard is DemoDashboard {
+  return "runActions" in dashboard;
+}
+
 const LOADING_MS = 400;
 const REFRESHING_MS = 700;
 
 /**
  * The demo's dashboard: the sample data, with a script that moves one pull request's checks and one release run
- * along every few seconds and then starts over, the way webhook events move the real page.
+ * along every few seconds and then starts over, the way webhook events move the real page. Its actions change the
+ * sample data as the real ones change GitHub, until the demo stops.
  */
-export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
+export function createDemoDashboard(options: DemoOptions = {}): DemoDashboard {
   const stepMs = options.stepMs ?? 3000;
   const { show } = options;
   let state: DashboardState = { status: "loading" };
@@ -30,6 +39,7 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   let base = 0;
   let frame = FIRST_FRAME;
   let frameAt = 0;
+  const edits = noEdits();
 
   function setState(next: DashboardState): void {
     state = next;
@@ -50,7 +60,7 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   function ready(refreshing: boolean, readAt: number): DashboardState {
     return {
       status: "ready",
-      data: show === "empty" ? NOTHING : sampleData({ base, frame, frameAt }),
+      data: show === "empty" ? NOTHING : applyEdits(sampleData({ base, frame, frameAt }), edits),
       readAt,
       refreshing,
       problem: show === "problem" ? "GitHub didn't answer (503). Showing what was read 5 minutes ago." : undefined,
@@ -61,6 +71,10 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   function advance(): void {
     frame = (frame + 1) % FRAMES;
     frameAt = Date.now();
+    if (frame === 0) {
+      // The scripted run starts over, and waits for its approval again.
+      forgetRun(edits, SCRIPTED_RUN);
+    }
     setState(ready(state.status === "ready" && state.refreshing, frameAt));
   }
 
@@ -72,7 +86,15 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
       clearTimeout(timer);
     }
     timers.clear();
+    clearEdits(edits);
     setState({ status: "loading" });
+  }
+
+  /** Draws the data again, with what the actions did. */
+  function changed(): void {
+    if (state.status === "ready") {
+      setState(ready(state.refreshing, show === "problem" ? state.readAt : Date.now()));
+    }
   }
 
   return {
@@ -124,5 +146,9 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
     },
 
     stop,
+
+    changed,
+
+    runActions: demoRunActions(edits, later, changed),
   };
 }

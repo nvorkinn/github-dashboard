@@ -1,10 +1,12 @@
-import type { Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
+import type { Approval, Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
 // as a newer release replaces it.
 export const RECENT_RELEASES = 5;
+// The workflow a project's Promote button starts: it deploys a release that dev already has to production.
+export const PROMOTE_WORKFLOW = ".github/workflows/promote.yml";
 
 // The parts of GitHub's answers that are used. Everything else in them is ignored.
 type RawInstallation = { id: number };
@@ -36,7 +38,7 @@ type RawPull = {
 };
 type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
 type RawStatus = { context: string; state: string; target_url: string | null };
-type RawWorkflow = { id: number; name: string; state: string };
+type RawWorkflow = { id: number; name: string; state: string; path?: string };
 type RawRun = {
   id: number;
   name: string | null;
@@ -59,6 +61,10 @@ type RawJob = {
   started_at: string | null;
   completed_at: string | null;
 };
+export type RawPendingDeployment = {
+  environment: { id: number; name?: string };
+  current_user_can_approve: boolean;
+};
 
 export type ReadResult = {
   data: DashboardData;
@@ -78,7 +84,7 @@ export async function readDashboard(api: Api, previous?: DashboardData): Promise
   const read = await Promise.all(
     repos.map(async (repo) => {
       const parts = await readRepo(api, repo.full_name, ALL_OF_IT, previous, failed);
-      return { ...parts, project: project(repo, parts.latestRelease) };
+      return { ...parts, project: project(repo, parts.latestRelease, parts.promoteWorkflow) };
     }),
   );
   return {
@@ -221,7 +227,7 @@ export async function readChanged(api: Api, plan: Map<string, RepoPlan>, previou
   );
   const projects = previous.projects.map((one) => {
     const parts = read.get(one.repo);
-    return parts ? { ...one, latestRelease: parts.latestRelease } : one;
+    return parts ? { ...one, latestRelease: parts.latestRelease, promoteWorkflow: parts.promoteWorkflow } : one;
   });
   return {
     data: {
@@ -244,7 +250,12 @@ function problemOf(failed: Set<string>): string | undefined {
     : `Couldn't read everything from ${names.length === 1 ? names[0] : `${names.length} projects`}.`;
 }
 
-type RepoParts = { latestRelease: Project["latestRelease"]; pulls: PullRequest[]; releases: ReleaseRun[] };
+type RepoParts = {
+  latestRelease: Project["latestRelease"];
+  pulls: PullRequest[];
+  releases: ReleaseRun[];
+  promoteWorkflow: Project["promoteWorkflow"];
+};
 
 /**
  * The parts of one repository: read if `wanted` names them, and as they were in `previous` otherwise. A part that
@@ -261,6 +272,7 @@ async function readRepo(
     latestRelease: previous?.projects.find(of(repo))?.latestRelease,
     pulls: previous?.pulls.filter(of(repo)) ?? [],
     releases: previous?.releases.filter(of(repo)) ?? [],
+    promoteWorkflow: previous?.projects.find(of(repo))?.promoteWorkflow,
   };
 
   async function part<T>(isWanted: boolean, read: () => Promise<T>, fallback: T): Promise<T> {
@@ -286,9 +298,10 @@ async function readRepo(
       () => (numbers === "all" ? pullRequests(api, repo) : somePullRequests(api, repo, numbers, was.pulls)),
       was.pulls,
     ),
-    part(wanted.releases, () => releaseRuns(api, repo), was.releases),
+    // The Promote workflow is found in the same list of workflows as the release workflows.
+    part(wanted.releases, () => releaseRuns(api, repo), { runs: was.releases, promoteWorkflow: was.promoteWorkflow }),
   ]);
-  return { latestRelease, pulls, releases };
+  return { latestRelease, pulls, releases: releases.runs, promoteWorkflow: releases.promoteWorkflow };
 }
 
 /**
@@ -311,7 +324,11 @@ async function repositories(api: Api): Promise<RawRepo[]> {
   return [...repos.values()].sort((a, b) => (b.pushed_at ?? "").localeCompare(a.pushed_at ?? ""));
 }
 
-function project(repo: RawRepo, latestRelease: Project["latestRelease"]): Project {
+function project(
+  repo: RawRepo,
+  latestRelease: Project["latestRelease"],
+  promoteWorkflow: Project["promoteWorkflow"],
+): Project {
   return {
     repo: repo.full_name,
     name: repo.name,
@@ -321,6 +338,7 @@ function project(repo: RawRepo, latestRelease: Project["latestRelease"]): Projec
     private: repo.private,
     pushedAt: repo.pushed_at ?? undefined,
     latestRelease,
+    promoteWorkflow,
   };
 }
 
@@ -500,13 +518,19 @@ export function isReleaseName(name: string | null | undefined): boolean {
 
 /**
  * Per release workflow, the runs still going among its latest ones and the last one that finished, the last started
- * first. Read per workflow, so CI runs can't push a release off the page.
+ * first. Read per workflow, so CI runs can't push a release off the page. With them, from the same list of
+ * workflows, the id of the repository's active Promote workflow, if it has one.
  */
-async function releaseRuns(api: Api, repo: string): Promise<ReleaseRun[]> {
-  const workflows = (await api.list<RawWorkflow>(`repos/${repo}/actions/workflows`, "workflows")).filter(
-    // A disabled workflow starts no more releases.
-    (workflow) => workflow.state === "active" && isReleaseName(workflow.name),
+async function releaseRuns(
+  api: Api,
+  repo: string,
+): Promise<{ runs: ReleaseRun[]; promoteWorkflow: number | undefined }> {
+  // A disabled workflow starts no more releases.
+  const active = (await api.list<RawWorkflow>(`repos/${repo}/actions/workflows`, "workflows")).filter(
+    (workflow) => workflow.state === "active",
   );
+  const workflows = active.filter((workflow) => isReleaseName(workflow.name));
+  const promoteWorkflow = active.find((workflow) => workflow.path === PROMOTE_WORKFLOW)?.id;
   const runs = await Promise.all(
     workflows.map(async (workflow) => {
       const latestRuns = (
@@ -517,7 +541,7 @@ async function releaseRuns(api: Api, repo: string): Promise<ReleaseRun[]> {
       return Promise.all(shownRuns(latestRuns).map((run) => releaseRun(api, repo, workflow, run)));
     }),
   );
-  return runs.flat().sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return { runs: runs.flat().sort((a, b) => b.startedAt.localeCompare(a.startedAt)), promoteWorkflow };
 }
 
 /** Of a workflow's latest runs: the unfinished ones, and the latest finished one so its outcome stays up. */
@@ -540,6 +564,8 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
   if (run.status !== "completed" && jobs.some((one) => one.state === "waiting")) {
     state = "waiting";
   }
+  // Only a run that waits has anything to approve, so only such a run costs the request.
+  const approvals = state === "waiting" ? await pendingApprovals(api, repo, run.id) : [];
   return {
     repo,
     id: run.id,
@@ -551,6 +577,33 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
     startedAt: run.run_started_at ?? run.created_at,
     finishedAt: run.status === "completed" ? run.updated_at : undefined,
     jobs,
+    approvals,
+  };
+}
+
+/**
+ * The environments a waiting run needs approved. A token without the permission to read them (GitHub answers 403 or
+ * 404) leaves the run without buttons rather than without its card.
+ */
+async function pendingApprovals(api: Api, repo: string, run: number): Promise<Approval[]> {
+  let pending: RawPendingDeployment[];
+  try {
+    pending = await api.list<RawPendingDeployment>(`repos/${repo}/actions/runs/${run}/pending_deployments`);
+  } catch (error) {
+    if (error instanceof GitHubError && error.retryAt === undefined && (error.status === 403 || error.status === 404)) {
+      return [];
+    }
+    throw error;
+  }
+  return pending.map(approval);
+}
+
+/** A pending deployment as GitHub lists it, in the model's words. */
+export function approval(raw: RawPendingDeployment): Approval {
+  return {
+    environmentId: raw.environment.id,
+    environment: raw.environment.name ?? `environment ${raw.environment.id}`,
+    canApprove: raw.current_user_can_approve,
   };
 }
 

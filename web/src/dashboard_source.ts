@@ -1,5 +1,7 @@
 import type { Auth } from "./auth.ts";
+import type { Actions } from "./components/actions.tsx";
 import { createDashboard } from "./github/dashboard.ts";
+import { createRunActions } from "./github/run_actions.ts";
 import type { Dashboard } from "./model.ts";
 
 /**
@@ -14,4 +16,18 @@ export async function makeDashboard(auth: Auth, demo: boolean): Promise<Dashboar
     return createDemoDashboard({ show: new URLSearchParams(location.search).get("show") ?? undefined });
   }
   return createDashboard(auth);
+}
+
+/**
+ * What the page can do to `dashboard`'s data: on GitHub as the signed-in user, or, for the demo's dashboard, on its
+ * sample data.
+ */
+export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolean): Promise<Actions> {
+  if (demo && import.meta.env.MODE === "demo") {
+    const { isDemoDashboard } = await import("./demo/dashboard.ts");
+    if (isDemoDashboard(dashboard)) {
+      return { runs: dashboard.runActions };
+    }
+  }
+  return { runs: createRunActions(auth, dashboard) };
 }

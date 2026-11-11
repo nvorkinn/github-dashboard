@@ -14,6 +14,8 @@ const DAY = 24 * HOUR;
 export const FRAMES = 14;
 /** Where the script starts: in the middle, with something in every state. */
 export const FIRST_FRAME = 5;
+/** The release run the script moves along. */
+export const SCRIPTED_RUN = 9071;
 // How much time a frame stands for in the story, which runs faster than the clock.
 const FRAME_STORY_MS = 45_000;
 
@@ -84,6 +86,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         url: github("weather-station/releases/tag/v2.4.1"),
         publishedAt: before(3 * DAY),
       },
+      promoteWorkflow: undefined,
     },
     {
       repo: `${OWNER}/trail-maps`,
@@ -94,6 +97,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       private: false,
       pushedAt: before(5 * HOUR),
       latestRelease: { tag: "v0.9.0", url: github("trail-maps/releases/tag/v0.9.0"), publishedAt: before(23 * DAY) },
+      promoteWorkflow: undefined,
     },
     {
       repo: `${OWNER}/home-ledger`,
@@ -108,6 +112,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         url: github("home-ledger/releases/tag/v1.12.3"),
         publishedAt: before(26 * HOUR),
       },
+      promoteWorkflow: 31,
     },
     {
       repo: `${OWNER}/recipe-box`,
@@ -118,6 +123,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       private: false,
       pushedAt: before(9 * DAY),
       latestRelease: undefined,
+      promoteWorkflow: undefined,
     },
     {
       repo: `${OWNER}/garden-sensors`,
@@ -132,6 +138,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         url: github("garden-sensors/releases/tag/v3.0.0-rc.2"),
         publishedAt: before(6 * DAY),
       },
+      promoteWorkflow: undefined,
     },
   ];
 
@@ -316,7 +323,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
   const releases: ReleaseRun[] = [
     {
       repo: `${OWNER}/weather-station`,
-      id: 9071,
+      id: SCRIPTED_RUN,
       workflow: "Release",
       title: "v2.5.0",
       url: github("weather-station/actions/runs/9071"),
@@ -325,6 +332,10 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       startedAt: iso(storyStart),
       finishedAt: releaseOver ? storyAt(RELEASE_DONE) : undefined,
       jobs: scriptedJobs,
+      // Someone else is the required reviewer here: the script approves it after a while, as they would.
+      approvals: scriptedStates.has("waiting")
+        ? [{ environmentId: 70, environment: "production", canApprove: false }]
+        : [],
     },
     {
       repo: `${OWNER}/weather-station`,
@@ -347,6 +358,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         job("weather-station", 889308, "publish release", "passed", 3 * DAY + MINUTE, 22_000),
         job("weather-station", 889309, "notify", "skipped"),
       ],
+      approvals: [],
     },
     {
       repo: `${OWNER}/garden-sensors`,
@@ -366,6 +378,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         job("garden-sensors", 441005, "sign", "skipped"),
         job("garden-sensors", 441006, "publish release", "skipped"),
       ],
+      approvals: [],
     },
     {
       repo: `${OWNER}/home-ledger`,
@@ -383,6 +396,26 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         job("home-ledger", 276403, "deploy", "passed", 26 * HOUR - 3 * MINUTE, 64_000),
         job("home-ledger", 276404, "health check", "passed", 26 * HOUR - 4 * MINUTE, 37_000),
       ],
+      approvals: [],
+    },
+    {
+      // Waits for the user, who is production's required reviewer, until the demo's Approve or Reject is pressed.
+      repo: `${OWNER}/home-ledger`,
+      id: 2781,
+      workflow: "Promote",
+      title: "v1.12.3",
+      url: github("home-ledger/actions/runs/2781"),
+      state: "waiting",
+      actor: "octocat",
+      startedAt: before(12 * MINUTE),
+      finishedAt: undefined,
+      jobs: [
+        job("home-ledger", 278101, "check tag", "passed", 12 * MINUTE, 9000),
+        job("home-ledger", 278102, "approve-prod", "waiting"),
+        job("home-ledger", 278103, "deploy prod", "queued"),
+        job("home-ledger", 278104, "health check", "queued"),
+      ],
+      approvals: [{ environmentId: 71, environment: "production", canApprove: true }],
     },
   ];
 

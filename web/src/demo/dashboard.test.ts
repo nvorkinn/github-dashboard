@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { CheckState, DashboardData } from "../model.ts";
-import { summarize } from "../model.ts";
+import type { Approval, CheckState, DashboardData, Job } from "../model.ts";
+import { promoteTag, summarize } from "../model.ts";
+import { ACTION_MS, FAILING_PROJECT } from "./actions.ts";
 import { createDemoDashboard } from "./dashboard.ts";
-import { FRAMES } from "./data.ts";
+import { FRAMES, SCRIPTED_RUN } from "./data.ts";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -69,7 +70,15 @@ test("has one of every case", () => {
   const every: CheckState[] = ["queued", "running", "waiting", "passed", "failed", "cancelled", "skipped"];
   const jobStates = new Set(releases.flatMap((run) => run.jobs.map((job) => job.state)));
   expect(every.every((state) => jobStates.has(state))).toBe(true);
-  expect(new Set(releases.map((run) => run.state))).toEqual(new Set(["running", "passed", "failed"]));
+  expect(new Set(releases.map((run) => run.state))).toEqual(new Set(["running", "waiting", "passed", "failed"]));
+  // Something for every action: an approval the user can give and one they can't, a run and a job to re-run, a
+  // project to promote and one to release.
+  const approvals = releases.flatMap((run) => run.approvals);
+  expect(new Set(approvals.map((one) => one.canApprove))).toEqual(new Set([true, false]));
+  expect(releases.some((run) => run.state === "failed" && run.jobs.some((job) => job.state === "cancelled"))).toBe(
+    true,
+  );
+  expect(projects.filter((project) => promoteTag(project))).toHaveLength(1);
   // The demo fetches nothing: every avatar is drawn into its address.
   expect(pulls.every((pull) => pull.authorAvatarUrl?.startsWith("data:image/svg+xml,"))).toBe(true);
 });
@@ -189,4 +198,140 @@ test("can hold a state the script never reaches", () => {
   expect(data(offline).pulls.length).toBeGreaterThan(0);
   // None of them runs the script.
   expect(vi.getTimerCount()).toBe(0);
+});
+
+/** What an action of the demo comes to, once its moment has passed. */
+async function acted<T>(doing: Promise<T>): Promise<T> {
+  await vi.advanceTimersByTimeAsync(ACTION_MS);
+  return doing;
+}
+
+const byId = (all: DashboardData, id: number) => {
+  const found = all.releases.find((run) => run.id === id);
+  if (!found) {
+    throw new Error(`No run ${id}`);
+  }
+  return found;
+};
+const byName = (all: DashboardData, name: string) => {
+  const found = all.projects.find((project) => project.name === name);
+  if (!found) {
+    throw new Error(`No project ${name}`);
+  }
+  return found;
+};
+const PROMOTE_RUN = 2781;
+const FAILED_RUN = 4410;
+
+test("approving the waiting run moves it on, and its button goes", async () => {
+  // Held, so the script doesn't move anything else meanwhile.
+  const dashboard = started("offline");
+  const waiting = byId(data(dashboard), PROMOTE_RUN);
+  expect(waiting).toMatchObject({ state: "waiting", approvals: [{ environment: "production", canApprove: true }] });
+  const listener = vi.fn();
+  dashboard.subscribe(listener);
+
+  const approving = dashboard.runActions.review(waiting, waiting.approvals[0] as Approval, "approved");
+  await vi.advanceTimersByTimeAsync(ACTION_MS - 1);
+  expect(byId(data(dashboard), PROMOTE_RUN).state).toBe("waiting");
+  await acted(approving);
+  expect(listener).toHaveBeenCalled();
+  const after = byId(data(dashboard), PROMOTE_RUN);
+  expect(after.state).toBe("running");
+  expect(after.approvals).toEqual([]);
+  expect(after.jobs.map((job) => job.state)).toEqual(["passed", "passed", "running", "queued"]);
+  dashboard.stop();
+});
+
+test("rejecting the waiting run fails it", async () => {
+  const dashboard = started("offline");
+  const waiting = byId(data(dashboard), PROMOTE_RUN);
+  await acted(dashboard.runActions.review(waiting, waiting.approvals[0] as Approval, "rejected"));
+  const after = byId(data(dashboard), PROMOTE_RUN);
+  expect(after).toMatchObject({ state: "failed", approvals: [] });
+  expect(after.finishedAt).toBeDefined();
+  expect(after.jobs.map((job) => job.state)).toEqual(["passed", "failed", "skipped", "skipped"]);
+  dashboard.stop();
+});
+
+test("re-running the failed run's jobs, or one of them, puts them back to queued", async () => {
+  const dashboard = started("offline");
+  const failed = byId(data(dashboard), FAILED_RUN);
+  expect(failed.state).toBe("failed");
+  await acted(dashboard.runActions.rerunFailed(failed));
+  const after = byId(data(dashboard), FAILED_RUN);
+  expect(after).toMatchObject({ state: "queued", finishedAt: undefined });
+  expect(after.jobs.map((job) => job.state)).toEqual(["passed", "passed", "queued", "queued", "queued", "queued"]);
+  dashboard.stop();
+
+  const again = started("offline");
+  const job = byId(data(again), FAILED_RUN).jobs.find((one) => one.state === "cancelled") as Job;
+  await acted(again.runActions.rerunJob(byId(data(again), FAILED_RUN), job));
+  expect(byId(data(again), FAILED_RUN).jobs.map((one) => one.state)).toEqual([
+    "passed",
+    "passed",
+    "failed",
+    "queued",
+    "queued",
+    "queued",
+  ]);
+  again.stop();
+});
+
+test("a release works out the next tag, then adds the release and a run of it", async () => {
+  const dashboard = started("offline");
+  const project = byName(data(dashboard), "weather-station");
+  const tag = await acted(dashboard.runActions.nextRelease(project));
+  expect(tag).toBe("v2.5.0");
+  await acted(dashboard.runActions.release(project, tag));
+  const after = data(dashboard);
+  expect(byName(after, "weather-station").latestRelease?.tag).toBe("v2.5.0");
+  expect(after.releases.at(-1)).toMatchObject({
+    repo: project.repo,
+    workflow: "Release",
+    title: "v2.5.0",
+    state: "running",
+    finishedAt: undefined,
+  });
+  // A project without a release yet gets its first.
+  expect(await acted(dashboard.runActions.nextRelease(byName(after, "recipe-box")))).toBe("v1.0.0");
+  dashboard.stop();
+});
+
+test("promoting adds a run of the Promote workflow", async () => {
+  const dashboard = started("offline");
+  const project = byName(data(dashboard), "home-ledger");
+  const tag = promoteTag(project) as string;
+  expect(tag).toBe("v1.12.3");
+  await acted(dashboard.runActions.promote(project, tag));
+  expect(data(dashboard).releases.at(-1)).toMatchObject({ workflow: "Promote", title: tag, state: "running" });
+  dashboard.stop();
+});
+
+test("one sample action fails, so the preview shows how that looks", async () => {
+  const dashboard = started("offline");
+  const failing = dashboard.runActions.nextRelease(byName(data(dashboard), FAILING_PROJECT));
+  const outcome = expect(failing).rejects.toThrow("Tag v3.1.0 already exists. Resolve it on GitHub before releasing.");
+  await vi.advanceTimersByTimeAsync(ACTION_MS);
+  await outcome;
+  dashboard.stop();
+});
+
+test("the scripted run waits for its approval again each time round, and stopping forgets every action", async () => {
+  const dashboard = started();
+  const scripted = byId(data(dashboard), SCRIPTED_RUN);
+  // Its required reviewer is someone else: the script approves it.
+  expect(scripted.approvals).toEqual([{ environmentId: 70, environment: "production", canApprove: false }]);
+  await acted(dashboard.runActions.review(scripted, scripted.approvals[0] as Approval, "rejected"));
+  expect(byId(data(dashboard), SCRIPTED_RUN).state).toBe("failed");
+  // Round to the same frame again.
+  await vi.advanceTimersByTimeAsync(FRAMES * 1000 - ACTION_MS);
+  expect(byId(data(dashboard), SCRIPTED_RUN).approvals).toHaveLength(1);
+
+  await acted(dashboard.runActions.rerunFailed(byId(data(dashboard), FAILED_RUN)));
+  dashboard.stop();
+  dashboard.start();
+  vi.advanceTimersByTime(400);
+  expect(byId(data(dashboard), FAILED_RUN).state).toBe("failed");
+  dashboard.stop();
 });

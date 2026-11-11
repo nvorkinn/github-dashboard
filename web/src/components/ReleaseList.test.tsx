@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, within } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, expect, test } from "vitest";
-import type { Job } from "../model.ts";
+import type { Approval, Job, ReleaseRun } from "../model.ts";
+import { ActionsContext } from "./actions.tsx";
 import { ReleaseList, sortRuns } from "./ReleaseList.tsx";
-import { before, NOW, run } from "./testing.ts";
+import { before, fakeRunActions, NOW, run } from "./testing.ts";
 
 afterEach(cleanup);
 
@@ -109,4 +110,90 @@ test("stacks the cards in one list", () => {
   const { container } = render(<ReleaseList now={NOW} runs={[run({ id: 1 }), run({ id: 2 }), run({ id: 3 })]} />);
   expect(container.querySelectorAll("ul.rows > li.release")).toHaveLength(3);
   expect(screen.getByRole("heading").textContent).toBe("Release workflows 3");
+});
+
+function withActions(runs: ReleaseRun[], actions = fakeRunActions()) {
+  const view = render(
+    <ActionsContext.Provider value={{ runs: actions }}>
+      <ReleaseList now={NOW} runs={runs} />
+    </ActionsContext.Provider>,
+  );
+  return { ...view, actions };
+}
+
+const production: Approval = { environmentId: 70, environment: "production", canApprove: true };
+
+test("a waiting run offers Approve and Reject for each environment its user may approve, each asking first", async () => {
+  const waiting = run({
+    state: "waiting",
+    finishedAt: undefined,
+    jobs: [job({ id: 1, name: "approve-prod", state: "waiting" })],
+    approvals: [production, { environmentId: 71, environment: "billing", canApprove: false }],
+  });
+  const { actions } = withActions([waiting]);
+  expect(screen.getByText("billing waits for its required reviewers")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Approve billing" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Approve production" }));
+  expect(screen.getByText("Approve production?")).toBeTruthy();
+  expect(actions.review).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(actions.review).toHaveBeenCalledWith(waiting, production, "approved");
+  expect((await screen.findByRole("status")).textContent).toBe("Approved production.");
+
+  fireEvent.click(screen.getByRole("button", { name: "Reject production" }));
+  expect(screen.getByText("Reject production?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(actions.review).toHaveBeenLastCalledWith(waiting, production, "rejected");
+});
+
+test("a finished run that failed offers to re-run its failed jobs, and each failed or cancelled job alone", async () => {
+  const failed = run({
+    state: "failed",
+    jobs: [
+      job({ id: 1, name: "build", state: "passed" }),
+      job({ id: 2, name: "sign", state: "failed" }),
+      job({ id: 3, name: "notify", state: "cancelled" }),
+      job({ id: 4, name: "publish", state: "skipped" }),
+    ],
+  });
+  const actions = fakeRunActions();
+  actions.rerunJob.mockRejectedValueOnce(new Error("Only a failed or cancelled job can be re-run."));
+  withActions([failed], actions);
+  expect(
+    screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent),
+  ).toEqual(["Re-run sign", "Re-run notify", "Re-run failed jobs"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Re-run failed jobs" }));
+  expect(actions.rerunFailed).toHaveBeenCalledWith(failed);
+  expect((await screen.findByRole("status")).textContent).toBe("Re-run of the failed jobs started.");
+
+  // A job's chip has no room for what came of it: that goes under the jobs.
+  fireEvent.click(screen.getByRole("button", { name: "Re-run sign" }));
+  expect(actions.rerunJob).toHaveBeenCalledWith(failed, failed.jobs[1]);
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toBe("Only a failed or cancelled job can be re-run.");
+  expect(alert.closest(".job")).toBeNull();
+});
+
+test("a run still going, or one that passed, offers no re-run", () => {
+  withActions([
+    run({ id: 1, state: "running", finishedAt: undefined, jobs: [job({ id: 1, state: "failed" })] }),
+    run({ id: 2, state: "passed", jobs: [job({ id: 2, state: "passed" })] }),
+  ]);
+  expect(screen.queryByRole("button")).toBeNull();
+});
+
+test("without actions the cards only show", () => {
+  render(
+    <ReleaseList
+      now={NOW}
+      runs={[
+        run({ state: "waiting", finishedAt: undefined, approvals: [production] }),
+        run({ id: 2, state: "failed" }),
+      ]}
+    />,
+  );
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.getByText("production waits for its required reviewers")).toBeTruthy();
 });

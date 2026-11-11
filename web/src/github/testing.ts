@@ -145,7 +145,7 @@ export function withPull(
 export function withWorkflow(
   routes: Routes,
   fullName: string,
-  workflow: { id: number; name: string; state?: string },
+  workflow: { id: number; name: string; state?: string; path?: string },
   runs: { id: number; jobs?: unknown[]; [key: string]: unknown }[],
 ): void {
   const list = routes[`repos/${fullName}/actions/workflows`] as { workflows: unknown[] };

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
@@ -97,5 +97,31 @@ test("the page on the demo can show that it is reconnecting", async () => {
   expect(await screen.findByText("Reconnecting")).toBeTruthy();
   expect(screen.getByText("Show wind gusts on the hourly chart")).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
+  unmount();
+});
+
+test("the page on the demo has actions that work on the sample data, and one that fails", async () => {
+  globalThis.fetch = vi.fn();
+  const auth = createAuth();
+  installDemo({ onSignIn: () => void auth.start() });
+  const dashboard = createDemoDashboard({ show: "offline" });
+  // What makeActions gives a demo build; this test runs in no build at all.
+  const actions = { runs: dashboard.runActions };
+  const { unmount } = render(<App auth={auth} dashboard={dashboard} actions={actions} demo />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Approve production" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(screen.getByRole("button", { name: "Approving…" })).toBeTruthy();
+  // The run moves on, so it waits for nothing anymore and its buttons go.
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Approving…" })).toBeNull(), { timeout: 3000 });
+  expect(screen.queryByRole("button", { name: "Approve production" })).toBeNull();
+  expect(screen.queryByText("Waiting for approval", { selector: ".chip" })).toBeNull();
+
+  expect(screen.getByRole("button", { name: "Re-run failed jobs" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Promote home-ledger v1.12.3" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Release garden-sensors" }));
+  expect((await screen.findByRole("alert", {}, { timeout: 3000 })).textContent).toBe(
+    "Tag v3.1.0 already exists. Resolve it on GitHub before releasing.",
+  );
   unmount();
 });

@@ -1,5 +1,27 @@
 import { vi } from "vitest";
-import type { Dashboard, DashboardData, DashboardState, Project, PullRequest, ReleaseRun } from "../model.ts";
+import type {
+  Approval,
+  Dashboard,
+  DashboardData,
+  DashboardState,
+  Job,
+  Project,
+  PullRequest,
+  ReleaseRun,
+  RunActions,
+} from "../model.ts";
+
+/** Run actions that do nothing but record what they were asked. */
+export function fakeRunActions() {
+  return {
+    review: vi.fn(async (_run: ReleaseRun, _approval: Approval, _verdict: "approved" | "rejected") => {}),
+    rerunFailed: vi.fn(async (_run: ReleaseRun) => {}),
+    rerunJob: vi.fn(async (_run: ReleaseRun, _job: Job) => {}),
+    nextRelease: vi.fn(async (_project: Project) => "v1.3.0"),
+    release: vi.fn(async (_project: Project, _tag: string) => {}),
+    promote: vi.fn(async (_project: Project, _tag: string) => {}),
+  } satisfies RunActions;
+}
 
 /** The moment the tests' data is dated from. */
 export const NOW = Date.parse("2026-03-01T12:00:00Z");
@@ -39,6 +61,7 @@ export function run(fields: Partial<ReleaseRun> = {}): ReleaseRun {
     startedAt: before(600_000),
     finishedAt: before(300_000),
     jobs: [],
+    approvals: [],
     ...fields,
   };
 }
@@ -53,6 +76,7 @@ export function project(fields: Partial<Project> = {}): Project {
     private: false,
     pushedAt: undefined,
     latestRelease: undefined,
+    promoteWorkflow: undefined,
     ...fields,
   };
 }
@@ -84,6 +108,7 @@ export function fakeDashboard(initial: DashboardState = { status: "loading" }) {
     start: vi.fn(),
     refresh: vi.fn(async () => {}),
     stop: vi.fn(),
+    changed: vi.fn(),
     set(next: DashboardState) {
       state = next;
       for (const listener of listeners) {
