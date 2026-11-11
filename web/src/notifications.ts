@@ -232,9 +232,15 @@ export function createNotifier(options: {
   };
 }
 
+/**
+ * The favicon as a PNG, which notifications take more widely than SVG. Under the page's base, so the demo (served
+ * from a subfolder) finds it too. Some systems show their own icon for the browser instead, such as macOS.
+ */
+export const NOTIFICATION_ICON = `${import.meta.env.BASE_URL}apple-touch-icon.png`;
+
 function browserShow(title: string, options: { body: string; tag: string }) {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
     return null;
   }
-  return new Notification(title, options);
+  return new Notification(title, { ...options, icon: NOTIFICATION_ICON });
 }
