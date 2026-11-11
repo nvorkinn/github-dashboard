@@ -23,7 +23,7 @@ export function LanesView({
   columns = 2,
 }: {
   projects: Project[];
-  /** Every open pull request, of hidden projects too: the dock counts theirs. */
+  /** The open pull requests of the projects that aren't hidden. */
   pulls: PullRequest[];
   runs: ReleaseRun[];
   now: number;
@@ -58,25 +58,19 @@ export function LanesView({
             Hidden <span class="count">{away.length}</span>
           </h2>
           <ul>
-            {away.map((project) => {
-              const count = pullsOf(project.repo).length;
-              return (
-                <li key={project.repo}>
-                  <button
-                    type="button"
-                    class="dock-project"
-                    aria-label={`Show ${project.name}`}
-                    title="Bring this project's lane back"
-                    onClick={() => onToggle(project.repo)}
-                  >
-                    <span class="dock-name">{project.name}</span>
-                    <span class="quiet">
-                      {count} pull request{count === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+            {away.map((project) => (
+              <li key={project.repo}>
+                <button
+                  type="button"
+                  class="dock-project"
+                  aria-label={`Show ${project.name}`}
+                  title="Bring this project's lane back"
+                  onClick={() => onToggle(project.repo)}
+                >
+                  <span class="dock-name">{project.name}</span>
+                </button>
+              </li>
+            ))}
           </ul>
         </section>
       )}

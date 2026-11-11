@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, expect, test } from "vitest";
 import type { Job } from "../model.ts";
 import { createApi } from "./api.ts";
-import { readDashboard } from "./read.ts";
+import { readEverything } from "./graphql.ts";
 import { account, fakeGitHub, job, type Routes, withWorkflow } from "./testing.ts";
 import { forgetWorkflowFiles, jobGraph, KEPT_FILES, workflowFile, workflowJobs } from "./workflow_graph.ts";
 
@@ -221,7 +221,7 @@ test("a release run gets its graph from the workflow file at its commit, or none
   withWorkflow(routes, "octo/app", { id: 4, name: "Deploy" }, [{ id: 3, head_sha: "def", jobs: [job(20)] }]);
   withFile(routes, "octo/app", ".github/workflows/release.yml", "abc", OWN_RELEASE);
   const { auth } = fakeGitHub(routes);
-  const { data } = await readDashboard(createApi(auth));
+  const { data } = await readEverything(auth);
   const release = data.releases.find((one) => one.id === 2);
   expect(release?.graph?.nodes.map((node) => [node.key, node.jobs.map((one) => one.id)])).toEqual([
     ["tag", [10]],

@@ -1,11 +1,38 @@
 import type { Auth } from "./auth.ts";
 import type { Actions } from "./components/actions.tsx";
+import { readHidden } from "./components/hooks.ts";
 import { createApi } from "./github/api.ts";
 import { createDashboard } from "./github/dashboard.ts";
 import { createFilesReader } from "./github/files.ts";
+import type { Shape } from "./github/graphql.ts";
 import { createPullActions } from "./github/pull_actions.ts";
 import { createRunActions } from "./github/run_actions.ts";
 import type { Dashboard } from "./model.ts";
+
+/**
+ * Where the browser keeps which workflows a read asks about (see `Shape`): names of projects and of workflow files,
+ * so that a reload reads everything in one request. Nothing of what GitHub answered, and nothing of the sign-in.
+ */
+export const SHAPE_KEY = "github-dashboard:shape";
+
+const keptShape = {
+  load(): Shape | undefined {
+    const kept: unknown = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? "null");
+    if (typeof kept !== "object" || kept === null || Array.isArray(kept)) {
+      return undefined;
+    }
+    const shape: Shape = {};
+    for (const [repo, paths] of Object.entries(kept)) {
+      if (Array.isArray(paths)) {
+        shape[repo] = paths.filter((path): path is string => typeof path === "string");
+      }
+    }
+    return shape;
+  },
+  save(shape: Shape): void {
+    localStorage.setItem(SHAPE_KEY, JSON.stringify(shape));
+  },
+};
 
 /**
  * Where the page's dashboard comes from: the demo's sample data, or GitHub. The one place that knows which, so the
@@ -18,7 +45,7 @@ export async function makeDashboard(auth: Auth, demo: boolean): Promise<Dashboar
     // `?show=problem` and the like put the demo into a state its script never reaches.
     return createDemoDashboard({ show: new URLSearchParams(location.search).get("show") ?? undefined });
   }
-  return createDashboard(auth);
+  return createDashboard(auth, { hidden: readHidden, shape: keptShape });
 }
 
 /**

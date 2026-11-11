@@ -3,6 +3,7 @@ import { project, pull } from "../components/testing.ts";
 import type { DashboardData } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
+import { readEverything } from "./graphql.ts";
 import {
   checkState,
   checks,
@@ -13,15 +14,14 @@ import {
   PROMOTE_WORKFLOW,
   planFor,
   readChanged,
-  readDashboard,
   releaseTag,
   shownRuns,
 } from "./read.ts";
 import { account, fakeGitHub, job, type Routes, repo, run, withPull, withWorkflow } from "./testing.ts";
 
-function read(routes: Record<string, unknown>, previous?: Parameters<typeof readDashboard>[1]) {
+function read(routes: Record<string, unknown>, previous?: DashboardData) {
   const github = fakeGitHub(routes);
-  return { ...github, result: readDashboard(createApi(github.auth), previous) };
+  return { ...github, result: readEverything(github.auth, { previous }) };
 }
 
 test.each([
@@ -198,28 +198,6 @@ test.each([
   expect(mergeMethod(settings)).toBe(method);
 });
 
-test("merge settings in the list of repositories are used as they are, without reading each repository", async () => {
-  const routes = account("octo/app");
-  const settings = { allow_merge_commit: false, allow_squash_merge: false, allow_rebase_merge: true };
-  routes["user/installations/7/repositories"] = {
-    total_count: 1,
-    repositories: [repo("octo/app", { ...settings, allow_auto_merge: true })],
-  };
-  const { result, calls } = read(routes);
-  expect((await result).data.projects[0]).toMatchObject({ mergeMethod: "rebase", autoMergeAllowed: true });
-  expect(calls).not.toContain("repos/octo/app");
-});
-
-test("merge settings that can't be read again stay as they were, and are no problem", async () => {
-  const routes = account("octo/app");
-  const before = (await read(routes).result).data;
-  const earlier = { ...before, projects: before.projects.map((one) => ({ ...one, mergeMethod: "squash" as const })) };
-  routes["repos/octo/app"] = () => Response.json({ message: "Not Found" }, { status: 404 });
-  const { data, problem } = await read(routes, earlier).result;
-  expect(problem).toBeUndefined();
-  expect(data.projects[0]).toMatchObject({ mergeMethod: "squash", autoMergeAllowed: true });
-});
-
 test("a pull request is read with its merge state and checks", async () => {
   const routes = account("octo/app");
   withPull(routes, "octo/app", 12, {
@@ -227,8 +205,6 @@ test("a pull request is read with its merge state and checks", async () => {
     checkRuns: [{ name: "test", status: "in_progress", conclusion: null, html_url: "https://github.com/r/1" }],
     statuses: [{ context: "ci/build", state: "success", target_url: null }],
   });
-  // The list's entry has no mergeability; only the pull request's own page does.
-  routes["repos/octo/app/pulls"] = [{ number: 12 }];
   const { result, calls } = read(routes);
   expect((await result).data.pulls).toEqual([
     {
@@ -253,9 +229,8 @@ test("a pull request is read with its merge state and checks", async () => {
       nodeId: "PR_node12",
     },
   ]);
-  expect(calls).toContain("repos/octo/app/pulls?state=open&per_page=100");
-  expect(calls).toContain("repos/octo/app/commits/sha12/check-runs?filter=latest&per_page=100");
-  expect(calls).toContain("repos/octo/app/commits/sha12/statuses?per_page=100");
+  // All of it through GraphQL: nothing is read pull request by pull request.
+  expect(new Set(calls)).toEqual(new Set(["graphql"]));
 });
 
 test("a pull request that closed or went away while being read is left out", async () => {
@@ -300,7 +275,7 @@ test("releases are the active release workflows' unfinished runs and last finish
     { environment: { id: 71, name: "billing" }, wait_timer: 5, current_user_can_approve: false, reviewers: [] },
   ];
 
-  const { result, calls } = read(routes);
+  const { result, calls, queries } = read(routes);
   const { data } = await result;
   expect(data.releases).toEqual([
     {
@@ -312,7 +287,8 @@ test("releases are the active release workflows' unfinished runs and last finish
       // In progress to GitHub, but a job is waiting for approval.
       state: "waiting",
       actor: "hubot",
-      startedAt: "2026-11-04T12:00:05Z",
+      // When the run was made: GraphQL doesn't say when a later attempt of it started.
+      startedAt: "2026-11-04T12:00:00Z",
       finishedAt: undefined,
       jobs: [
         {
@@ -341,14 +317,10 @@ test("releases are the active release workflows' unfinished runs and last finish
     }),
     expect.objectContaining({ id: 1, workflow: "Promote", title: "Promote", state: "passed", actor: "octocat" }),
   ]);
-  expect(calls).toContain("repos/octo/app/actions/workflows/3/runs?per_page=5");
-  expect(calls).toContain("repos/octo/app/actions/runs/4/jobs?per_page=100");
-  // Not the CI workflow's runs, the disabled workflow's, or the jobs of the older finished release.
-  expect(calls.filter((call) => /workflows\/[12]\/runs|runs\/[289]\/jobs/.test(call))).toEqual([]);
-  // What waits for an approval is asked only of the run that waits.
-  expect(calls.filter((call) => call.includes("pending_deployments"))).toEqual([
-    "repos/octo/app/actions/runs/4/pending_deployments?per_page=100",
-  ]);
+  // The release workflows are asked about by their files, and not the CI workflow.
+  expect(queries.join("\n")).toContain('resource(url: "https://github.com/octo/app/actions/workflows/3.yml")');
+  expect(queries.join("\n")).not.toContain("actions/workflows/1.yml");
+  expect(new Set(calls)).toEqual(new Set(["graphql"]));
   // No workflow is at promote.yml.
   expect(data.projects[0]?.promoteWorkflow).toBeUndefined();
 });
@@ -409,7 +381,7 @@ test("a project that can't be read keeps what was read before, and the others ar
   expect(later.data.pulls.map((pull) => pull.number)).toEqual([1, 3, 2]);
   expect(later.data.releases.map((run) => run.id)).toEqual([5]);
 
-  routes["repos/octo/worse/releases/latest"] = () => new Response(null, { status: 500 });
+  routes["repos/octo/worse/pulls"] = () => new Response(null, { status: 500 });
   expect((await read(routes).result).problem).toBe("Couldn't read everything from 2 projects.");
 });
 
@@ -663,13 +635,7 @@ test("a repository that marks its release workflows shows those and no others, w
 
   const first = read(routes);
   expect((await first.result).data.releases.map((one) => one.id)).toEqual([11]);
-  expect(first.calls.filter((call) => call.includes("/git/blobs/")).sort()).toEqual([
-    "repos/octo/app/git/blobs/docs",
-    "repos/octo/app/git/blobs/notes",
-    "repos/octo/app/git/blobs/ship",
-  ]);
 
-  // Read again, the folder is listed again but a file whose content is the same isn't read twice.
   routes["repos/octo/app/contents/.github/workflows"] = [
     { type: "file", path: ".github/workflows/1.yml", sha: "ship" },
     { type: "file", path: ".github/workflows/2.yml", sha: "docs2" },
@@ -677,7 +643,6 @@ test("a repository that marks its release workflows shows those and no others, w
   routes["repos/octo/app/git/blobs/docs2"] = blob("# dashboard: release\nname: Deploy docs\n");
   const second = read(routes);
   expect((await second.result).data.releases.map((one) => one.id).sort()).toEqual([11, 12]);
-  expect(second.calls.filter((call) => call.includes("/git/blobs/"))).toEqual(["repos/octo/app/git/blobs/docs2"]);
 });
 
 test("a repository that marks no workflow goes by their names, but never shows one GitHub runs by itself", async () => {

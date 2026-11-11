@@ -91,7 +91,7 @@ export function columnOf(pull: PullRequest): PullColumn {
  * Every open pull request, of all projects, on a board of three columns by what each needs. The columns sit side by
  * side where there is room for them and one under the other where there isn't.
  */
-export function PullList({ pulls, now, hiddenCount = 0 }: { pulls: PullRequest[]; now: number; hiddenCount?: number }) {
+export function PullList({ pulls, now }: { pulls: PullRequest[]; now: number }) {
   const [order, setOrder] = useState(rememberedOrder);
   const sorted = sortPulls(pulls, order);
 
@@ -101,7 +101,6 @@ export function PullList({ pulls, now, hiddenCount = 0 }: { pulls: PullRequest[]
         <h2 id="pulls-heading">
           Pull requests <span class="count">{pulls.length}</span>
         </h2>
-        {hiddenCount > 0 && <span class="quiet heading-note">{hiddenCount} more in hidden projects</span>}
         <label class="order">
           <span class="quiet">Order</span>
           <select

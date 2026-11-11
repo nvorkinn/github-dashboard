@@ -122,6 +122,7 @@ const files = new Map<string, Promise<WorkflowJob[] | undefined>>();
 export function forgetWorkflowFiles(): void {
   files.clear();
   marks.clear();
+  blobs.clear();
 }
 
 /**
@@ -246,4 +247,63 @@ function decodeBase64(text: string): string {
   const binary = atob(text.replace(/\s/g, ""));
   const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+/** What the dashboard reads out of one workflow file. */
+export type WorkflowBlob = {
+  /** Whether it carries the release mark. */
+  marked: boolean;
+  /** The workflow's `name`, if the file gives one; GitHub calls a workflow without one by its path. */
+  name: string | undefined;
+  /** Its jobs; undefined when the text isn't a workflow this can read. */
+  jobs: WorkflowJob[] | undefined;
+};
+
+/** How many workflow files' readings are kept. */
+export const KEPT_BLOBS = 500;
+
+// Per repository and blob. A blob never changes, so what was read out of it stays true; it is kept in memory for as
+// long as the user is signed in, the oldest going first.
+const blobs = new Map<string, WorkflowBlob>();
+
+/** Reads a workflow file's text. A text that isn't a workflow has no mark, name or jobs. */
+export function readWorkflowBlob(text: string): WorkflowBlob {
+  let name: string | undefined;
+  let jobs: WorkflowJob[] | undefined;
+  try {
+    const workflow = parseYaml(text);
+    name = isMap(workflow) && typeof workflow.name === "string" ? workflow.name : undefined;
+  } catch {
+    // No name, then.
+  }
+  try {
+    jobs = workflowJobs(text);
+  } catch {
+    // No graph, then.
+  }
+  return { marked: RELEASE_MARK.test(text), name, jobs };
+}
+
+/** What was read out of the blob `oid` of `repo`, if it was kept. */
+export function keptWorkflowBlob(repo: string, oid: string): WorkflowBlob | undefined {
+  return blobs.get(`${repo}\n${oid}`);
+}
+
+/** Reads the blob `oid` of `repo` from its text, and keeps the reading. */
+export function keepWorkflowBlob(repo: string, oid: string, text: string): WorkflowBlob {
+  const blob = readWorkflowBlob(text);
+  blobs.set(`${repo}\n${oid}`, blob);
+  while (blobs.size > KEPT_BLOBS) {
+    const oldest = blobs.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    blobs.delete(oldest);
+  }
+  return blob;
+}
+
+/** Whether any workflow file's reading is kept: none is on a page that has just loaded. */
+export function hasWorkflowBlobs(): boolean {
+  return blobs.size > 0;
 }

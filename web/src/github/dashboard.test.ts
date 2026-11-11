@@ -14,7 +14,8 @@ import {
 import { account, fakeGitHub, fakeStreams, type Routes, withPull } from "./testing.ts";
 
 const NOW = new Date(2026, 10, 11, 14, 0, 0).getTime();
-const FIRST = "user/installations?per_page=100";
+// A read of everything is the query that lists the repositories; the first of a visit asks more after it.
+const LISTS = /^\s*viewer \{/m;
 
 let isHidden = false;
 
@@ -46,7 +47,7 @@ function setUp(routes: Routes, relay?: ReturnType<typeof fakeStreams>) {
   const dashboard = createDashboard(github.auth, relay ? { connect: relay.connect } : {});
   const states: DashboardState[] = [];
   dashboard.subscribe(() => states.push(dashboard.state()));
-  return { ...github, dashboard, states, reads: () => github.calls.filter((call) => call === FIRST).length };
+  return { ...github, dashboard, states, reads: () => github.queries.filter((query) => LISTS.test(query)).length };
 }
 
 /** A dashboard that has read everything and is connected to a fake relay, which has said hello. */
@@ -57,6 +58,7 @@ async function setUpLive(routes: Routes) {
   await settle();
   relay.last().emit("hello");
   all.calls.length = 0;
+  all.queries.length = 0;
   all.states.length = 0;
   return { ...all, relay, stream: relay.last() };
 }
@@ -479,7 +481,8 @@ test("a change that arrives during a read of everything is read after it", async
   await settle();
   expect(reads()).toBe(1);
   expect(calls.slice(-3)).toEqual(pullCalls(2));
-  expect(calls.filter((call) => call === "repos/octo/app/pulls/2")).toHaveLength(2);
+  // Once: the read of everything is a query of its own.
+  expect(calls.filter((call) => call === "repos/octo/app/pulls/2")).toHaveLength(1);
   dashboard.stop();
 });
 
@@ -490,7 +493,7 @@ test("a read of everything takes the changes that were waiting with it", async (
   await dashboard.refresh();
   await pass(CHANGE_MAX_WAIT_MS);
   expect(reads()).toBe(1);
-  expect(calls.filter((call) => call === "repos/octo/app/pulls/1")).toHaveLength(1);
+  expect(calls.filter((call) => call === "repos/octo/app/pulls/1")).toEqual([]);
   dashboard.stop();
 });
 
@@ -606,12 +609,13 @@ test("a read that failed is tried again in a minute also while live, and a chang
 
 test("a change doesn't read before a rate limit ends", async () => {
   const routes = appWithPulls();
-  const { dashboard, stream, calls, reads } = await setUpLive(routes);
+  const { dashboard, stream, calls, queries, reads } = await setUpLive(routes);
   const installations = routes["user/installations"];
   routes["user/installations"] = failing(429, { "retry-after": "600" });
   await dashboard.refresh();
   routes["user/installations"] = installations;
   calls.length = 0;
+  queries.length = 0;
 
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
   await pass(CHANGE_MAX_WAIT_MS);
