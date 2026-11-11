@@ -114,7 +114,7 @@ export function RunAction<T = undefined>(props: RunActionProps<T>) {
       return (
         <span class="action-group asking">
           <span class="action-question">{phase.question}</span>
-          <button type="button" class="action confirm" ref={confirm} onClick={() => void go(phase.prepared)}>
+          <button type="button" class="action action-confirm" ref={confirm} onClick={() => void go(phase.prepared)}>
             Confirm
           </button>
           <button type="button" class="action secondary" onClick={() => enter({ name: "idle" })}>

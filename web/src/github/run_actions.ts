@@ -1,9 +1,9 @@
 import type { Auth } from "../auth.ts";
 import type { Dashboard, Project, RunActions } from "../model.ts";
 import { RELEASE_TAG } from "../model.ts";
-import { type Api, createApi, GitHubError, retryAt } from "./api.ts";
-import { describe } from "./dashboard.ts";
+import { type Api, createApi, GitHubError } from "./api.ts";
 import { approval, isReleaseName, PROMOTE_WORKFLOW, type RawPendingDeployment } from "./read.ts";
+import { ActionError, send as sendWrite, worded } from "./writes.ts";
 
 // What a finished job or run ends in when GitHub's re-run of its failed jobs runs it again (cancelled ones too).
 const RERUNNABLE = new Set(["failure", "timed_out", "cancelled"]);
@@ -11,28 +11,6 @@ const RERUNNABLE = new Set(["failure", "timed_out", "cancelled"]);
 // What GitHub's history of the approval says about where it came from.
 export const APPROVED_COMMENT = "Approved from the GitHub dashboard.";
 export const REJECTED_COMMENT = "Rejected from the GitHub dashboard.";
-
-/** An action that a check on GitHub just before it says no to. Its message is for the user. */
-export class ActionRefused extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ActionRefused";
-  }
-}
-
-/**
- * A write whose outcome isn't known: GitHub couldn't be reached, or had trouble, after it was sent. It may have gone
- * through, so it is not simply tried again.
- */
-class Uncertain extends Error {
-  reason: unknown;
-
-  constructor(reason: unknown) {
-    super("The write's outcome is unknown");
-    this.name = "Uncertain";
-    this.reason = reason;
-  }
-}
 
 type RawRun = { id: number; name: string | null; status: string | null; conclusion: string | null };
 type RawJob = { id: number; run_id: number; status: string; conclusion: string | null };
@@ -48,33 +26,13 @@ type RawWorkflow = { id: number; path: string; state: string };
 export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed">): RunActions {
   const api = createApi(auth);
 
-  /** Sends one write and gives GitHub's answer. A refusal is a `GitHubError`; an unknown outcome is `Uncertain`. */
-  async function send(path: string, body: unknown): Promise<Response> {
-    let response: Response;
-    try {
-      response = await auth.github(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } catch (error) {
-      throw new Uncertain(error);
-    }
-    if (!response.ok) {
-      const error = new GitHubError(path, response.status, await retryAt(response));
-      throw response.status >= 500 ? new Uncertain(error) : error;
-    }
-    return response;
+  /** Sends one write; `needs` is the permission it takes, said if GitHub says the app hasn't got it. */
+  function send(path: string, body: unknown, needs: string): Promise<Response> {
+    return sendWrite(auth, path, "POST", body, needs);
   }
 
-  /** Runs an action, turning whatever went wrong into an `Error` that says it in words for the user. */
-  async function act(task: () => Promise<void>): Promise<void> {
-    try {
-      await task();
-    } catch (error) {
-      throw new Error(describeRunError(error), { cause: error });
-    }
-  }
+  /** Runs an action, turning whatever went wrong into an `ActionError` that says it in words for the user. */
+  const act = worded<void>;
 
   return {
     review(run, wanted, verdict) {
@@ -82,30 +40,32 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         const path = `repos/${run.repo}/actions/runs/${run.id}`;
         const now = await api.get<RawRun>(path);
         if (now.status === "completed") {
-          throw new ActionRefused(
-            "This run has finished, so it no longer waits for an approval. Refresh the dashboard.",
-          );
+          throw new ActionError("This run has finished, so it no longer waits for an approval. Refresh the dashboard.");
         }
         if (!isReleaseName(now.name)) {
-          throw new ActionRefused(
+          throw new ActionError(
             "Only unfinished release, promote or deploy workflows can be approved from this dashboard.",
           );
         }
         const pending = (await api.list<RawPendingDeployment>(`${path}/pending_deployments`)).map(approval);
         const found = pending.find((one) => one.environmentId === wanted.environmentId);
         if (!found) {
-          throw new ActionRefused("This deployment is no longer waiting for approval. Refresh the dashboard.");
+          throw new ActionError("This deployment is no longer waiting for approval. Refresh the dashboard.");
         }
         if (!found.canApprove) {
-          throw new ActionRefused(
+          throw new ActionError(
             "Your GitHub account can't approve this environment. Check its required reviewers on GitHub.",
           );
         }
-        await send(`${path}/pending_deployments`, {
-          environment_ids: [found.environmentId],
-          state: verdict,
-          comment: verdict === "approved" ? APPROVED_COMMENT : REJECTED_COMMENT,
-        });
+        await send(
+          `${path}/pending_deployments`,
+          {
+            environment_ids: [found.environmentId],
+            state: verdict,
+            comment: verdict === "approved" ? APPROVED_COMMENT : REJECTED_COMMENT,
+          },
+          "Deployments",
+        );
         dashboard.changed({ kind: "deployment_review", repo: run.repo, run: run.id });
       });
     },
@@ -115,14 +75,12 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         const path = `repos/${run.repo}/actions/runs/${run.id}`;
         const now = await api.get<RawRun>(path);
         if (now.status !== "completed") {
-          throw new ActionRefused(
-            "GitHub re-runs failed jobs only once the workflow run has finished. Try again then.",
-          );
+          throw new ActionError("GitHub re-runs failed jobs only once the workflow run has finished. Try again then.");
         }
         if (!RERUNNABLE.has(now.conclusion ?? "")) {
-          throw new ActionRefused("This workflow run has no failed jobs to re-run. Refresh the dashboard.");
+          throw new ActionError("This workflow run has no failed jobs to re-run. Refresh the dashboard.");
         }
-        await send(`${path}/rerun-failed-jobs`, {});
+        await send(`${path}/rerun-failed-jobs`, {}, "Actions");
         dashboard.changed({ kind: "workflow_run", repo: run.repo, run: run.id });
       });
     },
@@ -132,14 +90,12 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         const path = `repos/${run.repo}/actions`;
         const now = await api.get<RawJob>(`${path}/jobs/${job.id}`);
         if (now.status !== "completed" || !RERUNNABLE.has(now.conclusion ?? "")) {
-          throw new ActionRefused("Only a failed or cancelled job can be re-run. Refresh the dashboard.");
+          throw new ActionError("Only a failed or cancelled job can be re-run. Refresh the dashboard.");
         }
         if ((await api.get<RawRun>(`${path}/runs/${now.run_id}`)).status !== "completed") {
-          throw new ActionRefused(
-            "GitHub re-runs a job only once its whole workflow run has finished. Try again then.",
-          );
+          throw new ActionError("GitHub re-runs a job only once its whole workflow run has finished. Try again then.");
         }
-        await send(`${path}/jobs/${job.id}/rerun`, {});
+        await send(`${path}/jobs/${job.id}/rerun`, {}, "Actions");
         dashboard.changed({ kind: "workflow_job", repo: run.repo, run: now.run_id });
       });
     },
@@ -157,17 +113,22 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         const plan = await planRelease(api, project);
         // Someone released in the meantime: the tag the user agreed to is no longer the next one.
         if (plan.tag !== tag) {
-          throw new ActionRefused(`The next release is ${plan.tag} now, not ${tag}. Refresh the dashboard.`);
+          throw new ActionError(`The next release is ${plan.tag} now, not ${tag}. Refresh the dashboard.`);
         }
         const path = `repos/${project.repo}/releases`;
         const target = { tag_name: tag, target_commitish: project.defaultBranch };
         const notes = (await (
-          await send(`${path}/generate-notes`, {
-            ...target,
-            ...(plan.previous ? { previous_tag_name: plan.previous } : {}),
-          })
+          await send(
+            `${path}/generate-notes`,
+            { ...target, ...(plan.previous ? { previous_tag_name: plan.previous } : {}) },
+            "Contents",
+          )
         ).json()) as { name: string; body: string };
-        await send(path, { ...target, name: notes.name, body: notes.body, draft: false, prerelease: false });
+        await send(
+          path,
+          { ...target, name: notes.name, body: notes.body, draft: false, prerelease: false },
+          "Contents",
+        );
         dashboard.changed({ kind: "release", repo: project.repo });
         // The tag starts the project's release workflow, whose run shows once it is read.
         dashboard.changed({ kind: "workflow_run", repo: project.repo });
@@ -177,7 +138,7 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
     promote(project, tag) {
       return act(async () => {
         if (!RELEASE_TAG.test(tag)) {
-          throw new ActionRefused("Only a release tag like v1.2.3 can be promoted.");
+          throw new ActionError("Only a release tag like v1.2.3 can be promoted.");
         }
         const path = `repos/${project.repo}`;
         const workflow =
@@ -185,16 +146,17 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
             ? undefined
             : await gone(api.get<RawWorkflow>(`${path}/actions/workflows/${project.promoteWorkflow}`));
         if (workflow?.state !== "active" || workflow.path !== PROMOTE_WORKFLOW) {
-          throw new ActionRefused(`This project has no active ${PROMOTE_WORKFLOW}. Refresh the dashboard.`);
+          throw new ActionError(`This project has no active ${PROMOTE_WORKFLOW}. Refresh the dashboard.`);
         }
         if (!(await gone(api.get(`${path}/releases/tags/${encodeURIComponent(tag)}`)))) {
-          throw new ActionRefused(`${tag} is not a published release. Refresh the dashboard.`);
+          throw new ActionError(`${tag} is not a published release. Refresh the dashboard.`);
         }
         // The workflow checks the rest itself, such as that dev has the release, before it asks for an approval.
-        await send(`${path}/actions/workflows/${workflow.id}/dispatches`, {
-          ref: project.defaultBranch,
-          inputs: { tag },
-        });
+        await send(
+          `${path}/actions/workflows/${workflow.id}/dispatches`,
+          { ref: project.defaultBranch, inputs: { tag } },
+          "Actions",
+        );
         dashboard.changed({ kind: "workflow_run", repo: project.repo });
       });
     },
@@ -207,7 +169,7 @@ async function planRelease(api: Api, project: Project): Promise<{ previous: stri
   const plan = nextTag(releases.map((one) => one.tag_name));
   // A tag left over from somewhere else may point at an older commit, which the release would then be of.
   if (await gone(api.get(`repos/${project.repo}/git/ref/tags/${encodeURIComponent(plan.tag)}`))) {
-    throw new ActionRefused(`Tag ${plan.tag} already exists. Resolve it on GitHub before releasing.`);
+    throw new ActionError(`Tag ${plan.tag} already exists. Resolve it on GitHub before releasing.`);
   }
   return plan;
 }
@@ -247,7 +209,7 @@ export function nextTag(tags: string[]): { previous: string | undefined; tag: st
     }
   }
   if (!best) {
-    throw new ActionRefused("No release has a version tag such as v1.19.0, so the next one isn't known.");
+    throw new ActionError("No release has a version tag such as v1.19.0, so the next one isn't known.");
   }
   const [major, minor] = best.key as [number, number];
   return { previous: best.tag, tag: `${best.prefix}${major}.${minor + 1}.0` };
@@ -261,20 +223,4 @@ function compare(a: number[], b: number[]): number {
     }
   }
   return 0;
-}
-
-/** Why an action didn't go through, in words for the user. */
-export function describeRunError(error: unknown): string {
-  if (error instanceof ActionRefused) {
-    return error.message;
-  }
-  if (error instanceof Uncertain) {
-    return `${describe(error.reason)} It may have gone through: check GitHub before trying again.`;
-  }
-  if (error instanceof GitHubError && error.retryAt === undefined && error.status !== 401 && error.status < 500) {
-    return error.status === 403 || error.status === 404
-      ? `GitHub refused (${error.status}). The app or your account may lack the permission for this.`
-      : `GitHub refused (${error.status}).`;
-  }
-  return describe(error);
 }

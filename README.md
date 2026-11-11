@@ -62,6 +62,18 @@ The GitHub App (Settings, Developer settings, GitHub Apps):
 - "Expire user authorization tokens": on. Without it GitHub gives no refresh token and the sign-in fails.
 - "Request user authorization (OAuth) during installation": as you like; the page starts the sign-in itself.
 - No webhook is needed for signing in; "Push" below sets one up.
+- Repository permissions: Actions write, Checks read, Commit statuses read, Contents write, Deployments write,
+  Metadata read, Pull requests write; and Workflows write, needed only when a release points at a commit that changes
+  workflow files. The page acts as the signed-in user, so the user needs the same access to the repository.
+
+What each write is for (reading needs only read access to the same):
+
+| Permission (write) | Buttons that need it                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| Actions            | Re-run failed jobs and Re-run on a release run; Promote (starts the Promote workflow)  |
+| Contents           | Release (writes the notes and publishes); Merge on a pull request                      |
+| Deployments        | Approve and Reject on a run waiting for an environment (the user must be its reviewer) |
+| Pull requests      | Auto-merge and Update branch on a pull request                                         |
 
 To sign in locally, start the relay with the four variables and `PUBLIC_URL=http://localhost:5173`, and open the
 page from `npm run dev`: Vite passes `/api` on to the relay, so the browser sees one origin. Without Vite, use
@@ -105,9 +117,8 @@ goes with, and a permission added later has to be accepted on the app's installa
 | Repository          | Metadata (every app has it)              |
 | Deployment review   | Deployments                              |
 
-Deployments is the one permission here beyond those the page already needs for its own calls (Actions, Checks,
-Commit statuses, Contents, Pull requests). If an event is missing
-from the list on the app's page, its permission is the thing to look at.
+The app has all of these permissions already for the page's own calls (see "Sign-in"). If an event is missing from the
+list on the app's page, its permission is the thing to look at.
 
 At the reverse proxy, `/api/github/webhook` must be reachable without Tinyauth, since GitHub can't sign in there;
 everything else, `/api/events` included, stays behind it. The relay has no list of who may read the stream. The

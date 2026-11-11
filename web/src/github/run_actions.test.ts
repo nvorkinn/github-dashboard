@@ -3,7 +3,8 @@ import type { Auth } from "../auth.ts";
 import { project, run } from "../components/testing.ts";
 import type { Approval, Job } from "../model.ts";
 import { PROMOTE_WORKFLOW } from "./read.ts";
-import { APPROVED_COMMENT, createRunActions, describeRunError, nextTag, REJECTED_COMMENT } from "./run_actions.ts";
+import { APPROVED_COMMENT, createRunActions, nextTag, REJECTED_COMMENT } from "./run_actions.ts";
+import { describeAction } from "./writes.ts";
 
 type Sent = { method: string; path: string; body: unknown };
 
@@ -337,9 +338,21 @@ test("GitHub's refusals are said in words for the user", async () => {
     [`GET ${RUN}`]: { id: 1, name: "Release", status: "completed", conclusion: "failure" },
     [`POST ${RUN}/rerun-failed-jobs`]: () => Response.json({ message: "Must have admin rights" }, { status: 403 }),
   });
-  await expect(refused.actions.rerunFailed(failedRun)).rejects.toThrow(
-    "GitHub refused (403). The app or your account may lack the permission for this.",
+  await expect(refused.actions.rerunFailed(failedRun)).rejects.toThrow("GitHub refused: Must have admin rights.");
+
+  // Each write says which permission it takes, should the app not have it.
+  const notAllowed = setUp({
+    [`GET ${RUN}`]: { id: 1, name: "Release", status: "waiting", conclusion: null },
+    [`GET ${RUN}/pending_deployments`]: pending(),
+    [`POST ${RUN}/pending_deployments`]: () =>
+      Response.json({ message: "Resource not accessible by integration" }, { status: 403 }),
+  });
+  await expect(notAllowed.actions.review(waitingRun, production, "approved")).rejects.toThrow(
+    "The GitHub App isn't allowed to do this. It needs Deployments with write access.",
   );
+
+  const forbiddenRead = setUp({ [`GET ${RUN}`]: () => new Response(null, { status: 403 }) });
+  await expect(forbiddenRead.actions.rerunFailed(failedRun)).rejects.toThrow(/^GitHub refused \(403\)\.$/);
 
   const limited = setUp({
     [`GET ${RUN}`]: () => Response.json({}, { status: 429, headers: { "retry-after": "60" } }),
@@ -362,5 +375,5 @@ test("GitHub's refusals are said in words for the user", async () => {
 });
 
 test("anything else is described as the dashboard describes a failed read", () => {
-  expect(describeRunError(new Error("odd"))).toBe("GitHub couldn't be reached.");
+  expect(describeAction(new Error("odd"))).toBe("GitHub couldn't be reached.");
 });

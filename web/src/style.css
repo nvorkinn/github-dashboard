@@ -713,26 +713,10 @@ button.action-confirm:hover:not(:disabled) {
   display: none;
 }
 
-button.action {
-  min-height: 1.875rem;
-  padding: 0.125rem 0.625rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
 /* The less likely choice beside a main one, such as Reject beside Approve. */
 button.action.secondary {
-  font-weight: 400;
   color: var(--quiet);
   background: transparent;
-}
-
-/* The answer to a question that can't be taken back. */
-button.action.confirm {
-  color: var(--link);
-  background: color-mix(in srgb, var(--link) 12%, var(--panel));
-  border-color: color-mix(in srgb, var(--link) 55%, transparent);
 }
 
 .action-question {
@@ -751,7 +735,7 @@ button.action.confirm {
   color: var(--done);
 }
 
-/* Why it didn't go through, in the look of the page's other problems. */
+/* Why an action didn't go through, in the look of the page's other problems: on pull requests and releases alike. */
 .action-problem {
   padding: 0.125rem 0.5rem;
   color: var(--problem);
@@ -760,9 +744,15 @@ button.action.confirm {
   border-radius: 6px;
 }
 
+/* Next to its button, a reason reads from the left, as the button does. */
+.action-group .action-problem {
+  max-width: none;
+  text-align: left;
+}
+
 /* What a job's re-run came to, under the jobs. */
-p.action-done,
-p.action-problem {
+.release p.action-done,
+.release p.action-problem {
   width: fit-content;
   max-width: 100%;
   margin-top: 0.5rem;
@@ -850,10 +840,6 @@ p.action-problem {
 
   .job {
     padding-block: 0.375rem;
-  }
-
-  button.action {
-    min-height: 2.75rem;
   }
 
   .job button.action {
