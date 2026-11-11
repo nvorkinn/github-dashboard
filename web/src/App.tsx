@@ -1,13 +1,27 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Auth, AuthState } from "./auth.ts";
+import { Account } from "./components/Account.tsx";
+import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
+import { useDashboardState, useNow } from "./components/hooks.ts";
+import type { Dashboard } from "./model.ts";
 
-/** The page so far: sign-in, and who is signed in. The dashboard itself comes next. */
-export function App({ auth, demo = false }: { auth: Auth; demo?: boolean }) {
+/** The page: sign-in, and behind it the dashboard. */
+export function App({ auth, dashboard, demo = false }: { auth: Auth; dashboard: Dashboard; demo?: boolean }) {
   const state = useAuthState(auth);
+  const signedIn = state.status === "signedIn";
 
   useEffect(() => {
     void auth.start();
   }, [auth]);
+
+  // The dashboard reads as the signed-in user, so it runs exactly as long as there is one.
+  useEffect(() => {
+    if (!signedIn) {
+      return;
+    }
+    dashboard.start();
+    return () => dashboard.stop();
+  }, [signedIn, dashboard]);
 
   return (
     <>
@@ -16,30 +30,55 @@ export function App({ auth, demo = false }: { auth: Auth; demo?: boolean }) {
           Demo: sample data, nothing here is real.
         </p>
       )}
-      <header class="top">
-        <h1>GitHub dashboard</h1>
-        {state.status === "signedIn" && <Account auth={auth} />}
-      </header>
-      <main>
-        {state.status === "loading" && <p class="quiet">Loading…</p>}
-        {state.status === "signedOut" && (
-          <>
-            {state.failed && (
+      {signedIn ? (
+        <SignedIn auth={auth} dashboard={dashboard} />
+      ) : (
+        <>
+          <header class="top">
+            <h1>GitHub dashboard</h1>
+          </header>
+          <main>
+            {state.status === "loading" && <p class="quiet">Loading…</p>}
+            {state.status === "signedOut" && (
+              <>
+                {state.failed && (
+                  <p role="alert" class="problem">
+                    Sign-in didn't work. Try again.
+                  </p>
+                )}
+                {/* A plain link: signing in is a trip to github.com and back, which the relay starts. */}
+                <a class="button" href="api/auth/login">
+                  Sign in with GitHub
+                </a>
+              </>
+            )}
+            {state.status === "unavailable" && (
               <p role="alert" class="problem">
-                Sign-in didn't work. Try again.
+                Can't reach the sign-in service. Reload to try again.
               </p>
             )}
-            {/* A plain link: signing in is a trip to github.com and back, which the relay starts. */}
-            <a class="button" href="api/auth/login">
-              Sign in with GitHub
-            </a>
-          </>
-        )}
-        {state.status === "unavailable" && (
-          <p role="alert" class="problem">
-            Can't reach the sign-in service. Reload to try again.
-          </p>
-        )}
+          </main>
+        </>
+      )}
+    </>
+  );
+}
+
+function SignedIn({ auth, dashboard }: { auth: Auth; dashboard: Dashboard }) {
+  const state = useDashboardState(dashboard);
+  const now = useNow();
+  const { refresh, pending } = useRefresh(dashboard);
+  return (
+    <>
+      <header class="top">
+        <h1>GitHub dashboard</h1>
+        <div class="top-controls">
+          <Freshness state={state} now={now} refresh={refresh} pending={pending} />
+          <Account auth={auth} />
+        </div>
+      </header>
+      <main>
+        <DashboardView state={state} now={now} refresh={refresh} />
       </main>
     </>
   );
@@ -52,39 +91,4 @@ function useAuthState(auth: Auth): AuthState {
     return auth.subscribe(() => setState(auth.state()));
   }, [auth]);
   return state;
-}
-
-type User = { login: string; avatar_url: string };
-
-/** Who is signed in, and the way out. */
-function Account({ auth }: { auth: Auth }) {
-  const [user, setUser] = useState<User | "failed">();
-  const [signOutFailed, setSignOutFailed] = useState(false);
-
-  useEffect(() => {
-    auth
-      .github("user")
-      .then(async (response) => setUser(response.ok ? ((await response.json()) as User) : "failed"))
-      .catch(() => setUser("failed"));
-  }, [auth]);
-
-  return (
-    <div class="account">
-      {user === "failed" && <span class="problem">Couldn't load your GitHub account</span>}
-      {user && user !== "failed" && (
-        <>
-          <img class="avatar" src={user.avatar_url} alt="" width="28" height="28" />
-          <span class="login">{user.login}</span>
-        </>
-      )}
-      {signOutFailed && (
-        <span role="alert" class="problem">
-          Sign-out didn't work
-        </span>
-      )}
-      <button type="button" onClick={async () => setSignOutFailed(!(await auth.signOut()))}>
-        Sign out
-      </button>
-    </div>
-  );
 }

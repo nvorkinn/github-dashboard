@@ -68,8 +68,11 @@ page from `npm run dev`: Vite passes `/api` on to the relay, so the browser sees
 
 ## Previews
 
-The demo is the page running on built-in sample data (`web/src/demo.ts`), with no relay, sign-in or GitHub behind it:
-it starts signed in as a sample user.
+The demo is the page running on built-in sample data (`web/src/demo.ts` for the sign-in, `web/src/demo/` for the
+dashboard), with no relay, sign-in or GitHub behind it: it starts signed in as a sample user. One pull request's
+checks and one release run follow a script that moves every few seconds and then starts over, so the page can be
+seen updating. Adding `?show=problem`, `?show=failed`, `?show=empty` or `?show=loading` to the address holds the
+demo in a state the script never reaches.
 The Preview workflow publishes it to GitHub Pages from the `gh-pages` branch:
 
 - each pull request's at `https://nvorkinn.github.io/github-dashboard/pr-<number>/`, linked from the pull request as
