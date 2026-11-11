@@ -8,6 +8,7 @@ import type { PullActions, ReadFiles, RunActions } from "../model.ts";
  * without it they aren't offered.
  */
 export type Actions = {
+  repositories?: import("../github/repository_config.ts").RepositoryConfig;
   review?: import("../github/review.ts").ReviewService;
   /** On pull requests. */
   pulls?: PullActions;
