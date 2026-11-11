@@ -192,7 +192,8 @@ test.each<[string, () => Response | Promise<Response>, string]>([
         status: 403,
         headers: {
           "x-ratelimit-remaining": "0",
-          "x-ratelimit-reset": String(Date.parse("2026-11-11T15:30:00") / 1000),
+          // Far off: a reset that has passed is answered with a moment from now instead.
+          "x-ratelimit-reset": String(Date.parse("2099-01-01T15:30:00") / 1000),
         },
       }),
     "GitHub's rate limit is used up. Trying again at 15:30.",

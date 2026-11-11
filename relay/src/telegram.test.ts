@@ -128,8 +128,8 @@ test("the notice links the dashboard when the relay knows its address", async ()
 test("a release waiting for approval gets a button that opens its run", async () => {
   const { post, bodies } = setUp();
   later(QUIET_MS);
-  const job = { workflow_name: "Release", run_id: 99, run_attempt: 1 };
-  await post("workflow_job", { action: "waiting", repository, workflow_job: job });
+  const review = { id: 99, name: "Release", run_attempt: 1 };
+  await post("deployment_review", { action: "requested", repository, workflow_run: review });
   const run = "https://github.com/nvorkinn/github-dashboard/actions/runs/99";
   expect(bodies()[0]?.reply_markup).toEqual({ inline_keyboard: [[{ text: "Review in GitHub", url: run }]] });
 });
@@ -202,15 +202,15 @@ test("the same notice is sent once: a redelivery, a suite after its run, another
   await post("check_run", failedCheck(OTHER_SHA), "d-4");
   expect(calls).toHaveLength(2);
 
-  // Two jobs of one release run waiting are one notice; the run's next attempt is another.
-  const waiting = (job: number, attempt: number) => ({
-    action: "waiting",
+  // A release run asking for its review again is one notice; the run's next attempt is another.
+  const waiting = (attempt: number) => ({
+    action: "requested",
     repository,
-    workflow_job: { id: job, workflow_name: "Release", run_id: 99, run_attempt: attempt },
+    workflow_run: { id: 99, name: "Release", run_attempt: attempt },
   });
-  await post("workflow_job", waiting(1, 1));
-  await post("workflow_job", waiting(2, 1));
-  await post("workflow_job", waiting(3, 2));
+  await post("deployment_review", waiting(1));
+  await post("deployment_review", waiting(1));
+  await post("deployment_review", waiting(2));
   expect(calls).toHaveLength(4);
 });
 

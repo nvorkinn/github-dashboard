@@ -227,7 +227,7 @@ need attention, with a link to the thing on github.com and, when `PUBLIC_URL` is
 | A review requested changes                                                           | `Changes requested on owner/name#7: its title`               |
 | A check run or suite on a pull request's commit failed, timed out or wants an action | `Checks failed in owner/name`, with each pull request's link |
 | A release run finished (a workflow whose name says release, promote or deploy)       | `Release in owner/name: success` (or how else it ended)      |
-| A release run waits for a deployment to be approved                                  | `A release in owner/name is waiting for your approval`       |
+| A release run asks for a deployment to be approved (a `deployment_review` request)   | `A release in owner/name is waiting for your approval`       |
 
 The last comes with a "Review in GitHub" button that opens the run, where Review deployments approves it. Everything
 else, such as checks passing or a pull request opening, sends nothing.
@@ -238,8 +238,8 @@ in a repository that marks its release workflows.
 It stays quiet while a page is open: a message goes only when no page has had `/api/events` open for the last 30
 seconds, so a reload, a brief reconnect or a restart of the relay sends nothing. An open page shows it already.
 
-Each message goes once. A webhook GitHub delivers again, a second failed check on the same commit, or a second job
-of the same release waiting, send nothing more. For that the relay remembers which messages it sent (what they were
+Each message goes once. A webhook GitHub delivers again, a second failed check on the same commit, or a release
+asking for the same review again, send nothing more. For that the relay remembers which messages it sent (what they were
 about, not what they said), the last 500 of them for 24 hours at most, in memory: a restart forgets them, and then a
 repeat can get through once. A send that fails is logged with Telegram's status code, and the webhook is answered all
 the same.

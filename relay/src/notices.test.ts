@@ -111,8 +111,7 @@ test("a finished release says how it went, but other runs are quiet", () => {
   );
 });
 
-test("a release waiting for approval repeats by run, not by job, and links its run", () => {
-  const job = { id: 5, workflow_name: "Release", run_id: 99, run_attempt: 1, html_url: "https://example.com/" };
+test("a release waiting for approval is told by its deployment review, and links its run", () => {
   const run = "https://github.com/nvorkinn/countdown/actions/runs/99";
   const expected = {
     type: "waiting",
@@ -123,17 +122,15 @@ test("a release waiting for approval repeats by run, not by job, and links its r
     text: `A release in nvorkinn/countdown is waiting for your approval\n${run}`,
     review: run,
   };
-  expect(noticeFrom("workflow_job", { action: "waiting", repository, workflow_job: job })).toEqual(expected);
-  const another = { ...job, id: 6 };
-  expect(noticeFrom("workflow_job", { action: "waiting", repository, workflow_job: another })).toEqual(expected);
-  // The run's own deployment review says the same.
   const review = { action: "requested", repository, workflow_run: { id: 99, name: "Release", run_attempt: 1 } };
   expect(noticeFrom("deployment_review", review)).toEqual(expected);
 
-  expect(noticeFrom("workflow_job", { action: "queued", repository, workflow_job: job })).toBeUndefined();
-  const test = { ...job, workflow_name: "Test" };
-  expect(noticeFrom("workflow_job", { action: "waiting", repository, workflow_job: test })).toBeUndefined();
   expect(noticeFrom("deployment_review", { ...review, action: "approved" })).toBeUndefined();
+  const test = { ...review, workflow_run: { ...review.workflow_run, name: "Test" } };
+  expect(noticeFrom("deployment_review", test)).toBeUndefined();
+  // A job is also waiting while it has no runner yet, so a waiting job says nothing about an approval.
+  const job = { id: 5, workflow_name: "Release", run_id: 99, run_attempt: 1 };
+  expect(noticeFrom("workflow_job", { action: "waiting", repository, workflow_job: job })).toBeUndefined();
 });
 
 test("a page is told only what its desktop notification shows", () => {
@@ -180,7 +177,7 @@ test.each<[string, string, unknown]>([
     { action: "completed", repository, check_suite: { conclusion: "failure", pull_requests: "7" } },
   ],
   ["a run with no id", "workflow_run", { action: "completed", repository, workflow_run: { name: "Release" } }],
-  ["a job with no run", "workflow_job", { action: "waiting", repository, workflow_job: { workflow_name: "Release" } }],
+  ["a review with no run", "deployment_review", { action: "requested", repository, workflow_run: { name: "Release" } }],
   ["an event with no rule", "push", { ...MERGED }],
   ["an event named like an object's property", "constructor", { ...MERGED }],
 ])("an odd payload sends nothing and throws nothing: %s", (_name, kind, payload) => {

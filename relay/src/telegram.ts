@@ -22,7 +22,7 @@ export const SENT_MS = 24 * 60 * 60 * 1000;
  * and nothing else, since the request's URL holds the bot token and its body the notice.
  *
  * The one thing kept is which notices were sent (their keys, such as `checks:owner/name:<sha>`), so that GitHub
- * delivering a webhook again, a second failed check on the same commit, or another job of the same release waiting
+ * delivering a webhook again, a second failed check on the same commit, or a release asking for the same review again
  * doesn't send the same notice twice. It is the least that does that job: keys only, no payloads or texts, at most
  * `MAX_SENT` of them and none older than `SENT_MS`, oldest dropped first, all in memory and lost on a restart. After
  * a restart a repeat can get through once, which is better than the relay keeping a store.
