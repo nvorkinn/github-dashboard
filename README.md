@@ -40,6 +40,19 @@ The Preview workflow publishes it to GitHub Pages from the `gh-pages` branch:
 When the page learns something new to show, give the demo sample data for it, so the preview shows it too. Pull
 requests from forks and from Dependabot get no preview.
 
+## Releases
+
+Press **Run workflow** on the Release workflow (Actions > Release) and pick the bump: patch, minor or major. It tags the
+head of `main` with the next version after the latest `v*` tag (with no tag yet, patch gives `v0.0.1` and minor
+`v0.1.0`), builds the image for amd64 and arm64, starts each to check it serves the page, and then publishes:
+
+- the image, as `ghcr.io/nvorkinn/github-dashboard:<tag>` (the tag as it is, `v` included) and `:latest`;
+- a GitHub Release for the tag, with the image's digest and the notes GitHub generates.
+
+Pushing a `v*` tag by hand does the same for that tag. Nothing is deployed from here: home-stack pins the image by tag
+and digest (`ghcr.io/nvorkinn/github-dashboard:v0.1.0@sha256:...`, the line the run's summary and the release show), so
+a release reaches the server when that pin is moved.
+
 ## Pull requests
 
 `main` takes changes only through pull requests, and requires one check, "Global PR Status". The All checks workflow
