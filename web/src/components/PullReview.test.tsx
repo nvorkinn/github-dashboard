@@ -67,3 +67,31 @@ test("does not let a late file response replace the next PR", async () => {
   release({ files: [file], truncated: false });
   await waitFor(() => expect(screen.queryByRole("button", { name: /example.ts/ })).toBeNull());
 });
+
+test("filters the compact file tree without changing the selected diff", async () => {
+  const initial = pull();
+  render(
+    <ActionsContext.Provider
+      value={{
+        files: async () => ({ files: [file, { ...file, path: "src/nested/folder/other.ts" }], truncated: false }),
+      }}
+    >
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await screen.findByRole("button", { name: /example.ts/ });
+  expect(screen.getByText("nested/folder/")).toBeTruthy();
+  const search = screen.getByRole("searchbox", { name: "Filter changed files" });
+  fireEvent.input(search, { target: { value: "OTHER" } });
+  expect(screen.queryByRole("button", { name: /example.ts/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /other.ts/ })).toBeTruthy();
+  expect(screen.getByRole("region", { name: /Before code/ })).toBeTruthy();
+  expect(screen.getByRole("region", { name: /After code/ })).toBeTruthy();
+  expect(document.querySelector(".review-file-title")?.textContent).toContain("src/example.ts");
+  fireEvent.input(search, { target: { value: "no matches" } });
+  expect(screen.getByText("No matching files.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
+  expect(screen.queryByRole("navigation", { name: "Changed files" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show files" }));
+  expect(screen.getByRole("searchbox")).toBeTruthy();
+});

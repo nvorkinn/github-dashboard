@@ -5,8 +5,9 @@ import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
 import { ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
+import { Icon } from "./Icon.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
-import "highlight.js/styles/github.css";
+
 import "./PullReview.css";
 
 /** GitHub may omit patches or cut them short. Never present an incomplete patch as a full review. */
@@ -57,9 +58,20 @@ function FileDiff({ file, split }: { file: ChangedFile; split: boolean }) {
         highlight: true,
         fileContentToggle: false,
         synchronisedScroll: true,
+        renderNothingWhenEmpty: false,
       },
     );
     ui.draw();
+    target.current.querySelectorAll<HTMLElement>(".d2h-file-side-diff, .d2h-file-diff").forEach((pane, index) => {
+      pane.tabIndex = 0;
+      pane.setAttribute("role", "region");
+      pane.setAttribute(
+        "aria-label",
+        split
+          ? `${index === 0 ? "Before" : "After"} code, scroll horizontally for long lines`
+          : "Unified code, scroll horizontally for long lines",
+      );
+    });
     target.current.scrollTop = 0;
     return () => {
       if (target.current) target.current.replaceChildren();
@@ -100,14 +112,34 @@ function FileTree({
   }
   return (
     <>
-      {[...folders].map(([folder, group]) => (
-        <details key={folder} open>
-          <summary>{folder}</summary>
-          <div class="review-folder">
-            <FileTree files={group} selected={selected} choose={choose} prefix={`${prefix}${folder}`} />
-          </div>
-        </details>
-      ))}
+      {[...folders].map(([initialFolder, group]) => {
+        let folder = initialFolder;
+        // Compact single-child directory chains without hiding the top-level grouping.
+        if (prefix) {
+          while (true) {
+            const next = group[0]?.path.slice(prefix.length + folder.length).split("/");
+            if (
+              !next ||
+              next.length < 2 ||
+              !group.every((file) => file.path.startsWith(`${prefix}${folder}${next[0]}/`))
+            )
+              break;
+            folder += `${next[0]}/`;
+          }
+        }
+        return (
+          <details key={folder} open>
+            <summary>
+              <Icon name="folder" />
+              <span>{folder}</span>
+              <span class="review-count">{group.length}</span>
+            </summary>
+            <div class="review-folder">
+              <FileTree files={group} selected={selected} choose={choose} prefix={`${prefix}${folder}`} />
+            </div>
+          </details>
+        );
+      })}
       {leaves.map((file) => (
         <button
           type="button"
@@ -116,10 +148,16 @@ function FileTree({
           title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}
           onClick={() => choose(file.path)}
         >
-          <span>{file.path.slice(prefix.length)}</span>
-          <small>
-            {file.status} · +{file.additions} −{file.deletions}
-          </small>
+          <Icon name="file" />
+          <span class="review-filename">{file.path.slice(prefix.length)}</span>
+          <span
+            class="review-stats"
+            role="img"
+            aria-label={`${file.status}, ${file.additions} additions, ${file.deletions} deletions`}
+          >
+            <span>+{file.additions}</span>
+            <span>−{file.deletions}</span>
+          </span>
         </button>
       ))}
     </>
@@ -146,6 +184,7 @@ export function PullReview({
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [split, setSplit] = useState(true);
   const [tree, setTree] = useState(true);
+  const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
   const action = useAction();
   const key = `${current.repo}#${current.number}`;
@@ -211,14 +250,30 @@ export function PullReview({
       }}
     >
       <header class="review-header">
-        <div>
-          <h2 id="review-title">
-            {pull.repo} #{pull.number} · {pull.title}
-          </h2>
-          <p>
-            <code>{pull.head}</code> → <code>{pull.base}</code> · {pull.draft ? "Draft" : pull.mergeState} · Checks:{" "}
-            {summarize(pull.checks)}
+        <Icon name="pull-request" size={36} class="review-pr-icon" />
+        <div class="review-heading">
+          <p class="review-repository">
+            {pull.repo} #{pull.number}
           </p>
+          <h2 id="review-title">{pull.title}</h2>
+          <div class="review-metadata">
+            <span class="review-branch">
+              <Icon name="pull-request" />
+              <code>{pull.head}</code>
+            </span>
+            <span>→</span>
+            <span class="review-branch">
+              <Icon name="pull-request" />
+              <code>{pull.base}</code>
+            </span>
+            <span class={`review-checks review-checks-${summarize(pull.checks)}`}>
+              <Icon name={summarize(pull.checks) === "passed" ? "check" : "attention"} />
+              Checks: {summarize(pull.checks)}
+            </span>
+            {(pull.draft || pull.mergeState !== "clean") && (
+              <span class="review-state">{pull.draft ? "Draft" : pull.mergeState}</span>
+            )}
+          </div>
         </div>
         <div class="review-controls">
           <button
@@ -229,7 +284,7 @@ export function PullReview({
               if (next) select(next);
             }}
           >
-            Previous PR
+            <span aria-hidden="true">‹</span> Previous PR
           </button>
           <button
             type="button"
@@ -239,8 +294,9 @@ export function PullReview({
               if (next) select(next);
             }}
           >
-            Next PR
+            Next PR <span aria-hidden="true">›</span>
           </button>
+          <ExternalLink href={pull.url}>Open on GitHub ↗</ExternalLink>
           <button
             type="button"
             disabled={!fresh || !info?.canApprove || !!action.busy || !!done}
@@ -256,40 +312,41 @@ export function PullReview({
               })
             }
           >
-            Approve
+            <Icon name="check" /> Approve
           </button>
-          <ConfirmButton
-            label="Merge"
-            confirmLabel="Confirm merge"
-            busyLabel="Merging…"
-            busy={action.busy === "merge"}
-            disabled={
-              !fresh ||
-              !info?.canMerge ||
-              !actions?.pulls ||
-              !!action.busy ||
-              done === "Merged" ||
-              !["passed", "none"].includes(summarize(pull.checks))
-            }
-            onConfirm={() =>
-              action.run("merge", async () => {
-                const latest = await actions?.review?.read(pull);
-                if (
-                  !latest?.canMerge ||
-                  latest.pull.sha !== pull.sha ||
-                  !["passed", "none"].includes(summarize(latest.pull.checks))
-                )
-                  throw new Error("Merge eligibility changed. Refresh this review.");
-                await actions?.pulls?.merge(pull);
-                setDone("Merged");
-              })
-            }
-          />
-          <ExternalLink href={pull.url}>Open on GitHub</ExternalLink>
-          <button type="button" onClick={onClose} aria-label="Close PR review">
-            Close ×
-          </button>
+          <span class="review-merge">
+            <ConfirmButton
+              label="Merge"
+              confirmLabel="Confirm merge"
+              busyLabel="Merging…"
+              busy={action.busy === "merge"}
+              disabled={
+                !fresh ||
+                !info?.canMerge ||
+                !actions?.pulls ||
+                !!action.busy ||
+                done === "Merged" ||
+                !["passed", "none"].includes(summarize(pull.checks))
+              }
+              onConfirm={() =>
+                action.run("merge", async () => {
+                  const latest = await actions?.review?.read(pull);
+                  if (
+                    !latest?.canMerge ||
+                    latest.pull.sha !== pull.sha ||
+                    !["passed", "none"].includes(summarize(latest.pull.checks))
+                  )
+                    throw new Error("Merge eligibility changed. Refresh this review.");
+                  await actions?.pulls?.merge(pull);
+                  setDone("Merged");
+                })
+              }
+            />
+          </span>
         </div>
+        <button class="review-close" type="button" onClick={onClose} aria-label="Close PR review">
+          ×
+        </button>
       </header>
       {(problem || action.problem) && (
         <p role="alert">
@@ -301,7 +358,12 @@ export function PullReview({
       )}
       {done && <p role="status">{done}</p>}
       <details class="review-info">
-        <summary>PR information · description, checks, reviews</summary>
+        <summary>
+          <strong>PR information</strong>
+          <span>
+            Description · Checks ({pull.checks.length}) · Reviews ({info?.reviews.length ?? 0})
+          </span>
+        </summary>
         {info ? (
           <>
             <p class="review-description">{info.description || "No description."}</p>
@@ -331,49 +393,96 @@ export function PullReview({
           </p>
         )}
       </details>
-      <div class="review-toolbar">
-        <button type="button" aria-expanded={tree} onClick={() => setTree(!tree)}>
-          {tree ? "Hide" : "Show"} files
-        </button>
-        <button type="button" aria-pressed={split} onClick={() => setSplit(true)}>
-          Split
-        </button>
-        <button type="button" aria-pressed={!split} onClick={() => setSplit(false)}>
-          Unified
-        </button>
-        <button type="button" disabled={index === 0} onClick={() => moveFile(-1)}>
-          Previous file
-        </button>
-        <button type="button" disabled={!files || index >= files.files.length - 1} onClick={() => moveFile(1)}>
-          Next file
-        </button>
-        <span>
-          {file?.path} · {files ? `${index + (file ? 1 : 0)} / ${files.files.length}` : "Loading files…"} · Alt+↑/↓
-        </span>
-      </div>
       {files?.truncated && <p role="status">Only the first 300 files are shown. Review remaining files on GitHub.</p>}
       <div class={`review-body ${tree ? "" : "review-no-tree"}`}>
         {tree && (
           <nav aria-label="Changed files" class="review-tree">
-            <FileTree
-              files={files?.files ?? []}
-              selected={file?.path}
-              choose={(path) => setPaths((previous) => ({ ...previous, [key]: path }))}
-            />
+            <div class="review-tree-heading">
+              <Icon name="file" size={20} />
+              <strong>Changed files</strong>
+              <span class="review-count">{files?.files.length ?? 0}</span>
+            </div>
+            <label class="review-search">
+              <Icon name="search" />
+              <input
+                type="search"
+                aria-label="Filter changed files"
+                placeholder="Filter files…"
+                value={filter}
+                onInput={(event) => setFilter(event.currentTarget.value)}
+              />
+            </label>
+            <div class="review-tree-list">
+              <FileTree
+                files={(files?.files ?? []).filter((item) => item.path.toLowerCase().includes(filter.toLowerCase()))}
+                selected={file?.path}
+                choose={(path) => setPaths((previous) => ({ ...previous, [key]: path }))}
+              />
+              {files && !files.files.some((item) => item.path.toLowerCase().includes(filter.toLowerCase())) && (
+                <p class="empty">No matching files.</p>
+              )}
+            </div>
           </nav>
         )}
         <section class="review-code" aria-label="File diff">
-          {file ? (
-            <FileDiff file={file} split={split} />
-          ) : (
-            <p class="empty">
-              {problem
-                ? "Diff could not be loaded. Refresh to try again."
-                : files
-                  ? "No changed files."
-                  : "Loading diff…"}
-            </p>
-          )}
+          <div class="review-toolbar">
+            <div class="review-file-title">
+              <Icon name="file" size={20} />
+              <strong title={file?.path}>{file?.path ?? "File diff"}</strong>
+              {file && (
+                <span class="review-stats">
+                  <span>+{file.additions}</span>
+                  <span>−{file.deletions}</span>
+                </span>
+              )}
+            </div>
+            <fieldset class="review-view-controls" aria-label="Diff layout">
+              <button type="button" aria-pressed={split} onClick={() => setSplit(true)}>
+                Split
+              </button>
+              <button type="button" aria-pressed={!split} onClick={() => setSplit(false)}>
+                Unified
+              </button>
+            </fieldset>
+            <button type="button" aria-expanded={tree} onClick={() => setTree(!tree)}>
+              {tree ? "Hide" : "Show"} files
+            </button>
+          </div>
+          <div class={`review-column-headings ${split ? "" : "review-unified-heading"}`}>
+            {split && (
+              <span>
+                − Before <span>({pull.base})</span>
+              </span>
+            )}
+            <span>
+              + {split ? "After" : "Changes"} <span>({pull.head})</span>
+            </span>
+          </div>
+          <section class="review-code-scroll" key={`${key}:${file?.path}:${split}`} aria-label="Scrollable code diff">
+            {file ? (
+              <FileDiff file={file} split={split} />
+            ) : (
+              <p class="empty">
+                {problem
+                  ? "Diff could not be loaded. Refresh to try again."
+                  : files
+                    ? "No changed files."
+                    : "Loading diff…"}
+              </p>
+            )}
+          </section>
+          <footer class="review-file-navigation">
+            <span>
+              {files ? `${index + (file ? 1 : 0)} of ${files.files.length} files` : "Loading files…"}
+              <span class="review-shortcut"> · Alt+↑/↓</span>
+            </span>
+            <button type="button" disabled={index === 0} onClick={() => moveFile(-1)}>
+              Previous file
+            </button>
+            <button type="button" disabled={!files || index >= files.files.length - 1} onClick={() => moveFile(1)}>
+              Next file
+            </button>
+          </footer>
         </section>
       </div>
     </dialog>
