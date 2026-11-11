@@ -74,7 +74,6 @@ export function project(fields: Partial<Project> = {}): Project {
     name: "weather-station",
     description: undefined,
     url: "https://github.com/octocat/weather-station",
-    defaultBranch: "main",
     private: false,
     pushedAt: undefined,
     latestRelease: undefined,

@@ -121,18 +121,10 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         if (plan.tag !== tag) {
           throw new ActionError(`The next release is ${plan.tag} now, not ${tag}. Refresh the dashboard.`);
         }
-        const path = `repos/${project.repo}/releases`;
-        const target = { tag_name: tag, target_commitish: project.defaultBranch };
-        const notes = (await (
-          await send(
-            `${path}/generate-notes`,
-            { ...target, ...(plan.previous ? { previous_tag_name: plan.previous } : {}) },
-            "Contents",
-          )
-        ).json()) as { name: string; body: string };
+        // Without a target, GitHub makes the tag at the head of the default branch; it writes the notes itself.
         await send(
-          path,
-          { ...target, name: notes.name, body: notes.body, draft: false, prerelease: false },
+          `repos/${project.repo}/releases`,
+          { tag_name: tag, generate_release_notes: true, draft: false, prerelease: false },
           "Contents",
         );
         dashboard.changed({ kind: "release", repo: project.repo });
@@ -157,12 +149,10 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         if (!(await gone(api.get(`${path}/releases/tags/${encodeURIComponent(tag)}`)))) {
           throw new ActionError(`${tag} is not a published release. Refresh the dashboard.`);
         }
+        // A workflow is started on a branch, which has to be named: the default one, asked for only now.
+        const { default_branch: ref } = await api.get<{ default_branch: string }>(path);
         // The workflow checks the rest itself, such as that dev has the release, before it asks for an approval.
-        await send(
-          `${path}/actions/workflows/${workflow.id}/dispatches`,
-          { ref: project.defaultBranch, inputs: { tag } },
-          "Actions",
-        );
+        await send(`${path}/actions/workflows/${workflow.id}/dispatches`, { ref, inputs: { tag } }, "Actions");
         dashboard.changed({ kind: "workflow_run", repo: project.repo });
       });
     },

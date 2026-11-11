@@ -25,7 +25,6 @@ export type RawRepo = {
   name: string;
   description: string | null;
   html_url: string;
-  default_branch: string;
   private: boolean;
   archived: boolean;
   pushed_at: string | null;
@@ -348,7 +347,6 @@ export function project(
     name: repo.name,
     description: repo.description ?? undefined,
     url: repo.html_url,
-    defaultBranch: repo.default_branch,
     private: repo.private,
     pushedAt: repo.pushed_at ?? undefined,
     latestRelease,
