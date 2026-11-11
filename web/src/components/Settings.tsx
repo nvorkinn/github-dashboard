@@ -54,9 +54,9 @@ export function Settings({
         </div>
         <div class="settings-body">
           <p>
-            While the dashboard is open on this computer, what needs attention shows as a notification from the browser,
-            in macOS's Notification Center. Once no dashboard has been open for 30 seconds, including when its tab is in
-            the background, the same things go to Telegram instead, if it is set up.
+            While the dashboard is open on this computer, including in a background tab, what needs attention shows as a
+            notification from the browser, in macOS's Notification Center. Once every dashboard page is closed or its
+            connection has been suspended for 30 seconds, the same things go to Telegram instead, if it is set up.
           </p>
 
           <div class="permission">

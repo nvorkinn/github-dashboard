@@ -154,37 +154,33 @@ test("a connection that can't even be made is tried again", () => {
   events.stop();
 });
 
-test("a hidden page disconnects, and connects at once when it is shown again", () => {
+test("a background page stays connected so desktop notifications can arrive", () => {
   const { events, streams, last, lives } = setUp();
   events.start();
   last().emit("hello");
 
   show(false);
-  expect(last().closed).toBe(true);
-  expect(lives).toEqual([true, false]);
+  expect(last().closed).toBe(false);
+  expect(lives).toEqual([true]);
   vi.advanceTimersByTime(10 * 60_000);
   expect(streams).toHaveLength(1);
 
   show(true);
-  expect(streams).toHaveLength(2);
+  expect(streams).toHaveLength(1);
   expect(last().closed).toBe(false);
-  last().emit("hello");
-  expect(lives).toEqual([true, false, true]);
+  expect(lives).toEqual([true]);
   events.stop();
 });
 
-test("a page that starts hidden waits to be shown, and one hidden while waiting to reconnect doesn't", () => {
+test("a page connects and reconnects while it is in the background", () => {
   const { events, streams, last } = setUp();
   show(false);
   events.start();
-  expect(streams).toHaveLength(0);
-  show(true);
   expect(streams).toHaveLength(1);
 
   last().emit("error");
-  show(false);
-  vi.advanceTimersByTime(60_000);
-  expect(streams).toHaveLength(1);
+  vi.advanceTimersByTime(BACKOFF_MS.at(0) ?? 0);
+  expect(streams).toHaveLength(2);
   events.stop();
 });
 

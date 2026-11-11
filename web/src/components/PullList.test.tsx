@@ -101,6 +101,29 @@ test("starts folded, down to the project, number, title, states and buttons, and
   expect(container.querySelector(".check-list")).toBeNull();
 });
 
+test("names the repository in compact cross-repository lists", () => {
+  const view = render(
+    <PullList
+      compact
+      now={NOW}
+      pulls={[pull({ repo: "octocat/weather-station", number: 42, title: "Show wind gusts" })]}
+    />,
+  );
+  const row = screen.getByRole("listitem");
+  const repository = within(row).getByText("weather-station", { selector: ".pull-compact-repo" });
+  expect(repository.getAttribute("title")).toBe("octocat/weather-station");
+
+  view.rerender(
+    <PullList
+      compact
+      showRepository={false}
+      now={NOW}
+      pulls={[pull({ repo: "octocat/weather-station", number: 42, title: "Show wind gusts" })]}
+    />,
+  );
+  expect(within(row).queryByText("weather-station", { selector: ".pull-compact-repo" })).toBeNull();
+});
+
 test("does without an avatar when there is none", () => {
   const { container } = render(<PullList now={NOW} pulls={[pull({ authorAvatarUrl: undefined })]} />);
   expect(container.querySelector("img")).toBeNull();

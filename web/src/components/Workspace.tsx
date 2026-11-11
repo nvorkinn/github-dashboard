@@ -349,7 +349,13 @@ export function Workspace({
         <div class={tab === "all" ? "workspace-content" : "workspace-content workspace-content-focused"}>
           {tab === "all" && (
             <>
-              <PullList key={`overview:${currentScope ?? "all"}`} pulls={visiblePulls} now={now} compact />
+              <PullList
+                key={`overview:${currentScope ?? "all"}`}
+                pulls={visiblePulls}
+                now={now}
+                compact
+                showRepository={selected === undefined}
+              />
               <div class="workspace-operations">
                 <ReleaseList runs={overviewRuns} now={now} inspect />
                 {visibleRuns.length > overviewRuns.length && (
@@ -362,14 +368,34 @@ export function Workspace({
             </>
           )}
           {tab === "pulls" && (
-            <PullList key={`pulls:${currentScope ?? "all"}`} pulls={visiblePulls} now={now} compact />
+            <PullList
+              key={`pulls:${currentScope ?? "all"}`}
+              pulls={visiblePulls}
+              now={now}
+              compact
+              showRepository={selected === undefined}
+            />
           )}
-          {tab === "ready" && <PullList key={`ready:${currentScope ?? "all"}`} pulls={ready} now={now} compact />}
+          {tab === "ready" && (
+            <PullList
+              key={`ready:${currentScope ?? "all"}`}
+              pulls={ready}
+              now={now}
+              compact
+              showRepository={selected === undefined}
+            />
+          )}
           {tab === "workflows" && <ReleaseList runs={visibleRuns} now={now} inspect />}
           {tab === "releases" && <ReleasePanel projects={selected ? [selected] : shown} now={now} />}
           {tab === "attention" && (
             <div class="workspace-attention-view">
-              <PullList key={`attention:${currentScope ?? "all"}`} pulls={attentionPulls} now={now} compact />
+              <PullList
+                key={`attention:${currentScope ?? "all"}`}
+                pulls={attentionPulls}
+                now={now}
+                compact
+                showRepository={selected === undefined}
+              />
               <ReleaseList runs={attentionRuns} now={now} inspect />
             </div>
           )}

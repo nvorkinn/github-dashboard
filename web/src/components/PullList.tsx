@@ -156,7 +156,18 @@ export function columnOf(pull: PullRequest): PullColumn {
  * Every open pull request, of all projects, on a board of three columns by what each needs. The columns sit side by
  * side where there is room for them and one under the other where there isn't.
  */
-export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]; now: number; compact?: boolean }) {
+export function PullList({
+  pulls,
+  now,
+  compact = false,
+  showRepository = true,
+}: {
+  pulls: PullRequest[];
+  now: number;
+  compact?: boolean;
+  /** Names each repository in a cross-repository compact list. */
+  showRepository?: boolean;
+}) {
   const [order, setOrder] = useState(rememberedOrder);
   const [status, setStatus] = useState<PullFilter>("all");
   const [author, setAuthor] = useState("all");
@@ -297,7 +308,13 @@ export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]
         ) : (
           <ul class="cards pull-queue" aria-labelledby="pulls-heading">
             {filtered.map((pull) => (
-              <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} foldable />
+              <PullRow
+                key={`${pull.repo}#${pull.number}`}
+                pull={pull}
+                now={now}
+                foldable
+                showRepository={showRepository}
+              />
             ))}
           </ul>
         )
@@ -356,7 +373,17 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
  * One pull request. A `foldable` one starts folded, down to its project, number, title, states and buttons, with a
  * button that unfolds the rest: who opened it and when, its branches, each check and the files changed.
  */
-export function PullRow({ pull: read, now, foldable = false }: { pull: PullRequest; now: number; foldable?: boolean }) {
+export function PullRow({
+  pull: read,
+  now,
+  foldable = false,
+  showRepository = false,
+}: {
+  pull: PullRequest;
+  now: number;
+  foldable?: boolean;
+  showRepository?: boolean;
+}) {
   const [unfolded, setUnfolded] = useState(false);
   const folded = foldable && !unfolded;
   const actions = useActions()?.pulls;
@@ -395,6 +422,11 @@ export function PullRow({ pull: read, now, foldable = false }: { pull: PullReque
         </ExternalLink>
         {folded && (
           <p class="pull-compact-meta">
+            {showRepository && (
+              <span class="pull-compact-repo" title={pull.repo}>
+                {shortName(pull.repo)}
+              </span>
+            )}
             <code>{pull.head}</code>
             <span>{pull.author}</span>
             <span>
