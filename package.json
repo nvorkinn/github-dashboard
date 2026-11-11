@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:demo": "vite build --mode demo --base ./ --outDir ../dist/demo",
     "start": "node relay/src/main.ts",
     "check": "biome ci . && tsc --noEmit",
     "test": "vitest run"

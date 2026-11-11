@@ -18,3 +18,9 @@ test("shows the relay as not reachable when the request fails", async () => {
   render(<App />);
   expect(await screen.findByText("Relay: not reachable")).toBeTruthy();
 });
+
+test("says so when it is the demo", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("ok")));
+  render(<App demo />);
+  expect(await screen.findByRole("note")).toBeTruthy();
+});

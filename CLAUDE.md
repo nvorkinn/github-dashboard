@@ -10,3 +10,5 @@ See README.md for what this is, the layout and the commands.
   page can read, or a log.
 - The relay keeps no database and stores no tokens. Question any change that makes it remember something.
 - Third-party GitHub Actions are pinned to commit SHAs with the version in a comment.
+- A change to what the page shows comes with sample data for it in `web/src/demo.ts`, so the pull request's preview
+  shows it.
