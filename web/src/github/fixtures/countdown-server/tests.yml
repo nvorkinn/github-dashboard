@@ -1,0 +1,209 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The tests in 3 shards side by side (pytest-shard, split by test ID), and Codecov merges their coverage reports
+  # (codecov.yml waits for all of them). Keep the shard list 0 to N-1 for --num-shards below.
+  test:
+    name: test (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One shard's failure shouldn't hide the others'.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      # vendor/countdown-api, the store contract, is a submodule.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      # uv installs the Python .python-version names itself. setup-uv caches uv's downloads, keyed on (among others)
+      # uv.lock.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Install redis-server
+        # For the render queue's script's tests against a real Redis (tests/services/test_render_jobs.py starts its
+        # own; they skip without it).
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends redis-server
+
+      # Exactly what uv.lock pins, dev group included, into .venv.
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # The browser tests don't depend on the shard, so only the first runs them.
+      - name: Test dashboard browser logic
+        if: matrix.shard == 0
+        run: node --test tests/browser/*.test.cjs
+
+      - name: Run tests
+        # This shard's tests, one worker per CPU; pytest-cov combines their coverage. No terminal coverage report: a
+        # shard's alone would list as missing every line only the other shards' tests reach.
+        run: >-
+          uv run --no-sync python -m pytest -n auto -v --num-shards 3 --shard-id ${{ matrix.shard }}
+          --cov=broker --cov-branch --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          disable_search: true
+
+  # Lint and formatting, with the Ruff uv.lock pins.
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      # uv checks uv.lock against every project in it, vendor/countdown-api included.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      # Restore only: this job installs just the dev group, so a cache it saved under the test jobs' key would be
+      # missing most of what they need.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          save-cache: false
+
+      - name: Lint
+        run: uv run --locked --only-dev ruff check .
+
+      - name: Check formatting
+        run: uv run --locked --only-dev ruff format --check .
+
+  # Lint and formatting of the first-party front-end (JS and CSS; see biome.jsonc), with a pinned Biome. Keep the
+  # version in step with the $schema URL in biome.jsonc.
+  biome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check lint and formatting
+        run: npx --yes @biomejs/biome@2.6.3 ci .
+
+  # Type checking, with the ty uv.lock pins. ty resolves imports from the installed dependencies, so this installs
+  # what the test jobs do (and shares their cache).
+  ty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Type check
+        run: uv run --locked ty check
+
+  # Unused, missing and transitive dependencies, against pyproject.toml's [tool.deptry]. Imports are read from the
+  # source; the import-name mapping comes from the installed packages, so this installs what the test jobs do.
+  deptry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Check dependencies
+        run: uv run --locked deptry .
+
+  # The file hygiene hooks of .pre-commit-config.yaml. Ruff, ty and the Terraform hooks are skipped: the ruff and ty
+  # jobs above and cloudflare.yml already run them, and they would need the project installed or terraform and tflint.
+  pre-commit:
+    runs-on: ubuntu-latest
+    env:
+      SKIP: ruff-check,ruff-format,ty,terraform_fmt,terraform_validate,terraform_tflint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Restore only: this job installs no project dependencies, so it must not save a cache the test jobs would use.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          save-cache: false
+
+      # The hooks' environments, keyed on the config that pins them.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  # Builds the images and checks the config baked into each. The infra images
+  # have their program as the entrypoint, so `check` is just its args.
+  image:
+    name: test image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: caddy
+            # The plugin is built in, and the binary runs.
+            check: docker-proxy --help
+          - image: fluent-bit
+            check: --dry-run --config /fluent-bit/etc/fluent-bit.yaml
+          # Its flags; the step below starts it as compose does and checks the vmui dashboards baked into it.
+          - image: victoria-metrics
+            check: -dryRun
+          # The broker itself: its CMD is overridden, and importing the submodule's code checks it was copied in and installed.
+          - image: broker
+            context: .
+            check: python -c "import countdown_api.models"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Build image
+        run: docker build -t countdown-server-${{ matrix.image }} ${{ matrix.context || matrix.image }}
+
+      # Fixable HIGH/CRITICAL vulnerabilities in the image's OS packages, the broker's Python packages and the Go
+      # binaries inside the infra images, plus Dockerfile misconfigurations. Accepted findings live in
+      # .trivyignore, each with a reason and an expiry.
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          scan-type: image
+          image-ref: countdown-server-${{ matrix.image }}
+          scanners: vuln,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+
+      # With the settings every image's environment would give it .
+      - name: Check config
+        run: docker run --rm --env-file config/dev.env countdown-server-${{ matrix.image }} ${{ matrix.check }}
+
+      # The broker's image as docker-compose.yml runs it: the broker and each provider, with stand-in secrets and no
+      # Redis, must start and then stop cleanly. Importing the code (above) isn't starting it: gunicorn checks
+      # gunicorn.conf.py only as it starts.
+      - name: Start its services
+        if: matrix.image == 'broker'
+        run: python3 scripts/check_image_starts.py countdown-server-broker
+
+      # With the image's own CMD (loopback, host networking as in compose): every dashboard is served and every
+      # query in it parses.
+      - name: Check the vmui dashboards
+        if: matrix.image == 'victoria-metrics'
+        run: |
+          docker run --detach --name check-victoria-metrics --network host countdown-server-victoria-metrics
+          status=0
+          python3 scripts/check_vmui_dashboards.py http://127.0.0.1:8428 || status=$?
+          if [ "$status" -ne 0 ]; then docker logs check-victoria-metrics; fi
+          docker rm --force check-victoria-metrics > /dev/null
+          exit $status

@@ -1,0 +1,210 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # The "Run workflow" button (Actions > Release): tags the head of main with the next version after the
+  # latest v* tag, then releases it in this same run. A tag pushed with the workflow's own token starts no
+  # second run.
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      # To create the tag on a button release.
+      contents: write
+    outputs:
+      value: ${{ steps.tag.outputs.value }}
+    steps:
+      - name: Work out and create the next tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "Release from main, not $GITHUB_REF" >&2; exit 1; }
+          latest="$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
+            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          IFS=. read -r major minor patch <<< "${latest:-v0.0.0}"
+          major="${major#v}"
+          case "$BUMP" in
+            major) next="v$((major + 1)).0.0" ;;
+            minor) next="v$major.$((minor + 1)).0" ;;
+            *) next="v$major.$minor.$((patch + 1))" ;;
+          esac
+          # Fails if the tag already exists, e.g. two releases started at once.
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$next" -f sha="$GITHUB_SHA" > /dev/null
+          echo "Tagged $GITHUB_SHA as $next (after ${latest:-no tag})"
+          echo "NEXT_TAG=$next" >> "$GITHUB_ENV"
+
+      - name: Extract tag
+        id: tag
+        run: |
+          # The tag just made by the button, else the pushed tag.
+          tag="${NEXT_TAG:-${GITHUB_REF#refs/tags/}}"
+          # The tag is passed to a shell on the deploy host, so keep it to safe characters.
+          [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
+
+  # One build per image and architecture, side by side, each on a runner of its own architecture (no emulation): arm64
+  # for production's host (ARM), amd64 for dev, which runs on the x86 home server. Caddy is built for arm64 only, as only
+  # production deploys it. Each build is pushed by digest, with BuildKit's provenance and SBOM beside it, and the
+  # `images` job below joins the two into the tags. The broker's image is the code; the others are built every release
+  # too, so a release is one tag across all of them.
+  build:
+    name: build ${{ matrix.image }} (${{ matrix.arch }})
+    needs: tag
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { image: countdown-server, context: ., arch: amd64, runner: ubuntu-24.04 }
+          - { image: countdown-server, context: ., arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: countdown-server-caddy, context: caddy, arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: countdown-server-fluent-bit, context: fluent-bit, arch: amd64, runner: ubuntu-24.04 }
+          - { image: countdown-server-fluent-bit, context: fluent-bit, arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: countdown-server-victoria-logs, context: victoria-logs, arch: amd64, runner: ubuntu-24.04 }
+          - { image: countdown-server-victoria-logs, context: victoria-logs, arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: countdown-server-victoria-metrics, context: victoria-metrics, arch: amd64, runner: ubuntu-24.04 }
+          - {
+              image: countdown-server-victoria-metrics,
+              context: victoria-metrics,
+              arch: arm64,
+              runner: ubuntu-24.04-arm,
+            }
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The broker image bakes in vendor/countdown-api; the infra images don't use it.
+          submodules: ${{ matrix.context == '.' }}
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      # BuildKit's own attestations are pushed beside the image as extra (unknown/unknown platform) manifests in the
+      # index of this digest; the join below keeps them, so a pull on either host still picks its own platform's image.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+
+      - name: Keep the digest for the join
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          # The image last, so the join's pattern below matches this image's and no other's (`*` matches hyphens, and
+          # one image's name begins another's).
+          name: digests-${{ matrix.arch }}-${{ matrix.image }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Each image's architectures joined into one multi-platform tag: the release's, and latest.
+  images:
+    name: image ${{ matrix.image }}
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image:
+          - countdown-server
+          - countdown-server-caddy
+          - countdown-server-fluent-bit
+          - countdown-server-victoria-logs
+          - countdown-server-victoria-metrics
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+      TAG: ${{ needs.tag.outputs.value }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digests-*-${{ matrix.image }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Tag the join of the architectures
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          # shellcheck disable=SC2046  # one argument per digest file
+          docker buildx imagetools create --tag "$IMAGE:$TAG" --tag "$IMAGE:latest" $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE:$TAG"
+
+  # The GitHub Release for the tag, with the notes GitHub generates from the pull requests merged since the last one. It
+  # has no assets: the deploys use the tag's own docker-compose.yml and config/.
+  github-release:
+    needs: tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.tag.outputs.value }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Create the GitHub Release
+        run: gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+
+  # A release deploys to dev only, with no approval (starting the release is
+  # the decision). Production is promote.yml's, for a tag that has been through
+  # here. The services wait for the images. A target's environment holds its
+  # host's secrets (DEPLOY_HOST and the rest). Dev runs no edge of its own (home-stack's Caddy, Tinyauth and Pocket
+  # ID serve it, so the edge profile is off there); production's edge is promote.yml's, in the same deploy. DNS is not
+  # part of a release: it is applied on its own (cloudflare.yml).
+  # Dev, through the host's Docker daemon (deploy-compose.yml): one job fetches the secrets from Vaultwarden and deploys
+  # every service once the images are built.
+  deploy-dev:
+    name: deploy (dev)
+    needs: [tag, images]
+    uses: ./.github/workflows/deploy-compose.yml
+    # The deploy job (below) asks for id-token: write, to join the tailnet with GitHub's OIDC token, so its caller grants it too.
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: dev
+      tag: ${{ needs.tag.outputs.value }}
+    secrets: inherit
