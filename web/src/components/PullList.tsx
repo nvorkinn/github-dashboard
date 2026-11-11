@@ -4,6 +4,7 @@ import { summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
+import { PullReview } from "./PullReview.tsx";
 import type { Tone } from "./state.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
 
@@ -311,6 +312,7 @@ export function PullList({
               <PullRow
                 key={`${pull.repo}#${pull.number}`}
                 pull={pull}
+                reviewPulls={filtered}
                 now={now}
                 foldable
                 showRepository={showRepository}
@@ -332,7 +334,13 @@ export function PullList({
                 ) : (
                   <ul class="cards" aria-labelledby={`column-${value}`}>
                     {these.map((pull) => (
-                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} foldable />
+                      <PullRow
+                        key={`${pull.repo}#${pull.number}`}
+                        pull={pull}
+                        reviewPulls={sorted}
+                        now={now}
+                        foldable
+                      />
                     ))}
                   </ul>
                 )}
@@ -375,15 +383,18 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
  */
 export function PullRow({
   pull: read,
+  reviewPulls,
   now,
   foldable = false,
   showRepository = false,
 }: {
   pull: PullRequest;
+  reviewPulls?: PullRequest[];
   now: number;
   foldable?: boolean;
   showRepository?: boolean;
 }) {
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
   const folded = foldable && !unfolded;
   const actions = useActions()?.pulls;
@@ -469,6 +480,12 @@ export function PullRow({
         )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
       </div>
+      {readFiles && (
+        <button type="button" class="action" onClick={() => setReviewOpen(true)}>
+          Review changes
+        </button>
+      )}
+      {reviewOpen && <PullReview initial={pull} pulls={reviewPulls ?? [pull]} onClose={() => setReviewOpen(false)} />}
       <Checks checks={pull.checks} folded={folded} />
       {actions && done?.what !== "merged" && (
         <PullButtons pull={pull} actions={actions} updated={done?.what === "updated"} onDone={setDone} />

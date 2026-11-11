@@ -6,6 +6,7 @@ export const MAX_FILES = 300;
 const PAGE_SIZE = 100;
 
 type RawFile = {
+  patch?: string;
   filename: string;
   previous_filename?: string;
   status: string;
@@ -29,6 +30,7 @@ export async function readPullFiles(api: Api, repo: string, number: number): Pro
   return {
     files: found.slice(0, MAX_FILES).map((file) => ({
       path: file.filename,
+      ...(file.patch === undefined ? {} : { patch: file.patch }),
       previousPath: file.previous_filename,
       status: file.status,
       additions: file.additions,

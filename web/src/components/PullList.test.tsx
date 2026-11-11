@@ -84,7 +84,7 @@ test("starts folded, down to the project, number, title, states and buttons, and
   expect(within(row).getByRole("link", { name: "#42 Show wind gusts" })).toBeTruthy();
   expect(within(row).getByText("Ready to merge")).toBeTruthy();
   expect(row.querySelector(".checks .chip")?.textContent).toBe("Checks: Failed");
-  expect(buttons()).toEqual(["Merge", "Cancel auto-merge"]);
+  expect(buttons()).toEqual(["Review changes", "Merge", "Cancel auto-merge"]);
   // Nothing else: no author or picture, no branches or times, no list of checks, no files.
   expect(row.querySelector("img, .avatar, details")).toBeNull();
   expect(row.querySelector(".meta")).toBeNull();

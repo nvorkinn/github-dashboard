@@ -6,6 +6,7 @@ import { createDashboard } from "./github/dashboard.ts";
 import { createFilesReader } from "./github/files.ts";
 import type { Shape } from "./github/graphql.ts";
 import { createPullActions } from "./github/pull_actions.ts";
+import { createReviewService } from "./github/review.ts";
 import { createRunActions } from "./github/run_actions.ts";
 import type { Dashboard } from "./model.ts";
 
@@ -60,6 +61,7 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     return { ...(pulls ? { pulls } : {}), ...(runs ? { runs } : {}) };
   }
   return {
+    review: createReviewService(auth, dashboard),
     pulls: createPullActions(auth, dashboard),
     runs: createRunActions(auth, dashboard),
     files: createFilesReader(createApi(auth)),
