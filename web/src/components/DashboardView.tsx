@@ -37,14 +37,37 @@ export function Freshness({
   return (
     <div class="freshness">
       {state.status === "ready" && (
-        <span class="quiet updated">
-          updated <Ago at={state.readAt} now={now} />
-        </span>
+        <>
+          <Liveness live={state.live} />
+          <span class="quiet updated">
+            updated <Ago at={state.readAt} now={now} />
+          </span>
+        </>
       )}
       <button type="button" onClick={refresh} disabled={refreshing || state.status === "loading"}>
         {refreshing ? "Refreshing…" : "Refresh"}
       </button>
     </div>
+  );
+}
+
+/**
+ * Whether changes arrive as they happen. A filled dot and a hollow one, so the colour isn't the only difference, and
+ * the word next to it says the same.
+ */
+function Liveness({ live }: { live: boolean }) {
+  return (
+    <span
+      class={`liveness ${live ? "liveness-live" : "liveness-waiting"}`}
+      title={
+        live
+          ? "Changes on GitHub show here as they happen."
+          : "Not connected for live updates. Checking GitHub every minute meanwhile."
+      }
+    >
+      <span class="liveness-dot" aria-hidden="true" />
+      {live ? "Live" : "Reconnecting"}
+    </span>
   );
 }
 

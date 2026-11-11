@@ -80,6 +80,26 @@ test("says how fresh the data is and refreshes on request", () => {
   expect(refresh).toHaveBeenCalledOnce();
 });
 
+test("says whether changes arrive as they happen, and what happens while they don't", () => {
+  freshness(ready());
+  expect(screen.getByText("Live").title).toBe("Changes on GitHub show here as they happen.");
+  expect(screen.queryByText("Reconnecting")).toBeNull();
+  cleanup();
+
+  freshness(ready({}, { live: false }));
+  expect(screen.getByText("Reconnecting").title).toBe(
+    "Not connected for live updates. Checking GitHub every minute meanwhile.",
+  );
+  expect(screen.queryByText("Live")).toBeNull();
+  // Still says how old the data is.
+  expect(screen.getByText("12s ago")).toBeTruthy();
+  cleanup();
+
+  // Nothing to say before there is anything to keep fresh.
+  freshness({ status: "loading" });
+  expect(screen.queryByText(/Live|Reconnecting/)).toBeNull();
+});
+
 test("shows a refresh under way, whoever started it", () => {
   freshness(ready({}, { refreshing: true }));
   expect((screen.getByRole("button", { name: "Refreshing…" }) as HTMLButtonElement).disabled).toBe(true);

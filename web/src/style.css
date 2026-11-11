@@ -119,6 +119,36 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Whether changes arrive as they happen: a filled dot while they do, a hollow one while reconnecting. */
+.liveness {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+
+.liveness-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1.5px solid var(--dot);
+  border-radius: 50%;
+}
+
+.liveness-live {
+  --dot: var(--done);
+}
+
+.liveness-live .liveness-dot {
+  background: var(--dot);
+}
+
+.liveness-waiting {
+  --dot: var(--waiting);
+}
+
 main {
   max-width: 100rem;
   margin: 0 auto;

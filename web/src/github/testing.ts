@@ -1,4 +1,5 @@
 import type { Auth } from "../auth.ts";
+import type { Change, Connect, EventStream } from "./events.ts";
 
 /** What a fake GitHub answers for a path: JSON, or a function for anything else (an error, headers, a delay). */
 export type Routes = Record<string, unknown>;
@@ -159,4 +160,50 @@ export function withWorkflow(
       jobs: one.jobs ?? [],
     };
   }
+}
+
+/** One fake connection to the relay's stream of events. */
+export type FakeStream = EventStream & {
+  closed: boolean;
+  /** Delivers an event, with `data` as the relay would have written it. */
+  emit(type: string, data?: string): void;
+  /** Delivers a change, as JSON. */
+  change(change: Change): void;
+};
+
+/** A `Connect` that makes fake streams and keeps them: `last` is the one connected now. */
+export function fakeStreams(): { connect: Connect; streams: FakeStream[]; last: () => FakeStream } {
+  const streams: FakeStream[] = [];
+  return {
+    streams,
+    connect() {
+      const listeners = new Map<string, ((event: Event) => void)[]>();
+      const stream: FakeStream = {
+        closed: false,
+        addEventListener(type, listener) {
+          listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+        },
+        close() {
+          stream.closed = true;
+        },
+        emit(type, data = "{}") {
+          for (const listener of listeners.get(type) ?? []) {
+            listener(new MessageEvent(type, { data }));
+          }
+        },
+        change(change) {
+          stream.emit("change", JSON.stringify(change));
+        },
+      };
+      streams.push(stream);
+      return stream;
+    },
+    last() {
+      const stream = streams.at(-1);
+      if (!stream) {
+        throw new Error("Nothing has connected");
+      }
+      return stream;
+    },
+  };
 }

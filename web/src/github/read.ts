@@ -1,5 +1,6 @@
 import type { Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
+import type { Change } from "./events.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
 // as a newer release replaces it.
@@ -74,56 +75,196 @@ export type ReadResult = {
 export async function readDashboard(api: Api, previous?: DashboardData): Promise<ReadResult> {
   const repos = await repositories(api);
   const failed = new Set<string>();
-
-  /** `read`'s result, or `fallback` and a note of the project if GitHub refuses just this. */
-  async function part<T>(repo: RawRepo, read: () => Promise<T>, fallback: () => T): Promise<T> {
-    try {
-      return await read();
-    } catch (error) {
-      if (!(error instanceof GitHubError) || error.retryAt !== undefined || error.status === 401) {
-        throw error;
-      }
-      failed.add(repo.full_name);
-      return fallback();
-    }
-  }
-
   const read = await Promise.all(
     repos.map(async (repo) => {
-      const name = repo.full_name;
-      const [latestRelease, pulls, releases] = await Promise.all([
-        part(
-          repo,
-          () => latest(api, name),
-          () => previous?.projects.find((project) => project.repo === name)?.latestRelease,
-        ),
-        part(
-          repo,
-          () => pullRequests(api, name),
-          () => previous?.pulls.filter((pull) => pull.repo === name) ?? [],
-        ),
-        part(
-          repo,
-          () => releaseRuns(api, name),
-          () => previous?.releases.filter((run) => run.repo === name) ?? [],
-        ),
-      ]);
-      return { project: project(repo, latestRelease), pulls, releases };
+      const parts = await readRepo(api, repo.full_name, ALL_OF_IT, previous, failed);
+      return { ...parts, project: project(repo, parts.latestRelease) };
     }),
   );
-
-  const names = [...failed];
   return {
     data: {
       projects: read.map((one) => one.project),
       pulls: read.flatMap((one) => one.pulls),
       releases: read.flatMap((one) => one.releases),
     },
-    problem:
-      names.length === 0
-        ? undefined
-        : `Couldn't read everything from ${names.length === 1 ? names[0] : `${names.length} projects`}.`,
+    problem: problemOf(failed),
   };
+}
+
+/** What to read again of one repository. */
+export type RepoPlan = {
+  /** `all`: the list of open pull requests and each one on it. Otherwise only the ones with these numbers. */
+  pulls: "all" | Set<number>;
+  /** The runs of its release workflows. */
+  releases: boolean;
+  latestRelease: boolean;
+};
+
+/** What to read again: everything, or these parts of these repositories (`owner/name`). */
+export type Plan = "everything" | Map<string, RepoPlan>;
+
+const ALL_OF_IT: RepoPlan = { pulls: "all", releases: true, latestRelease: true };
+
+/**
+ * What a batch of changes asks to be read again, given what is `known` now. A busy CI run sends dozens of them, so
+ * each one reads as little as shows it:
+ *
+ * - `pull_request`, `pull_request_review`, `pull_request_review_thread`, `check_run`, `check_suite`, `status`: the
+ *   pull request it is about, with its checks.
+ * - `workflow_run`, `workflow_job`, `deployment_review`: the repository's release runs, and the pull request it is
+ *   about.
+ * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged.
+ * - `release`: the repository's latest release.
+ *
+ * The pull request a change is about is the one it numbers, or else the ones whose head is its commit: none for a
+ * check on the default branch, which is most of them. A change that names neither is about all of the repository's.
+ *
+ * Anything else reads everything: the kinds that change which repositories there are (`repository`,
+ * `installation`, `installation_repositories`), a kind not listed here, and a change that names no repository or
+ * one that isn't known.
+ */
+export function planFor(changes: Change[], known: DashboardData): Plan {
+  const plan = new Map<string, RepoPlan>();
+  for (const change of changes) {
+    const name = change.repo;
+    if (name === undefined || !known.projects.some(of(name))) {
+      return "everything";
+    }
+    const repo = plan.get(name) ?? { pulls: new Set<number>(), releases: false, latestRelease: false };
+    plan.set(name, repo);
+    switch (change.kind) {
+      case "pull_request":
+      case "pull_request_review":
+      case "pull_request_review_thread":
+      case "check_run":
+      case "check_suite":
+      case "status":
+        repo.pulls = both(repo.pulls, pullsOf(change, known));
+        break;
+      case "workflow_run":
+      case "workflow_job":
+      case "deployment_review":
+        repo.releases = true;
+        repo.pulls = both(repo.pulls, pullsOf(change, known));
+        break;
+      case "push":
+        repo.pulls = "all";
+        break;
+      case "release":
+        repo.latestRelease = true;
+        break;
+      default:
+        return "everything";
+    }
+  }
+  // Such as a check on a commit that no pull request has as its head: nothing on the page shows it.
+  for (const [name, repo] of plan) {
+    if (repo.pulls !== "all" && repo.pulls.size === 0 && !repo.releases && !repo.latestRelease) {
+      plan.delete(name);
+    }
+  }
+  return plan;
+}
+
+/** The pull requests of its repository that a change is about. */
+function pullsOf(change: Change, known: DashboardData): RepoPlan["pulls"] {
+  if (change.pull !== undefined) {
+    return new Set([change.pull]);
+  }
+  if (change.sha === undefined) {
+    return "all";
+  }
+  return new Set(
+    known.pulls.filter((pull) => pull.repo === change.repo && pull.sha === change.sha).map((pull) => pull.number),
+  );
+}
+
+function both(a: RepoPlan["pulls"], b: RepoPlan["pulls"]): RepoPlan["pulls"] {
+  return a === "all" || b === "all" ? "all" : new Set([...a, ...b]);
+}
+
+/**
+ * Reads only what `plan` names and puts it into a copy of `previous`; the rest stays as it was. The projects stay
+ * the same ones, so a plan is only for changes that can't add or remove one. Fails the way `readDashboard` does: a
+ * part GitHub refuses stays as it was and is a `problem`, and what would fail every call is thrown.
+ */
+export async function readChanged(api: Api, plan: Map<string, RepoPlan>, previous: DashboardData): Promise<ReadResult> {
+  const failed = new Set<string>();
+  const read = new Map(
+    await Promise.all(
+      [...plan].map(async ([name, wanted]) => [name, await readRepo(api, name, wanted, previous, failed)] as const),
+    ),
+  );
+  const projects = previous.projects.map((one) => {
+    const parts = read.get(one.repo);
+    return parts ? { ...one, latestRelease: parts.latestRelease } : one;
+  });
+  return {
+    data: {
+      projects,
+      pulls: projects.flatMap((one) => read.get(one.repo)?.pulls ?? previous.pulls.filter(of(one.repo))),
+      releases: projects.flatMap((one) => read.get(one.repo)?.releases ?? previous.releases.filter(of(one.repo))),
+    },
+    problem: problemOf(failed),
+  };
+}
+
+function of(repo: string): (one: { repo: string }) => boolean {
+  return (one) => one.repo === repo;
+}
+
+function problemOf(failed: Set<string>): string | undefined {
+  const names = [...failed];
+  return names.length === 0
+    ? undefined
+    : `Couldn't read everything from ${names.length === 1 ? names[0] : `${names.length} projects`}.`;
+}
+
+type RepoParts = { latestRelease: Project["latestRelease"]; pulls: PullRequest[]; releases: ReleaseRun[] };
+
+/**
+ * The parts of one repository: read if `wanted` names them, and as they were in `previous` otherwise. A part that
+ * GitHub refuses, and only that part, also stays as it was, and its repository is added to `failed`.
+ */
+async function readRepo(
+  api: Api,
+  repo: string,
+  wanted: RepoPlan,
+  previous: DashboardData | undefined,
+  failed: Set<string>,
+): Promise<RepoParts> {
+  const was: RepoParts = {
+    latestRelease: previous?.projects.find(of(repo))?.latestRelease,
+    pulls: previous?.pulls.filter(of(repo)) ?? [],
+    releases: previous?.releases.filter(of(repo)) ?? [],
+  };
+
+  async function part<T>(isWanted: boolean, read: () => Promise<T>, fallback: T): Promise<T> {
+    if (!isWanted) {
+      return fallback;
+    }
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof GitHubError) || error.retryAt !== undefined || error.status === 401) {
+        throw error;
+      }
+      failed.add(repo);
+      return fallback;
+    }
+  }
+
+  const numbers = wanted.pulls;
+  const [latestRelease, pulls, releases] = await Promise.all([
+    part(wanted.latestRelease, () => latest(api, repo), was.latestRelease),
+    part(
+      numbers === "all" || numbers.size > 0,
+      () => (numbers === "all" ? pullRequests(api, repo) : somePullRequests(api, repo, numbers, was.pulls)),
+      was.pulls,
+    ),
+    part(wanted.releases, () => releaseRuns(api, repo), was.releases),
+  ]);
+  return { latestRelease, pulls, releases };
 }
 
 /**
@@ -187,6 +328,27 @@ async function pullRequests(api: Api, repo: string): Promise<PullRequest[]> {
   const open = await api.list<RawPull>(`repos/${repo}/pulls?state=open`);
   const pulls = await Promise.all(open.map((pull) => pullRequest(api, repo, pull.number)));
   return pulls.filter((pull) => pull !== undefined);
+}
+
+/**
+ * `known` with the pull requests of these numbers read again: each one as it is now, gone if it closed, or new at
+ * the front, where GitHub's list has the newest.
+ */
+async function somePullRequests(
+  api: Api,
+  repo: string,
+  numbers: Set<number>,
+  known: PullRequest[],
+): Promise<PullRequest[]> {
+  const read = new Map(
+    await Promise.all([...numbers].map(async (number) => [number, await pullRequest(api, repo, number)] as const)),
+  );
+  const added = [...numbers]
+    .filter((number) => !known.some((pull) => pull.number === number))
+    .sort((a, b) => b - a)
+    .map((number) => read.get(number));
+  const kept = known.map((pull) => (read.has(pull.number) ? read.get(pull.number) : pull));
+  return [...added, ...kept].filter((pull) => pull !== undefined);
 }
 
 async function pullRequest(api: Api, repo: string, number: number): Promise<PullRequest | undefined> {

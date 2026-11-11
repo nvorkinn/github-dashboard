@@ -6,7 +6,8 @@ export type DemoOptions = {
   stepMs?: number;
   /**
    * A state to hold instead of running the script, for looking at what the sample data never does: `loading`,
-   * `failed`, `empty`, or `problem` (the data with a failed refresh over it).
+   * `failed`, `empty`, `problem` (the data with a failed refresh over it), or `offline` (the data while the relay's
+   * events don't arrive, so the header says it is reconnecting).
    */
   show?: string | undefined;
 };
@@ -53,6 +54,7 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
       readAt,
       refreshing,
       problem: show === "problem" ? "GitHub didn't answer (503). Showing what was read 5 minutes ago." : undefined,
+      live: show !== "offline",
     };
   }
 

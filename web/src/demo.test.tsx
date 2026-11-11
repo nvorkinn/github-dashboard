@@ -84,5 +84,18 @@ test("the page on the demo shows the sample dashboard", async () => {
   expect(screen.getByRole("link", { name: "v2.5.0" })).toBeTruthy();
   expect(screen.getByText("no release yet")).toBeTruthy();
   expect(screen.getByText("Private")).toBeTruthy();
+  expect(screen.getByText("Live")).toBeTruthy();
+  unmount();
+});
+
+test("the page on the demo can show that it is reconnecting", async () => {
+  globalThis.fetch = vi.fn();
+  const auth = createAuth();
+  installDemo({ onSignIn: () => void auth.start() });
+  const { unmount } = render(<App auth={auth} dashboard={createDemoDashboard({ show: "offline" })} demo />);
+
+  expect(await screen.findByText("Reconnecting")).toBeTruthy();
+  expect(screen.getByText("Show wind gusts on the hourly chart")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
   unmount();
 });
