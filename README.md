@@ -263,6 +263,19 @@ Pushing a `v*` tag by hand does the same for that tag. Nothing is deployed from 
 and digest (`ghcr.io/nvorkinn/github-dashboard:v0.1.0@sha256:...`, the line the run's summary and the release show), so
 a release reaches the server when that pin is moved.
 
+The release moves it: its last job opens a pull request in home-stack that changes that line and merges itself once
+home-stack's checks pass, and the merge deploys it. An earlier release's pull request that is still open is closed as
+superseded. The job uses a token from a GitHub App, as the workflow's own token can't write to home-stack and a pull
+request opened with it would start no checks there. To set it up:
+
+1. Create a GitHub App (Settings > Developer settings > GitHub Apps) with no webhook and two repository permissions,
+   Contents and Pull requests, both read and write. Install it on `nvorkinn/home-stack` only.
+2. Generate a private key for it.
+3. In this repository's Actions settings, add the App ID as the variable `HOME_STACK_BUMP_APP_ID` and the private key
+   as the secret `HOME_STACK_BUMP_PRIVATE_KEY`.
+
+Without the variable the job is skipped, and home-stack is bumped by hand.
+
 ## Pull requests
 
 `main` takes changes only through pull requests, and requires one check, "Global PR Status". The All checks workflow

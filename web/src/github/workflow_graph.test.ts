@@ -32,6 +32,7 @@ test("reads this repository's release workflow", () => {
     { key: "build", label: "build", needs: ["tag"], several: true },
     { key: "image", label: "image", needs: ["tag", "build"], several: false },
     { key: "github-release", label: "github-release", needs: ["tag", "image"], several: false },
+    { key: "home-stack", label: "home-stack", needs: ["tag", "image", "github-release"], several: false },
   ]);
 });
 
@@ -66,7 +67,8 @@ test("places a run's jobs on the file's jobs by name", () => {
     runJob("build (amd64)"),
     runJob("build (arm64)"),
     runJob("image"),
-    runJob("github-release", { state: "queued" }),
+    runJob("github-release"),
+    runJob("home-stack", { state: "queued" }),
     runJob("something the file has lost"),
   ];
   const graph = jobGraph(workflowJobs(OWN_RELEASE), jobs);
@@ -75,6 +77,7 @@ test("places a run's jobs on the file's jobs by name", () => {
     ["build", ["build (amd64)", "build (arm64)"]],
     ["image", ["image"]],
     ["github-release", ["github-release"]],
+    ["home-stack", ["home-stack"]],
   ]);
   expect(graph.unplaced.map((one) => one.name)).toEqual(["something the file has lost"]);
 });
@@ -146,7 +149,7 @@ test("reads the workflow file at the run's commit once, and keeps it", async () 
   const { auth, calls } = fakeGitHub(routes);
   const api = createApi(auth);
   const first = await workflowFile(api, "octo/app", ".github/workflows/release.yml", "abc");
-  expect(first?.map((one) => one.key)).toEqual(["tag", "build", "image", "github-release"]);
+  expect(first?.map((one) => one.key)).toEqual(["tag", "build", "image", "github-release", "home-stack"]);
   // A run's path can carry the ref it ran from.
   const again = await Promise.all([
     workflowFile(api, "octo/app", ".github/workflows/release.yml@refs/heads/main", "abc"),
@@ -230,6 +233,7 @@ test("a release run gets its graph from the workflow file at its commit, or none
     ["build", [11]],
     ["image", []],
     ["github-release", []],
+    ["home-stack", []],
   ]);
   expect(release?.graph?.unplaced.map((one) => one.id)).toEqual([12]);
   // Deploy's file (.github/workflows/4.yml) isn't there: its jobs are shown without a graph.

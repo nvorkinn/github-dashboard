@@ -5,7 +5,7 @@ name: Release
 
 # Publishes the image home-stack runs: ghcr.io/nvorkinn/github-dashboard:<tag>, for amd64 and arm64, and the GitHub
 # Release for the tag with the image's digest in it. Nothing is deployed from here: home-stack pins the image by tag
-# and digest, and moving that pin is the deploy.
+# and digest, and moving that pin is the deploy: the last job opens the pull request in home-stack that does it.
 on:
   push:
     tags: ["v*"]
@@ -230,3 +230,71 @@ jobs:
           else
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --notes "$image"
           fi
+
+  # Moves home-stack's pin to the new image: a pull request in nvorkinn/home-stack that changes the github-dashboard
+  # line in compose.yaml and merges itself once home-stack's checks pass, which deploys it. The workflow's own token
+  # can't write to another repository, and a pull request opened with it would start no checks there, so this uses a
+  # token from the home-stack-bump GitHub App (installed on home-stack only, with contents and pull requests write).
+  home-stack:
+    needs: [tag, image, github-release]
+    # Until the app is set up, a release still publishes and home-stack is bumped by hand.
+    if: vars.HOME_STACK_BUMP_APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TAG: ${{ needs.tag.outputs.value }}
+      DIGEST: ${{ needs.image.outputs.digest }}
+      GH_REPO: nvorkinn/home-stack
+    steps:
+      - name: Get a token for home-stack
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.HOME_STACK_BUMP_APP_ID }}
+          private-key: ${{ secrets.HOME_STACK_BUMP_PRIVATE_KEY }}
+          owner: nvorkinn
+          repositories: home-stack
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nvorkinn/home-stack
+          token: ${{ steps.token.outputs.token }}
+          path: home-stack
+          persist-credentials: false
+
+      - name: Open the pull request and let it merge itself
+        working-directory: home-stack
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          pin="$IMAGE:$TAG@$DIGEST"
+          sed -i -E "s#^(\s*image: )$IMAGE:[^ ]+\$#\1$pin#" compose.yaml
+          grep -qF "image: $pin" compose.yaml || { echo "No github-dashboard image line in compose.yaml" >&2; exit 1; }
+          if git diff --quiet; then
+            echo "home-stack already runs $pin"
+            exit 0
+          fi
+          branch="github-dashboard-$TAG"
+          user_id="$(gh api "users/$APP_SLUG%5Bbot%5D" --jq .id)"
+          git config user.name "$APP_SLUG[bot]"
+          git config user.email "$user_id+$APP_SLUG[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -qam "Bump github-dashboard to $TAG"
+          # The checkout keeps no credentials, so the token goes to git for this one push.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            push --force origin "$branch"
+          notes="https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          url="$(gh pr view "$branch" --json url --jq .url 2> /dev/null)" ||
+            url="$(gh pr create --head "$branch" --title "Bump github-dashboard to $TAG" \
+              --body "Moves the \`github-dashboard\` service to [$TAG]($notes): \`$pin\`. Opened by the release; it merges itself once the checks pass.")"
+          gh pr merge "$url" --auto --merge
+          # An earlier release's pull request that hasn't merged yet is superseded by this one.
+          gh pr list --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"github-dashboard-v\")) | select(.headRefName != \"$branch\") | .number" |
+            while read -r number; do
+              gh pr close "$number" --delete-branch --comment "Superseded by $url."
+            done
+          echo "home-stack: $url" >> "$GITHUB_STEP_SUMMARY"
