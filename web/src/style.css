@@ -433,7 +433,7 @@ h2 {
   grid-template-columns: 2rem minmax(0, 1fr) auto;
   grid-template-areas:
     "avatar main badges"
-    ". checks checks";
+    ". checks actions";
   gap: 0.25rem 0.75rem;
   align-items: start;
 }
@@ -484,6 +484,50 @@ h2 {
 .checks {
   grid-area: checks;
   min-width: 0;
+}
+
+/* What can be done to a pull request: small buttons at the row's end, and why the last one didn't work. */
+.pull-actions {
+  grid-area: actions;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+button.action {
+  min-height: 1.75rem;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+/* Confirming a merge, which can't be undone, stands out from the buttons around it. */
+button.action-confirm {
+  color: var(--done);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--done) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--done) 55%, transparent);
+}
+
+button.action-confirm:hover:not(:disabled) {
+  border-color: var(--done);
+}
+
+.action-problem {
+  max-width: 22rem;
+  font-size: 0.8125rem;
+  color: var(--problem);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .checks-none {
@@ -666,7 +710,21 @@ h2 {
     grid-template-areas:
       "avatar main"
       ". badges"
-      ". checks";
+      ". checks"
+      ". actions";
+  }
+
+  .pull-actions {
+    align-items: flex-start;
+  }
+
+  .action-buttons {
+    justify-content: flex-start;
+  }
+
+  .action-problem {
+    max-width: none;
+    text-align: left;
   }
 
   .pull-badges {
@@ -683,6 +741,7 @@ h2 {
 /* Fingers need more to hit than a mouse does. */
 @media (pointer: coarse) {
   button,
+  button.action,
   .button,
   select {
     min-height: 2.75rem;

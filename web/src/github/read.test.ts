@@ -7,6 +7,7 @@ import {
   checkState,
   checks,
   isReleaseName,
+  mergeMethod,
   mergeState,
   type Plan,
   planFor,
@@ -128,6 +129,13 @@ test("projects are the installations' repositories, without archived ones, the l
         repo("acme/empty", { pushed_at: null }),
       ],
     },
+    // Its own page has its merge settings; octo/old's can't be read, and counts as allowing everything.
+    "repos/acme/new": repo("acme/new", {
+      allow_merge_commit: false,
+      allow_squash_merge: true,
+      allow_rebase_merge: true,
+      allow_auto_merge: false,
+    }),
     "repos/acme/new/releases/latest": {
       tag_name: "v2.1.0",
       html_url: "https://github.com/acme/new/releases/tag/v2.1.0",
@@ -157,6 +165,8 @@ test("projects are the installations' repositories, without archived ones, the l
         url: "https://github.com/acme/new/releases/tag/v2.1.0",
         publishedAt: "2026-11-09T10:00:00Z",
       },
+      mergeMethod: "squash",
+      autoMergeAllowed: false,
     },
     {
       repo: "octo/old",
@@ -168,9 +178,44 @@ test("projects are the installations' repositories, without archived ones, the l
       pushedAt: "2026-01-01T00:00:00Z",
       // A 404 from releases/latest.
       latestRelease: undefined,
+      mergeMethod: "merge",
+      autoMergeAllowed: true,
     },
     expect.objectContaining({ repo: "acme/empty", pushedAt: undefined }),
   ]);
+});
+
+test.each([
+  [{}, "merge"],
+  [{ allow_merge_commit: false }, "squash"],
+  [{ allow_merge_commit: false, allow_squash_merge: false }, "rebase"],
+  [{ allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, "merge"],
+  // GitHub doesn't allow turning all three off, but if it said so, a merge commit is what it would be asked for.
+  [{ allow_merge_commit: false, allow_squash_merge: false, allow_rebase_merge: false }, "merge"],
+] as const)("the merge method of %j is %s: the first allowed, a merge commit first", (settings, method) => {
+  expect(mergeMethod(settings)).toBe(method);
+});
+
+test("merge settings in the list of repositories are used as they are, without reading each repository", async () => {
+  const routes = account("octo/app");
+  const settings = { allow_merge_commit: false, allow_squash_merge: false, allow_rebase_merge: true };
+  routes["user/installations/7/repositories"] = {
+    total_count: 1,
+    repositories: [repo("octo/app", { ...settings, allow_auto_merge: true })],
+  };
+  const { result, calls } = read(routes);
+  expect((await result).data.projects[0]).toMatchObject({ mergeMethod: "rebase", autoMergeAllowed: true });
+  expect(calls).not.toContain("repos/octo/app");
+});
+
+test("merge settings that can't be read again stay as they were, and are no problem", async () => {
+  const routes = account("octo/app");
+  const before = (await read(routes).result).data;
+  const earlier = { ...before, projects: before.projects.map((one) => ({ ...one, mergeMethod: "squash" as const })) };
+  routes["repos/octo/app"] = () => Response.json({ message: "Not Found" }, { status: 404 });
+  const { data, problem } = await read(routes, earlier).result;
+  expect(problem).toBeUndefined();
+  expect(data.projects[0]).toMatchObject({ mergeMethod: "squash", autoMergeAllowed: true });
 });
 
 test("a pull request is read with its merge state and checks", async () => {
@@ -203,6 +248,7 @@ test("a pull request is read with its merge state and checks", async () => {
         { name: "test", state: "running", url: "https://github.com/r/1" },
         { name: "ci/build", state: "passed", url: undefined },
       ],
+      nodeId: "PR_node12",
     },
   ]);
   expect(calls).toContain("repos/octo/app/pulls?state=open&per_page=100");

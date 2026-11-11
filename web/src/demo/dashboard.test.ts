@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { CheckState, DashboardData } from "../model.ts";
 import { summarize } from "../model.ts";
-import { createDemoDashboard } from "./dashboard.ts";
+import { ACTION_MS, createDemoDashboard, demoPullActions, MERGED_MS, UPDATE_CHECKS_MS } from "./dashboard.ts";
 import { FRAMES } from "./data.ts";
 
 beforeEach(() => {
@@ -167,6 +167,115 @@ test("starting twice runs one script", () => {
   dashboard.subscribe(listener);
   vi.advanceTimersByTime(1000);
   expect(listener).toHaveBeenCalledOnce();
+  dashboard.stop();
+});
+
+/** The demo's actions on a started demo, and the sample pull request numbered `number`, as it shows now. */
+function withActions(show?: string) {
+  const dashboard = started(show);
+  const actions = demoPullActions(dashboard);
+  if (!actions) {
+    throw new Error("The demo has no actions");
+  }
+  const find = (number: number) => data(dashboard).pulls.find((pull) => pull.number === number);
+  const get = (number: number) => {
+    const found = find(number);
+    if (!found) {
+      throw new Error(`#${number} isn't shown`);
+    }
+    return found;
+  };
+  return { dashboard, actions, find, get };
+}
+
+test("only the demo's own dashboard has the demo's actions", () => {
+  expect(demoPullActions(createDemoDashboard())).toBeDefined();
+  expect(demoPullActions({ ...createDemoDashboard() })).toBeUndefined();
+});
+
+test("the sample data has a pull request for each action, and one where auto-merge is refused", () => {
+  const dashboard = started();
+  const { projects, pulls } = data(dashboard);
+  dashboard.stop();
+  expect(pulls.some((pull) => pull.mergeState === "clean" && !pull.draft && !pull.autoMerge)).toBe(true);
+  expect(pulls.some((pull) => pull.mergeState === "behind" && !pull.draft)).toBe(true);
+  expect(new Set(projects.map((project) => project.mergeMethod))).toEqual(new Set(["merge", "squash", "rebase"]));
+  const refusing = projects.filter((project) => !project.autoMergeAllowed).map((project) => project.repo);
+  expect(pulls.some((pull) => refusing.includes(pull.repo) && !pull.draft)).toBe(true);
+  expect(new Set(pulls.map((pull) => pull.nodeId)).size).toBe(pulls.length);
+});
+
+test("turning auto-merge on and off takes a moment, and then shows, also as the script moves on", async () => {
+  const { dashboard, actions, get } = withActions();
+  const turning = actions.setAutoMerge(get(338), true);
+  vi.advanceTimersByTime(ACTION_MS - 1);
+  expect(get(338).autoMerge).toBe(false);
+  vi.advanceTimersByTime(1);
+  await expect(turning).resolves.toEqual({ merged: false });
+  expect(get(338).autoMerge).toBe(true);
+  vi.advanceTimersByTime(3000);
+  expect(get(338).autoMerge).toBe(true);
+
+  const off = actions.setAutoMerge(get(128), false);
+  vi.advanceTimersByTime(ACTION_MS);
+  await off;
+  expect(get(128).autoMerge).toBe(false);
+  dashboard.stop();
+});
+
+test("auto-merge is refused where the repository doesn't allow it, and for a draft", async () => {
+  const { dashboard, actions, get } = withActions();
+  const refused = actions.setAutoMerge(get(9), true);
+  vi.advanceTimersByTime(ACTION_MS);
+  await expect(refused).rejects.toThrow("Auto-merge is off for this repository");
+  expect(get(9).autoMerge).toBe(false);
+
+  const draft = actions.setAutoMerge(get(212), true);
+  vi.advanceTimersByTime(ACTION_MS);
+  await expect(draft).rejects.toThrow("ready for review");
+  dashboard.stop();
+});
+
+test("a merged pull request leaves the list a moment later", async () => {
+  const { dashboard, actions, get, find } = withActions();
+  const merging = actions.merge(get(131));
+  vi.advanceTimersByTime(ACTION_MS);
+  await merging;
+  expect(find(131)).toBeDefined();
+  vi.advanceTimersByTime(MERGED_MS);
+  expect(find(131)).toBeUndefined();
+  vi.advanceTimersByTime(10_000);
+  expect(find(131)).toBeUndefined();
+  dashboard.stop();
+});
+
+test("an updated branch runs its checks again, and is then ready to merge", async () => {
+  const { dashboard, actions, get } = withActions("offline");
+  const before = get(61);
+  expect(before.mergeState).toBe("behind");
+  const updating = actions.updateBranch(before);
+  vi.advanceTimersByTime(ACTION_MS);
+  await updating;
+  const after = get(61);
+  expect(after.mergeState).toBe("blocked");
+  expect(after.sha).not.toBe(before.sha);
+  expect(summarize(after.checks)).toBe("running");
+  vi.advanceTimersByTime(UPDATE_CHECKS_MS);
+  expect(get(61).mergeState).toBe("clean");
+  expect(summarize(get(61).checks)).toBe("passed");
+  dashboard.stop();
+});
+
+test("stopping forgets what the actions did", async () => {
+  const { dashboard, actions, get, find } = withActions();
+  const merging = actions.merge(get(131));
+  vi.advanceTimersByTime(ACTION_MS);
+  await merging;
+  vi.advanceTimersByTime(MERGED_MS);
+  dashboard.stop();
+  dashboard.start();
+  vi.advanceTimersByTime(400);
+  expect(find(131)).toBeDefined();
   dashboard.stop();
 });
 

@@ -1,12 +1,23 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
+import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
 import { useDashboardState, useNow } from "./components/hooks.ts";
 import type { Dashboard } from "./model.ts";
 
-/** The page: sign-in, and behind it the dashboard. */
-export function App({ auth, dashboard, demo = false }: { auth: Auth; dashboard: Dashboard; demo?: boolean }) {
+/** The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. */
+export function App({
+  auth,
+  dashboard,
+  actions,
+  demo = false,
+}: {
+  auth: Auth;
+  dashboard: Dashboard;
+  actions?: Actions | undefined;
+  demo?: boolean;
+}) {
   const state = useAuthState(auth);
   const signedIn = state.status === "signedIn";
 
@@ -31,7 +42,7 @@ export function App({ auth, dashboard, demo = false }: { auth: Auth; dashboard: 
         </p>
       )}
       {signedIn ? (
-        <SignedIn auth={auth} dashboard={dashboard} />
+        <SignedIn auth={auth} dashboard={dashboard} actions={actions} />
       ) : (
         <>
           <header class="top">
@@ -64,7 +75,7 @@ export function App({ auth, dashboard, demo = false }: { auth: Auth; dashboard: 
   );
 }
 
-function SignedIn({ auth, dashboard }: { auth: Auth; dashboard: Dashboard }) {
+function SignedIn({ auth, dashboard, actions }: { auth: Auth; dashboard: Dashboard; actions: Actions | undefined }) {
   const state = useDashboardState(dashboard);
   const now = useNow();
   const { refresh, pending } = useRefresh(dashboard);
@@ -78,7 +89,9 @@ function SignedIn({ auth, dashboard }: { auth: Auth; dashboard: Dashboard }) {
         </div>
       </header>
       <main>
-        <DashboardView state={state} now={now} refresh={refresh} />
+        <ActionsContext.Provider value={actions}>
+          <DashboardView state={state} now={now} refresh={refresh} />
+        </ActionsContext.Provider>
       </main>
     </>
   );

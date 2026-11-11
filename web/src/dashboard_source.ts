@@ -1,5 +1,7 @@
 import type { Auth } from "./auth.ts";
+import type { Actions } from "./components/actions.tsx";
 import { createDashboard } from "./github/dashboard.ts";
+import { createPullActions } from "./github/pull_actions.ts";
 import type { Dashboard } from "./model.ts";
 
 /**
@@ -14,4 +16,17 @@ export async function makeDashboard(auth: Auth, demo: boolean): Promise<Dashboar
     return createDemoDashboard({ show: new URLSearchParams(location.search).get("show") ?? undefined });
   }
   return createDashboard(auth);
+}
+
+/**
+ * What the page can do to what `dashboard` shows: on GitHub, or, in the demo, to the demo's sample data, which only
+ * the demo's own dashboard knows how to change.
+ */
+export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolean): Promise<Actions> {
+  if (demo && import.meta.env.MODE === "demo") {
+    const { demoPullActions } = await import("./demo/dashboard.ts");
+    const pulls = demoPullActions(dashboard);
+    return pulls ? { pulls } : {};
+  }
+  return { pulls: createPullActions(auth, dashboard) };
 }

@@ -84,6 +84,8 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         url: github("weather-station/releases/tag/v2.4.1"),
         publishedAt: before(3 * DAY),
       },
+      mergeMethod: "merge",
+      autoMergeAllowed: true,
     },
     {
       repo: `${OWNER}/trail-maps`,
@@ -94,6 +96,8 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       private: false,
       pushedAt: before(5 * HOUR),
       latestRelease: { tag: "v0.9.0", url: github("trail-maps/releases/tag/v0.9.0"), publishedAt: before(23 * DAY) },
+      mergeMethod: "squash",
+      autoMergeAllowed: true,
     },
     {
       repo: `${OWNER}/home-ledger`,
@@ -108,6 +112,8 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         url: github("home-ledger/releases/tag/v1.12.3"),
         publishedAt: before(26 * HOUR),
       },
+      mergeMethod: "rebase",
+      autoMergeAllowed: true,
     },
     {
       repo: `${OWNER}/recipe-box`,
@@ -118,6 +124,9 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       private: false,
       pushedAt: before(9 * DAY),
       latestRelease: undefined,
+      mergeMethod: "merge",
+      // Turning auto-merge on is refused here: the demo's one action that fails.
+      autoMergeAllowed: false,
     },
     {
       repo: `${OWNER}/garden-sensors`,
@@ -132,6 +141,8 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         url: github("garden-sensors/releases/tag/v3.0.0-rc.2"),
         publishedAt: before(6 * DAY),
       },
+      mergeMethod: "merge",
+      autoMergeAllowed: true,
     },
   ];
 
@@ -159,6 +170,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       mergeState: "clean",
       autoMerge: false,
       checks: [],
+      nodeId: `PR_demo_${repo}_${number}`,
       ...fields,
     };
   }

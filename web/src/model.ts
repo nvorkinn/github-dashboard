@@ -38,6 +38,8 @@ export type PullRequest = {
   mergeState: "clean" | "blocked" | "conflicts" | "behind" | "unknown";
   autoMerge: boolean;
   checks: Check[];
+  /** GitHub's global id for it, which its GraphQL API (auto-merge) asks for. */
+  nodeId: string;
 };
 
 /** One job of a workflow run. */
@@ -80,7 +82,14 @@ export type Project = {
   pushedAt: string | undefined;
   /** The newest published release, if there is one. */
   latestRelease: { tag: string; url: string; publishedAt: string } | undefined;
+  /** How the page merges its pull requests: the first way the repository allows, a merge commit first. */
+  mergeMethod: MergeMethod;
+  /** Whether the repository allows auto-merge. True when its settings couldn't be read: GitHub then says. */
+  autoMergeAllowed: boolean;
 };
+
+/** The ways GitHub merges a pull request. */
+export type MergeMethod = "merge" | "squash" | "rebase";
 
 /** Everything on the page at one moment. The lists are complete: something missing from them is gone. */
 export type DashboardData = {
@@ -119,6 +128,27 @@ export type Dashboard = {
   refresh(): Promise<void>;
   /** Stops keeping it fresh and forgets what was read, such as on sign-out. */
   stop(): void;
+  /**
+   * Says that something changed, as an event from the relay would, so that it is read again: such as after the page
+   * itself merged a pull request. `kind` is a webhook's name and the rest says where, as in the relay's events.
+   */
+  changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number }): void;
+};
+
+/**
+ * What the page can do to an open pull request. Each one resolves once GitHub took it, and rejects with an `Error`
+ * whose message says why not, in words for the user. On success the dashboard reads the pull request again.
+ */
+export type PullActions = {
+  /**
+   * Turns auto-merge on or off. GitHub won't wait when the base branch requires nothing; turning it on then merges at
+   * once if every check passed, and `merged` says so.
+   */
+  setAutoMerge(pull: PullRequest, enabled: boolean): Promise<{ merged: boolean }>;
+  /** Merges it now, but only the commit the page showed as its head, whose checks were seen. */
+  merge(pull: PullRequest): Promise<void>;
+  /** Brings its base's new commits into its branch, if its head is still the one the page showed. */
+  updateBranch(pull: PullRequest): Promise<void>;
 };
 
 /** A pull request's checks in one word: the worst that is true of them. `none` when it has no checks. */

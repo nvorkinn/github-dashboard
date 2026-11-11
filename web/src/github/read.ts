@@ -1,4 +1,4 @@
-import type { Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
+import type { Check, CheckState, DashboardData, Job, MergeMethod, Project, PullRequest, ReleaseRun } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 
@@ -17,6 +17,11 @@ type RawRepo = {
   private: boolean;
   archived: boolean;
   pushed_at: string | null;
+  // Only in some answers (a repository's own page, for a user who can push to it), so each may be missing.
+  allow_merge_commit?: boolean;
+  allow_squash_merge?: boolean;
+  allow_rebase_merge?: boolean;
+  allow_auto_merge?: boolean;
 };
 type RawRelease = { tag_name: string; html_url: string; published_at: string | null; created_at: string };
 type RawPull = {
@@ -33,6 +38,7 @@ type RawPull = {
   mergeable?: boolean | null;
   mergeable_state?: string;
   auto_merge?: object | null;
+  node_id: string;
 };
 type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
 type RawStatus = { context: string; state: string; target_url: string | null };
@@ -77,8 +83,11 @@ export async function readDashboard(api: Api, previous?: DashboardData): Promise
   const failed = new Set<string>();
   const read = await Promise.all(
     repos.map(async (repo) => {
-      const parts = await readRepo(api, repo.full_name, ALL_OF_IT, previous, failed);
-      return { ...parts, project: project(repo, parts.latestRelease) };
+      const [parts, settings] = await Promise.all([
+        readRepo(api, repo.full_name, ALL_OF_IT, previous, failed),
+        mergeSettings(api, repo, previous),
+      ]);
+      return { ...parts, project: project(repo, parts.latestRelease, settings) };
     }),
   );
   return {
@@ -270,7 +279,7 @@ async function readRepo(
     try {
       return await read();
     } catch (error) {
-      if (!(error instanceof GitHubError) || error.retryAt !== undefined || error.status === 401) {
+      if (!refused(error)) {
         throw error;
       }
       failed.add(repo);
@@ -311,7 +320,57 @@ async function repositories(api: Api): Promise<RawRepo[]> {
   return [...repos.values()].sort((a, b) => (b.pushed_at ?? "").localeCompare(a.pushed_at ?? ""));
 }
 
-function project(repo: RawRepo, latestRelease: Project["latestRelease"]): Project {
+type MergeSettings = Pick<Project, "mergeMethod" | "autoMergeAllowed">;
+
+const MERGE_SETTINGS = ["allow_merge_commit", "allow_squash_merge", "allow_rebase_merge", "allow_auto_merge"] as const;
+
+/**
+ * How the repository's pull requests are merged. The list of repositories may carry its settings; if it doesn't,
+ * they are on the repository's own page, which is one request more per repository (and mostly a 304, which GitHub
+ * doesn't count). Settings that can't be read are what they were, or else count as allowed: GitHub's refusal then
+ * says what isn't, when the user acts. Nothing on the page shows them, so they are no problem for it.
+ */
+async function mergeSettings(api: Api, repo: RawRepo, previous: DashboardData | undefined): Promise<MergeSettings> {
+  if (MERGE_SETTINGS.every((key) => typeof repo[key] === "boolean")) {
+    return settingsOf(repo);
+  }
+  try {
+    return settingsOf(await api.get<RawRepo>(`repos/${repo.full_name}`));
+  } catch (error) {
+    if (!refused(error)) {
+      throw error;
+    }
+    return previous?.projects.find(of(repo.full_name)) ?? settingsOf({});
+  }
+}
+
+function settingsOf(repo: Partial<RawRepo>): MergeSettings {
+  return { mergeMethod: mergeMethod(repo), autoMergeAllowed: repo.allow_auto_merge !== false };
+}
+
+/**
+ * The first merge method the repository allows, preferring a merge commit, as countdown-server's dashboard did. A
+ * setting that isn't known counts as allowed.
+ */
+export function mergeMethod(repo: Partial<Pick<RawRepo, (typeof MERGE_SETTINGS)[number]>>): MergeMethod {
+  if (repo.allow_merge_commit !== false) {
+    return "merge";
+  }
+  if (repo.allow_squash_merge !== false) {
+    return "squash";
+  }
+  if (repo.allow_rebase_merge !== false) {
+    return "rebase";
+  }
+  return "merge";
+}
+
+/** Whether `error` is GitHub refusing one read, rather than something that fails every call. */
+function refused(error: unknown): boolean {
+  return error instanceof GitHubError && error.retryAt === undefined && error.status !== 401;
+}
+
+function project(repo: RawRepo, latestRelease: Project["latestRelease"], settings: MergeSettings): Project {
   return {
     repo: repo.full_name,
     name: repo.name,
@@ -321,6 +380,8 @@ function project(repo: RawRepo, latestRelease: Project["latestRelease"]): Projec
     private: repo.private,
     pushedAt: repo.pushed_at ?? undefined,
     latestRelease,
+    mergeMethod: settings.mergeMethod,
+    autoMergeAllowed: settings.autoMergeAllowed,
   };
 }
 
@@ -375,7 +436,8 @@ async function somePullRequests(
   return [...added, ...kept].filter((pull) => pull !== undefined);
 }
 
-async function pullRequest(api: Api, repo: string, number: number): Promise<PullRequest | undefined> {
+/** One pull request with its checks, as it is now; undefined if it is closed or gone. */
+export async function pullRequest(api: Api, repo: string, number: number): Promise<PullRequest | undefined> {
   // The list doesn't say whether a pull request can be merged; only its own page does.
   const pull = await unlessGone(api.get<RawPull>(`repos/${repo}/pulls/${number}`));
   if (pull?.state !== "open") {
@@ -403,6 +465,7 @@ async function pullRequest(api: Api, repo: string, number: number): Promise<Pull
     mergeState: mergeState(pull),
     autoMerge: pull.auto_merge != null,
     checks: checks(checkRuns, statuses),
+    nodeId: pull.node_id,
   };
 }
 
