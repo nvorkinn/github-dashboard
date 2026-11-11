@@ -264,7 +264,8 @@ To set it up:
 
 While the dashboard is open, what Telegram would be told shows instead as a notification from the browser, which on a
 Mac lands in Notification Center. Clicking one opens the thing on github.com. They are the two halves of one thing:
-the page closes its event stream while its tab is in the background, so 30 seconds later Telegram takes over.
+an open page keeps its event stream in a background tab, while Telegram takes over 30 seconds after every page is
+closed or the browser suspends their connections.
 
 **Settings** in the header (`#settings`) asks the browser for its permission, sends a test, and picks which of the five
 kinds show: a pull request merged, changes requested, checks failed, a release finished, a release waiting for

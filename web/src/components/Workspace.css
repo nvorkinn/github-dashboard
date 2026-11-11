@@ -819,6 +819,15 @@ body:has(.workspace) {
   font-size: 0.62rem;
 }
 
+.pull-compact-repo {
+  padding: 0.05rem 0.3rem;
+  color: #b9d9ff;
+  background: #14243a;
+  border: 1px solid #294564;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
 .pull-compact-meta code {
   color: #8998ad;
   font-size: inherit;

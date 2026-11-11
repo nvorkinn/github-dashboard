@@ -43,7 +43,7 @@ export type EventsOptions = {
 };
 
 export type Events = {
-  /** Connects, and from then on stays connected while the page is visible. */
+  /** Connects, and from then on stays connected until stopped. */
   start(): void;
   stop(): void;
   /** Whether changes arrive as they happen: from the relay's hello until the connection ends. */
@@ -80,7 +80,7 @@ export function createEvents(options: EventsOptions): Events {
 
   function open(): void {
     const connect = options.connect ?? browserConnect();
-    if (!connect || stream || !started || hidden()) {
+    if (!connect || stream || !started) {
       return;
     }
     let mine: EventStream;
@@ -133,13 +133,6 @@ export function createEvents(options: EventsOptions): Events {
     failures++;
   }
 
-  function onVisibility(): void {
-    // Nobody is looking at a hidden page, and a connection held open costs the relay and a phone's battery.
-    close();
-    failures = 0;
-    open();
-  }
-
   return {
     start() {
       if (started) {
@@ -147,17 +140,11 @@ export function createEvents(options: EventsOptions): Events {
       }
       started = true;
       failures = 0;
-      if (typeof document !== "undefined") {
-        document.addEventListener("visibilitychange", onVisibility);
-      }
       open();
     },
 
     stop() {
       started = false;
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVisibility);
-      }
       close();
     },
 
@@ -167,10 +154,6 @@ export function createEvents(options: EventsOptions): Events {
 
 function browserConnect(): Connect | undefined {
   return typeof EventSource === "undefined" ? undefined : () => new EventSource(STREAM_PATH);
-}
-
-function hidden(): boolean {
-  return typeof document !== "undefined" && document.hidden;
 }
 
 function dataOf(event: Event): Record<string, unknown> | undefined {

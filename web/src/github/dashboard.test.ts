@@ -669,20 +669,19 @@ test("what a read of everything couldn't read stays a problem after a read of ch
   dashboard.stop();
 });
 
-test("a hidden page drops the connection and reads nothing; shown again it connects and reads everything once", async () => {
+test("a hidden page keeps its notification connection but reads nothing; shown again it reads everything once", async () => {
   const { dashboard, relay, stream, reads } = await setUpLive(appWithPulls());
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
   show(false);
-  expect(stream.closed).toBe(true);
-  expect(dashboard.state()).toMatchObject({ status: "ready", live: false });
+  expect(stream.closed).toBe(false);
+  expect(dashboard.state()).toMatchObject({ status: "ready", live: true });
   await pass(2 * LIVE_REFRESH_MS);
   expect(relay.streams).toHaveLength(1);
   expect(reads()).toBe(0);
   expect(vi.getTimerCount()).toBe(0);
 
   show(true);
-  expect(relay.streams).toHaveLength(2);
-  relay.last().emit("hello");
+  expect(relay.streams).toHaveLength(1);
   await pass(0);
   expect(reads()).toBe(1);
   expect(dashboard.state()).toMatchObject({ status: "ready", live: true });
