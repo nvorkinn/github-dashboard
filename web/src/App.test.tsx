@@ -104,6 +104,7 @@ test("links a pull request's demo back to the pull request", async () => {
   render(<App dashboard={fakeDashboard()} auth={createAuth()} demo pull={{ number: 14, title: "Link demos", url }} />);
   const link = await screen.findByRole("link", { name: "#14 Link demos" });
   expect(link.getAttribute("href")).toBe(url);
+  expect(link.getAttribute("target")).toBe("_blank");
 });
 
 test("starts the dashboard once signed in, and not before", async () => {
