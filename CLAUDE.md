@@ -11,5 +11,3 @@ See README.md for what this is, the layout and the commands.
 - The relay keeps no database and stores no tokens. Question any change that makes it remember something.
 - The relay logs why a sign-in or refresh failed, never a token, code, cookie or secret.
 - Third-party GitHub Actions are pinned to commit SHAs with the version in a comment.
-- A change to what the page shows comes with sample data for it in `web/src/demo.ts`, so the pull request's preview
-  shows it.

@@ -1,16 +1,19 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
-import type { PullActions, RunActions } from "../model.ts";
+import type { PullActions, ReadFiles, RunActions } from "../model.ts";
 
 /**
  * What the page can do, beyond showing: GitHub's for real, the demo's on its sample data. Each part is missing where
- * nothing can be done, and the components then show no buttons for it.
+ * nothing can be done, and the components then show no buttons for it. `files` reads a pull request's changed files;
+ * without it they aren't offered.
  */
 export type Actions = {
   /** On pull requests. */
   pulls?: PullActions;
   /** On release runs and projects. */
   runs?: RunActions;
+  /** Reads a pull request's changed files. */
+  files?: ReadFiles;
 };
 
 export const ActionsContext = createContext<Actions | undefined>(undefined);

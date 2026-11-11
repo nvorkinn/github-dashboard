@@ -1,8 +1,8 @@
-import { useState } from "preact/hooks";
-import type { Check, CheckState, PullActions, PullRequest } from "../model.ts";
+import { useEffect, useState } from "preact/hooks";
+import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
 import { summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
-import { ConfirmButton, useAction, useActions } from "./actions.tsx";
+import { ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import type { Tone } from "./state.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
 
@@ -130,6 +130,7 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
 
 function PullRow({ pull: read, now }: { pull: PullRequest; now: number }) {
   const actions = useActions()?.pulls;
+  const readFiles = useActions()?.files;
   const [doneState, setDone] = useState<Done | undefined>(undefined);
   const done = stillShown(doneState, read);
   const pull =
@@ -187,6 +188,7 @@ function PullRow({ pull: read, now }: { pull: PullRequest; now: number }) {
       {actions && done?.what !== "merged" && (
         <PullButtons pull={pull} actions={actions} updated={done?.what === "updated"} onDone={setDone} />
       )}
+      {readFiles && <FilesChanged pull={pull} read={readFiles} />}
     </li>
   );
 }
@@ -283,6 +285,94 @@ function PullButtons({
         </p>
       )}
     </div>
+  );
+}
+
+/** What is known of a pull request's files, for the head commit `sha`. */
+type FilesState = { sha: string } & (
+  | { status: "loading" }
+  | { status: "loaded"; files: PullFiles }
+  | { status: "failed"; problem: string }
+);
+
+const FILE_STATUS: Record<string, string> = {
+  added: "Added",
+  modified: "Modified",
+  removed: "Removed",
+  renamed: "Renamed",
+  copied: "Copied",
+  changed: "Changed",
+  unchanged: "Unchanged",
+};
+
+/** The files a pull request changes: read when first opened, and again while open once its head is a new commit. */
+function FilesChanged({ pull, read }: { pull: PullRequest; read: ReadFiles }) {
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<FilesState | undefined>(undefined);
+  const [attempt, setAttempt] = useState(0);
+  const { sha } = pull;
+
+  // Not for each new copy of the same pull request: only a new head, or a retry, reads again.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let current = true;
+    setState((was) => (was?.sha === sha && was.status === "loaded" ? was : { sha, status: "loading" }));
+    read(pull).then(
+      (files) => current && setState({ sha, status: "loaded", files }),
+      (error: unknown) => current && setState({ sha, status: "failed", problem: reasonOf(error) }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [open, sha, attempt, read]);
+
+  const loaded = state?.sha === sha && state.status === "loaded" ? state.files : undefined;
+  const count = loaded ? ` (${loaded.files.length}${loaded.truncated ? "+" : ""})` : "";
+  return (
+    <details class="pull-files" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>Files changed{count}</summary>
+      {state?.status === "failed" ? (
+        <div class="files-note" role="alert">
+          <p class="problem">Couldn't read the files changed. {state.problem}</p>
+          <button type="button" class="action" onClick={() => setAttempt((n) => n + 1)}>
+            Try again
+          </button>
+        </div>
+      ) : !loaded ? (
+        <p class="files-note quiet">Reading the files changed…</p>
+      ) : loaded.files.length === 0 ? (
+        <p class="files-note quiet">No files changed</p>
+      ) : (
+        <ul class="file-list">
+          {loaded.files.map((file) => (
+            <li key={file.path} class={`file file-${file.status}`}>
+              <span class="file-status">{FILE_STATUS[file.status] ?? file.status}</span>
+              <span class="file-path">
+                {file.previousPath && (
+                  <>
+                    <span class="quiet">{file.previousPath}</span>
+                    <span aria-hidden="true"> → </span>
+                    <span class="visually-hidden"> to </span>
+                  </>
+                )}
+                {file.path}
+              </span>
+              <span class="file-counts">
+                <span class="additions">+{file.additions}</span>
+                <span class="deletions">−{file.deletions}</span>
+              </span>
+            </li>
+          ))}
+          {loaded.truncated && (
+            <li class="file-more">
+              <a href={`${pull.url}/files`}>More files on GitHub</a>
+            </li>
+          )}
+        </ul>
+      )}
+    </details>
   );
 }
 
