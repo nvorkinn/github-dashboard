@@ -72,7 +72,6 @@ export function project(fields: Partial<Project> = {}): Project {
   return {
     repo: "octocat/weather-station",
     name: "weather-station",
-    description: undefined,
     url: "https://github.com/octocat/weather-station",
     private: false,
     pushedAt: undefined,

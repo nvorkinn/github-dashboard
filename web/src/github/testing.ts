@@ -128,7 +128,6 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
       nodes.push({
         nameWithOwner: one.full_name,
         name: one.name,
-        description: one.description,
         url: one.html_url,
         isPrivate: one.private,
         pushedAt: one.pushed_at,
@@ -388,7 +387,6 @@ export function repo(fullName: string, more: Record<string, unknown> = {}) {
     owner: { login: owner },
     private: false,
     html_url: `https://github.com/${fullName}`,
-    description: "A sample",
     archived: false,
     pushed_at: "2026-11-01T10:00:00Z",
     default_branch: "main",

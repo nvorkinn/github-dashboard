@@ -100,7 +100,6 @@ export type EverythingResult = ReadResult & {
 type GqlRepo = {
   nameWithOwner: string;
   name: string;
-  description: string | null;
   url: string;
   isPrivate: boolean;
   pushedAt: string | null;
@@ -187,7 +186,7 @@ type GqlWorkflow = {
 type GqlError = { type?: string; path?: (string | number)[]; message?: string };
 
 const LISTED = `fragment Listed on Repository {
-  nameWithOwner name description url isPrivate pushedAt
+  nameWithOwner name url isPrivate pushedAt
   mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed
   latestRelease { tagName url publishedAt createdAt }
 }`;
@@ -751,7 +750,6 @@ function rawRepo(repo: GqlRepo): RawRepo {
   return {
     full_name: repo.nameWithOwner,
     name: repo.name,
-    description: repo.description,
     html_url: repo.url,
     private: repo.isPrivate,
     archived: false,

@@ -124,7 +124,6 @@ export type Project = {
   repo: string;
   /** Just the name. */
   name: string;
-  description: string | undefined;
   url: string;
   private: boolean;
   pushedAt: string | undefined;

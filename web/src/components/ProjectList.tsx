@@ -58,7 +58,6 @@ export function ProjectList({
                   <span class="quiet">no release yet</span>
                 )}
               </div>
-              {project.description && <p class="project-description quiet">{project.description}</p>}
               {(actions || onToggle) && (
                 <div class="actions project-actions">
                   {actions && <ProjectActions project={project} actions={actions} />}
