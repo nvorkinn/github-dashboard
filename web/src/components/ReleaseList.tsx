@@ -46,7 +46,7 @@ export function ReleaseList({ runs, now }: { runs: ReleaseRun[]; now: number }) 
     <section class="panel" aria-labelledby="releases-heading">
       <div class="panel-heading">
         <h2 id="releases-heading">
-          Release workflows <span class="count">{shown.length}</span>
+          Running now <span class="count">{shown.length}</span>
         </h2>
       </div>
       {shown.length === 0 ? (
