@@ -9,7 +9,22 @@ import {
   type Setting,
 } from "../github/repository_config.ts";
 import { ConfirmButton, reasonOf, useAction } from "./actions.tsx";
+import { Icon, type IconName } from "./Icon.tsx";
 import "./RepositorySettings.css";
+
+const SETTING_DETAILS: Record<Setting, { icon: IconName; description: string }> = {
+  delete_branch_on_merge: {
+    icon: "trash",
+    description: "Automatically delete the source branch when a pull request is merged.",
+  },
+  allow_auto_merge: { icon: "bolt", description: "Automatically merge pull requests when all requirements are met." },
+  allow_merge_commit: { icon: "merge", description: "Allow merging with a merge commit (preserves full history)." },
+  allow_squash_merge: {
+    icon: "layers",
+    description: "Allow squashing commits into a single commit (cleaner history).",
+  },
+  allow_rebase_merge: { icon: "refresh", description: "Allow rebasing the source branch onto the target branch." },
+};
 
 /** Mounted with a repository key: late answers can never change another repository's settings. */
 export function RepositorySettings({ repo, service }: { repo: string; service: RepositoryConfig }) {
@@ -70,11 +85,16 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
   }
 
   return (
-    <section class="panel settings repository-settings" aria-labelledby="repository-settings-heading">
-      <div class="panel-heading">
-        <h2 id="repository-settings-heading">Repository settings</h2>
+    <section class="repository-settings" aria-labelledby="repository-settings-heading">
+      <header class="repository-settings-heading">
+        <Icon name="settings" size={32} />
+        <div>
+          <h2 id="repository-settings-heading">Repository settings</h2>
+          <p>Configure merge behaviour, branch rules and other repository settings.</p>
+        </div>
         <button
           type="button"
+          class="repository-settings-refresh"
           disabled={!!action.busy}
           onClick={() =>
             action.run("refresh", async () => {
@@ -83,67 +103,85 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
             })
           }
         >
-          Refresh settings
+          <Icon name="refresh" /> <span>Refresh settings</span>
         </button>
-      </div>
-      <div class="settings-body">
-        <p class="quiet">
-          Changes apply to {repo}. The GitHub App needs Administration write access, accepted on its installation.
-        </p>
+      </header>
+      <div class="repository-settings-feedback">
         {readProblem && (
           <p role="alert" class="problem">
             {readProblem}
           </p>
         )}
         {!current && !readProblem && <p role="status">Loading repository settings…</p>}
-        {current && (
-          <>
-            {!canEdit && (
-              <p class="quiet">
-                Read only. A writable repository and repository administrator access are required to make changes.
-              </p>
-            )}
-            <fieldset disabled={!canEdit || !!action.busy}>
-              <legend>Merge settings</legend>
-              {(Object.entries(REPOSITORY_SETTINGS) as [Setting, string][]).map(([key, label]) => (
-                <label key={key}>
-                  <input
-                    type="checkbox"
-                    checked={current[key] === true}
-                    disabled={current[key] === undefined}
-                    onChange={() =>
-                      action.run(key, async () => {
-                        setMessage("");
-                        setPreview(undefined);
-                        try {
-                          await service.save(repo, key, !current[key], current[key] === true);
-                          if (mounted.current) setMessage(`${label}: saved.`);
-                        } finally {
-                          await refresh();
-                        }
-                      })
-                    }
-                  />
-                  {label}
-                  {current[key] === undefined && <span class="quiet"> — unavailable from GitHub</span>}
-                </label>
-              ))}
-            </fieldset>
-          </>
-        )}
-        <section class="repository-copy" aria-labelledby="copy-rules-heading">
-          <h3 id="copy-rules-heading">Copy Branch Rules</h3>
-          <p class="quiet">
-            Preview classic protections and rulesets. Select individual changes; target-only and inherited rules stay in
-            place.
-          </p>
+      </div>
+      <div class="repository-settings-grid">
+        <section class="repository-settings-card repository-merge" aria-labelledby="merge-settings-heading">
+          <header class="repository-card-heading">
+            <Icon name="pull-request" size={32} />
+            <div>
+              <h3 id="merge-settings-heading">Merge settings</h3>
+              <p>Control how pull requests can be merged into this repository.</p>
+            </div>
+          </header>
+          {current && (
+            <>
+              {!canEdit && (
+                <p class="quiet">
+                  Read only. A writable repository and repository administrator access are required to make changes.
+                </p>
+              )}
+              <fieldset disabled={!canEdit || !!action.busy}>
+                <legend class="visually-hidden">Merge settings</legend>
+                {(Object.entries(REPOSITORY_SETTINGS) as [Setting, string][]).map(([key, label]) => (
+                  <label class="repository-toggle-row" key={key}>
+                    <Icon name={SETTING_DETAILS[key].icon} size={25} />
+                    <span class="repository-toggle-copy">
+                      <strong>{label}</strong>
+                      <span id={`description-${key}`}>{SETTING_DETAILS[key].description}</span>
+                      {current[key] === undefined && <span class="quiet">Unavailable from GitHub</span>}
+                    </span>
+                    <input
+                      role="switch"
+                      aria-checked={current[key] === true}
+                      aria-label={label}
+                      aria-describedby={`description-${key}`}
+                      type="checkbox"
+                      checked={current[key] === true}
+                      disabled={current[key] === undefined}
+                      onChange={() =>
+                        action.run(key, async () => {
+                          setMessage("");
+                          setPreview(undefined);
+                          try {
+                            await service.save(repo, key, !current[key], current[key] === true);
+                            if (mounted.current) setMessage(`${label}: saved.`);
+                          } finally {
+                            await refresh();
+                          }
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </fieldset>
+            </>
+          )}
+        </section>
+        <section class="repository-settings-card repository-copy" aria-labelledby="copy-rules-heading">
+          <header class="repository-card-heading">
+            <Icon name="copy" size={34} />
+            <div>
+              <h3 id="copy-rules-heading">Copy branch rules</h3>
+              <p>Copy branch protection rules from another repository.</p>
+            </div>
+          </header>
           {listProblem && (
             <p role="alert" class="problem">
               Repository list: {listProblem}
             </p>
           )}
-          <label>
-            Source repository
+          <label class="repository-source">
+            <span>Source repository</span>
             <select
               value={source}
               disabled={!!action.busy}
@@ -160,7 +198,7 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
               ))}
             </select>
           </label>
-          <label>
+          <label class="repository-map-default">
             <input
               type="checkbox"
               checked={mapDefault}
@@ -172,12 +210,16 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
             />
             Map the source default branch to this repository’s default branch
           </label>
-          <p class="quiet">
-            Otherwise names stay identical. Only exact default-branch names change; wildcard patterns and
-            ~DEFAULT_BRANCH keep their meaning.
+          <p class="repository-mapping-note">
+            <Icon name="info" size={20} />
+            <span>
+              Otherwise names stay identical. Only exact default-branch names change; wildcard patterns and
+              ~DEFAULT_BRANCH keep their meaning.
+            </span>
           </p>
           <button
             type="button"
+            class="repository-preview-button"
             disabled={!source || !!action.busy}
             onClick={() =>
               action.run("preview", async () => {
@@ -187,7 +229,7 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
               })
             }
           >
-            {action.busy === "preview" ? "Reading rules…" : "Preview rules"}
+            <Icon name="eye" size={20} /> {action.busy === "preview" ? "Reading rules…" : "Preview rules"}
           </button>
           {preview && (
             <div class="repository-preview">
@@ -264,6 +306,8 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
             </ul>
           )}
         </section>
+      </div>
+      <div class="repository-settings-feedback" aria-live="polite">
         {action.problem && (
           <p role="alert" class="problem">
             {action.problem}

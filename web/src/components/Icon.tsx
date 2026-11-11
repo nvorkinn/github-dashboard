@@ -11,9 +11,66 @@ export type IconName =
   | "pull-request"
   | "release"
   | "search"
-  | "workflow";
+  | "workflow"
+  | "settings"
+  | "copy"
+  | "trash"
+  | "bolt"
+  | "merge"
+  | "layers"
+  | "refresh"
+  | "info"
+  | "eye";
 
 const paths: Record<IconName, ComponentChildren> = {
+  settings: (
+    <>
+      <path d="m9 3-.6 2.2-2 .9-2-.6-2 3.5 1.6 1.6v2.8L2.4 15l2 3.5 2-.6 2 .9L9 21h4l.6-2.2 2-.9 2 .6 2-3.5-1.6-1.6v-2.8L19.6 9l-2-3.5-2 .6-2-.9L13 3Z" />
+      <circle cx="11" cy="12" r="3" />
+    </>
+  ),
+  copy: (
+    <>
+      <path d="M14 3H5v14h3M14 3v5h5M14 3l5 5v13H8V8h6" />
+      <path d="M11 12h5m-5 4h5" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" />
+    </>
+  ),
+  bolt: <path d="m13 2-9 12h7l-1 8 10-13h-8l1-7Z" />,
+  merge: (
+    <>
+      <circle cx="6" cy="4" r="2" />
+      <circle cx="6" cy="20" r="2" />
+      <circle cx="18" cy="7" r="2" />
+      <path d="M6 6v12m0-5c8 0 12-1 12-4" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="m12 3 10 5-10 5L2 8l10-5Zm-10 9 10 5 10-5M2 16l10 5 10-5" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5M4 16a8 8 0 0 0 14 3l3-3m0 5v-5h-5" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v6m0-10h.01" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
   file: (
     <>
       <path d="M14 2H5v20h14V7Z" />

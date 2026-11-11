@@ -77,13 +77,13 @@ The GitHub App (Settings, Developer settings, GitHub Apps):
 
 What each write is for (reading needs only read access to the same):
 
-| Permission (write) | Buttons that need it                                                                                 |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Administration     | Repository settings and copying branch rules (Workspace → select a repository → Repository settings) |
-| Actions            | Re-run failed jobs and Re-run on a release run; Promote (starts the Promote workflow)                |
-| Contents           | Release (writes the notes and publishes); Merge on a pull request                                    |
-| Deployments        | Approve and Reject on a run waiting for an environment (the user must be its reviewer)               |
-| Pull requests      | Auto-merge and Update branch on a pull request                                                       |
+| Permission (write) | Buttons that need it                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| Administration     | Repository settings and copying branch rules (Workspace → select a repository → Settings) |
+| Actions            | Re-run failed jobs and Re-run on a release run; Promote (starts the Promote workflow)     |
+| Contents           | Release (writes the notes and publishes); Merge on a pull request                         |
+| Deployments        | Approve and Reject on a run waiting for an environment (the user must be its reviewer)    |
+| Pull requests      | Auto-merge and Update branch on a pull request                                            |
 
 To sign in locally, start the relay with the four variables and `PUBLIC_URL=http://localhost:5173`, and open the
 page from `npm run dev`: Vite passes `/api` on to the relay, so the browser sees one origin. Without Vite, use
@@ -316,7 +316,7 @@ added to its list (`tests/workflows.test.ts` fails until it is).
 
 ### Repository configuration
 
-In **Workspace**, select a repository and open **Repository settings**. This compact panel is separate from the
+In **Workspace**, select a repository and open its **Settings** tab. This compact panel is separate from the
 pull request review overlay. It reads current values with `GET /repos/{owner}/{repo}` and saves only the changed
 field with `PATCH`: deleting branches after merging, auto-merge, and the three merge methods. Unknown values are
 unavailable, and at least one merge method must remain enabled. Administrator access is checked again before writes;
