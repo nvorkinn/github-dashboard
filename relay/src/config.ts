@@ -55,3 +55,38 @@ export function readAuthConfig(env: Record<string, string | undefined>): AuthCon
 export function readWebhookSecret(env: Record<string, string | undefined>): string | undefined {
   return env.GITHUB_WEBHOOK_SECRET || undefined;
 }
+
+/** Where the Telegram notices go (see README.md, "Telegram"). */
+export type TelegramConfig = {
+  /** The bot's token from BotFather, `<digits>:<letters>`. It is a secret: it never goes into a log. */
+  botToken: string;
+  /** The chat the bot writes to: a number (negative for a group) or a channel's `@name`. */
+  chatId: string;
+};
+
+const TELEGRAM_NAMES = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"] as const;
+const BOT_TOKEN = /^\d+:[A-Za-z0-9_-]+$/;
+const CHAT_ID = /^(-?\d+|@[A-Za-z0-9_]{5,32})$/;
+
+/**
+ * Reads the Telegram settings. They are optional: with neither set no notices are sent. One without the other, or
+ * either in the wrong form, is a mistake and throws, so the relay refuses to start. The error never quotes the token.
+ */
+export function readTelegramConfig(env: Record<string, string | undefined>): TelegramConfig | undefined {
+  const missing = TELEGRAM_NAMES.filter((name) => !env[name]);
+  if (missing.length === TELEGRAM_NAMES.length) {
+    return undefined;
+  }
+  if (missing.length > 0) {
+    throw new Error(`Telegram is half configured: ${missing.join(", ")} not set`);
+  }
+  const botToken = env.TELEGRAM_BOT_TOKEN ?? "";
+  const chatId = env.TELEGRAM_CHAT_ID ?? "";
+  if (!BOT_TOKEN.test(botToken)) {
+    throw new Error("TELEGRAM_BOT_TOKEN must be a bot token as BotFather gives it, <digits>:<letters>");
+  }
+  if (!CHAT_ID.test(chatId)) {
+    throw new Error("TELEGRAM_CHAT_ID must be a chat's number, such as 123456789, or a channel's @name");
+  }
+  return { botToken, chatId };
+}

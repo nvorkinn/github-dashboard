@@ -45,7 +45,8 @@ the refresh token, 6 months from the last use. `POST /api/auth/logout` removes i
 no list of users: the site sits behind Tinyauth at the reverse proxy, which decides who gets as far as signing in.
 
 The relay reads four variables for the sign-in. With none set it runs without sign-in (the endpoints answer 503);
-with some missing or wrong it refuses to start. The fifth is for the webhooks (see "Push") and optional on its own.
+with some missing or wrong it refuses to start. The fifth is for the webhooks (see "Push") and optional on its own,
+as are the two for Telegram (see "Telegram").
 
 | Variable                   | Value                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -145,6 +146,47 @@ curl -X POST localhost:8080/api/github/webhook -H "X-GitHub-Event: pull_request"
   -H "X-Hub-Signature-256: sha256=$(printf %s "$body" | openssl dgst -sha256 -hmac secret -r | cut -d' ' -f1)" \
   -d "$body"
 ```
+
+## Telegram
+
+When nobody is looking at the dashboard, the relay sends a short message to a Telegram chat about the webhooks that
+need attention, with a link to the thing on github.com and, when `PUBLIC_URL` is set, to the dashboard:
+
+| What happened                                                                        | Message                                                      |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| A pull request merged                                                                | `Merged owner/name#7: its title`                             |
+| A review requested changes                                                           | `Changes requested on owner/name#7: its title`               |
+| A check run or suite on a pull request's commit failed, timed out or wants an action | `Checks failed in owner/name`, with each pull request's link |
+| A release run finished (a workflow whose name says release, promote or deploy)       | `Release in owner/name: success` (or how else it ended)      |
+| A release run waits for a deployment to be approved                                  | `A release in owner/name is waiting for your approval`       |
+
+The last comes with a "Review in GitHub" button that opens the run, where Review deployments approves it. Everything
+else, such as checks passing or a pull request opening, sends nothing.
+
+It stays quiet while a page is open: a message goes only when no page has had `/api/events` open for the last 30
+seconds, so a reload, a brief reconnect or a restart of the relay sends nothing. An open page shows it already.
+
+Each message goes once. A webhook GitHub delivers again, a second failed check on the same commit, or a second job
+of the same release waiting, send nothing more. For that the relay remembers which messages it sent (what they were
+about, not what they said), the last 500 of them for 24 hours at most, in memory: a restart forgets them, and then a
+repeat can get through once. A send that fails is logged with Telegram's status code, and the webhook is answered all
+the same.
+
+| Variable             | Value                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN` | The bot's token, `123456789:AA...`. It is a secret: keep it with the others.           |
+| `TELEGRAM_CHAT_ID`   | The chat the bot writes to: its number (negative for a group), or a channel's `@name`. |
+
+Both or neither: with neither the relay sends nothing, and with one, or either in the wrong form, it refuses to
+start. Messages also need the webhooks set up (see "Push").
+
+To set it up:
+
+1. In Telegram, talk to [@BotFather](https://t.me/BotFather), send `/newbot` and follow it. It answers with the
+   token.
+2. Send your new bot any message (a bot can't write to someone who hasn't), or add it to the group it should write in.
+3. Open `https://api.telegram.org/bot<token>/getUpdates` in a browser: `"chat":{"id":...}` in the answer is the chat
+   id.
 
 ## Previews
 

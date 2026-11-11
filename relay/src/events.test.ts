@@ -195,3 +195,27 @@ test("a reader that stops reading is dropped instead of having its events pile u
   expect(vi.getTimerCount()).toBe(0);
   expect(await stream.ended()).toBe(true);
 });
+
+test("the hub knows since when nobody has listened", () => {
+  vi.useFakeTimers({ toFake: ["Date"], now: 1000 });
+  const hub = createHub();
+  // Made, and nobody has listened yet.
+  expect(hub.idleSince()).toBe(1000);
+
+  vi.setSystemTime(2000);
+  const first = hub.subscribe(() => {});
+  const second = hub.subscribe(() => {});
+  expect(hub.idleSince()).toBeUndefined();
+
+  vi.setSystemTime(3000);
+  first();
+  expect(hub.idleSince()).toBeUndefined();
+
+  vi.setSystemTime(4000);
+  second();
+  expect(hub.idleSince()).toBe(4000);
+  // Stopping again later changes nothing.
+  vi.setSystemTime(5000);
+  second();
+  expect(hub.idleSince()).toBe(4000);
+});

@@ -2,14 +2,22 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { validWebhookSignature } from "./crypto.ts";
 import type { Change, Hub } from "./events.ts";
+import { commit, isRecord, pullNumbers, record, text, wholeNumber } from "./payload.ts";
+
+/** What may look at a signed webhook's whole payload besides `changeFrom` (see `webhookRoutes`). */
+export type OnWebhook = (
+  kind: string,
+  payload: Record<string, unknown>,
+  delivery: string | undefined,
+) => void | Promise<void>;
 
 /** GitHub sends no webhook larger than this. */
 export const MAX_WEBHOOK_BYTES = 25 * 1024 * 1024;
 
 // Every event name GitHub has is lower-case words joined by underscores.
 const EVENT_NAME = /^[a-z][a-z_]{0,63}$/;
-const SHA = /^[0-9a-f]{40,64}$/;
-const MAX_TEXT = 200;
+// GitHub's delivery ids are GUIDs; anything else in the header is left out.
+const DELIVERY = /^[0-9A-Za-z-]{1,64}$/;
 
 /**
  * The webhook endpoint, mounted at /api/github: `POST /webhook` takes the GitHub App's webhooks and publishes a
@@ -18,8 +26,18 @@ const MAX_TEXT = 200;
  * Anyone can reach this path (GitHub can't sign in at the reverse proxy), so the signature made with the webhook
  * secret is the only thing that tells GitHub from anyone else, and it is checked against the bytes as they came,
  * before anything reads them as JSON. Without `secret` the endpoint answers 503.
+ *
+ * `onWebhook`, when given, sees each signed webhook whole: its event name, its payload and its delivery id
+ * (`X-GitHub-Delivery`). It is for the Telegram notices (see telegram.ts), which need more of the payload than a
+ * `Change` carries; the payload goes nowhere else. It runs after the answer is settled, so whatever it does or fails
+ * at, GitHub still gets its 204.
  */
-export function webhookRoutes(options: { secret: string | undefined; hub: Hub; maxBodyBytes?: number }) {
+export function webhookRoutes(options: {
+  secret: string | undefined;
+  hub: Hub;
+  maxBodyBytes?: number;
+  onWebhook?: OnWebhook | undefined;
+}) {
   const routes = new Hono();
   const { secret, hub } = options;
   const maxBodyBytes = options.maxBodyBytes ?? MAX_WEBHOOK_BYTES;
@@ -63,6 +81,19 @@ export function webhookRoutes(options: { secret: string | undefined; hub: Hub; m
       return refuse(400, "body is not a JSON object");
     }
     hub.publish(changeFrom(kind, payload));
+
+    const { onWebhook } = options;
+    if (onWebhook) {
+      const whole = payload;
+      const id = c.req.header("X-GitHub-Delivery") ?? "";
+      const delivery = DELIVERY.test(id) ? id : undefined;
+      // In a later turn, so the answer never waits for it, and caught, so its failing never reaches the answer.
+      void Promise.resolve()
+        .then(() => onWebhook(kind, whole, delivery))
+        .catch((error: unknown) => {
+          console.warn(`webhook hook failed: ${error instanceof Error ? error.name : "unknown error"}`);
+        });
+    }
     return c.body(null, 204);
   });
 
@@ -127,9 +158,9 @@ export function changeFrom(kind: string, payload: unknown): Change {
 
   const pull =
     wholeNumber(pullRequest.number) ??
-    firstPullNumber(checkRun.pull_requests) ??
-    firstPullNumber(checkSuite.pull_requests) ??
-    firstPullNumber(workflowRun.pull_requests) ??
+    pullNumbers(checkRun.pull_requests)[0] ??
+    pullNumbers(checkSuite.pull_requests)[0] ??
+    pullNumbers(workflowRun.pull_requests)[0] ??
     // Comments on a pull request come as issue events; the issue then says it is a pull request.
     (isRecord(issue.pull_request) ? wholeNumber(issue.number) : undefined);
   if (pull !== undefined) {
@@ -154,39 +185,4 @@ export function changeFrom(kind: string, payload: unknown): Change {
   }
 
   return change;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** The value if it is a JSON object, and an empty one otherwise, so a missing branch reads as missing leaves. */
-function record(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
-}
-
-function text(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.length <= MAX_TEXT ? value : undefined;
-}
-
-function commit(value: unknown): string | undefined {
-  return typeof value === "string" && SHA.test(value) ? value : undefined;
-}
-
-function wholeNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
-}
-
-/** The number of the first pull request in a check's or run's `pull_requests` that has one. */
-function firstPullNumber(value: unknown): number | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  for (const entry of value) {
-    const number = wholeNumber(record(entry).number);
-    if (number !== undefined) {
-      return number;
-    }
-  }
-  return undefined;
 }
