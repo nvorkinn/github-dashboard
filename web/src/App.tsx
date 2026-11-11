@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
@@ -8,6 +8,7 @@ import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Icon, type IconName } from "./components/Icon.tsx";
 import { NotificationCentre } from "./components/NotificationCentre.tsx";
+import { ServiceStatus, ServiceStatusSummary, useServiceStatus } from "./components/ServiceStatus.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { useLaneColumns, useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import { navigateWorkspace, type WorkspaceDestination } from "./components/Workspace.tsx";
@@ -131,6 +132,14 @@ function SignedIn({
   const page = usePage();
   const notifier = useMemo(() => given ?? createNotifier({ hidden: readHidden }), [given]);
   const [notices, setNotices] = useState(readNotificationHistory);
+  const status = useServiceStatus();
+  const [statusOpen, setStatusOpen] = useState(false);
+  const closeStatus = useCallback(() => setStatusOpen(false), []);
+  const openStatus = () => {
+    setNotificationsOpen(false);
+    setPaletteOpen(false);
+    setStatusOpen(true);
+  };
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceDestination | undefined>(undefined);
@@ -235,6 +244,7 @@ function SignedIn({
       ) {
         event.preventDefault();
         setNotificationsOpen(false);
+        setStatusOpen(false);
         setPaletteOpen(true);
       }
     };
@@ -264,6 +274,7 @@ function SignedIn({
         </div>
         {commandCentre && <CommandSummary state={state} />}
         <div class="top-controls">
+          <ServiceStatus state={status} open={statusOpen} onOpen={openStatus} onClose={closeStatus} />
           <ViewSwitch
             view={view}
             onChange={(next) => {
@@ -281,6 +292,7 @@ function SignedIn({
             title="Open command palette (Command or Control + K)"
             onClick={() => {
               setNotificationsOpen(false);
+              setStatusOpen(false);
               setPaletteOpen(true);
             }}
           >
@@ -294,6 +306,7 @@ function SignedIn({
             notices={notices}
             open={notificationsOpen}
             onOpen={() => {
+              setStatusOpen(false);
               setPaletteOpen(false);
               setNotificationsOpen(true);
             }}
@@ -307,6 +320,7 @@ function SignedIn({
         </div>
       </header>
       <main class={commandCentre ? "command-main" : undefined}>
+        {page === "dashboard" && <ServiceStatusSummary state={status} onOpen={openStatus} />}
         {page === "settings" ? (
           <Settings notifier={notifier} laneColumns={laneColumns} onLaneColumns={setLaneColumns} />
         ) : (

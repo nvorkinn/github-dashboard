@@ -14,6 +14,10 @@ export function installDemo(options: { onSignIn: () => void }): void {
 
   /** The sample answer to a call to the relay, or nothing for a path the demo doesn't stand in for. */
   function relay(path: string): Response | undefined {
+    if (path.endsWith("/api/github/status")) {
+      // Standalone previews have no relay; never present sample incidents as live status.
+      return Response.json({ stale: true, error: "Live status needs the relay." }, { status: 503 });
+    }
     if (path.endsWith("/api/auth/token")) {
       return signedIn
         ? Response.json({ access_token: "demo-token", expires_at: Date.now() + 8 * 60 * 60 * 1000 })

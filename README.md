@@ -349,3 +349,16 @@ not provide a transaction across rules. Writes run sequentially, stop on the fir
 and skipped items. Successful writes are retained; no automatic retry or rollback occurs. A response lost in transit
 may still represent an applied change, so the preview is consumed before writing. Settings and comparisons refresh
 afterward, including partial failures; make a fresh selection to continue. All tokens remain in page memory.
+
+### GitHub service status
+
+The header status pill and dashboard summary open public GitHub service details: component statuses, active
+incidents with update history, and scheduled or active maintenance. The page polls `GET /api/github/status` every
+minute while signed in, using one shared request and timer for both surfaces. The relay reads GitHub's public
+[summary API](https://www.githubstatus.com/api) with a ten-second timeout and shares a minute-long, on-demand
+cache across pages. It sends no account credentials. Failed upstream reads also back off for a minute.
+
+A failed refresh retains the last successful response and timestamp, visibly marked stale; without a successful
+read, status is unavailable rather than operational. The popover links to GitHub Status, supports Escape, restores
+focus on close, and dismisses when focus or a pointer leaves it. Standalone demo builds have no relay and show
+unavailable status, never sample incidents as live service data.
