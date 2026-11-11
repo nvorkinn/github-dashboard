@@ -1,6 +1,8 @@
 import type { ComponentChildren } from "preact";
 
 export type IconName =
+  | "file"
+  | "folder"
   | "attention"
   | "check"
   | "command"
@@ -69,6 +71,13 @@ const paths: Record<IconName, ComponentChildren> = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+  file: (
+    <>
+      <path d="M14 2H5v20h14V7Z" />
+      <path d="M14 2v6h5" />
+    </>
+  ),
+  folder: <path d="M3 6h7l2 2h9v12H3Z" />,
   attention: (
     <>
       <path d="M12 3 2.6 20h18.8L12 3Z" />
