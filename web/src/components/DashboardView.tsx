@@ -3,9 +3,9 @@ import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
 import { LanesView } from "./LanesView.tsx";
-import { ProjectList } from "./ProjectList.tsx";
-import { PullList } from "./PullList.tsx";
-import { ReleaseList } from "./ReleaseList.tsx";
+import { Workspace } from "./Workspace.tsx";
+
+
 import type { LaneColumns, View } from "./ViewSwitch.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
@@ -135,12 +135,7 @@ export function DashboardView({
           columns={laneColumns}
         />
       ) : (
-        // Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side.
-        <div class="stage">
-          <PullList pulls={pulls} now={now} />
-          <ReleaseList runs={releases} now={now} />
-          <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
-        </div>
+        <Workspace projects={data.projects.filter((project) => !hidden.has(project.repo))} pulls={pulls} runs={releases} now={now} />
       )}
     </>
   );
