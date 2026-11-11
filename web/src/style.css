@@ -1364,6 +1364,10 @@ h1 .home {
   margin: 0 auto;
 }
 
+.settings + .settings {
+  margin-top: 1.5rem;
+}
+
 .settings-body {
   display: grid;
   gap: 1rem;
@@ -1586,25 +1590,26 @@ h1 .home {
 }
 
 /* A big screen: the lanes stand two abreast, each its head across the top with its runs beside its pull requests,
-   so the page only ever scrolls down. A lone lane, and the dock, take the whole width. */
+   so the page only ever scrolls down. A lone lane, and the dock, take the whole width. With one column chosen in the
+   settings (.lanes-single) they stay one to a row. */
 @media (min-width: 100rem) {
-  .lanes {
+  .lanes:not(.lanes-single) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
 
-  .lanes > .lanes-empty,
-  .lanes > .dock,
-  .lanes:not(:has(> .lane ~ .lane)) > .lane {
+  .lanes:not(.lanes-single) > .lanes-empty,
+  .lanes:not(.lanes-single) > .dock,
+  .lanes:not(.lanes-single):not(:has(> .lane ~ .lane)) > .lane {
     grid-column: 1 / -1;
   }
 
-  .lane:not(.lane-quiet) {
+  .lanes:not(.lanes-single) > .lane:not(.lane-quiet) {
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   }
 
-  .lane:not(.lane-quiet) .lane-head {
+  .lanes:not(.lanes-single) > .lane:not(.lane-quiet) .lane-head {
     grid-column: 1 / -1;
     flex-direction: row;
     flex-wrap: wrap;
@@ -1612,7 +1617,7 @@ h1 .home {
     gap: 0.375rem 1rem;
   }
 
-  .lane:not(.lane-quiet) .lane-actions {
+  .lanes:not(.lanes-single) > .lane:not(.lane-quiet) .lane-actions {
     margin: 0 0 0 auto;
   }
 }

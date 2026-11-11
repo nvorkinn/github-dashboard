@@ -6,7 +6,7 @@ import { DashboardView, Freshness, useRefresh } from "./components/DashboardView
 import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Settings } from "./components/Settings.tsx";
-import { useView, ViewSwitch } from "./components/ViewSwitch.tsx";
+import { useLaneColumns, useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import type { Dashboard } from "./model.ts";
 import { createNotifier, type Notifier } from "./notifications.ts";
 
@@ -125,6 +125,7 @@ function SignedIn({
   useEffect(() => dashboard.onNotice?.((notice) => notifier.notify(notice)), [dashboard, notifier]);
 
   const [view, setView] = useView();
+  const [laneColumns, setLaneColumns] = useLaneColumns();
   return (
     <>
       <header class="top">
@@ -153,10 +154,10 @@ function SignedIn({
       </header>
       <main>
         {page === "settings" ? (
-          <Settings notifier={notifier} />
+          <Settings notifier={notifier} laneColumns={laneColumns} onLaneColumns={setLaneColumns} />
         ) : (
           <ActionsContext.Provider value={actions}>
-            <DashboardView state={state} now={now} refresh={refresh} view={view} />
+            <DashboardView state={state} now={now} refresh={refresh} view={view} laneColumns={laneColumns} />
           </ActionsContext.Provider>
         )}
       </main>

@@ -79,3 +79,11 @@ test("says so when every project is hidden", () => {
   expect(screen.getByText("Every project is hidden")).toBeTruthy();
   expect(screen.getByRole("region", { name: "Hidden 3" })).toBeTruthy();
 });
+
+test("marks the lanes as one column when that is chosen, and not otherwise", () => {
+  const two = lanes();
+  expect(two.container.querySelector(".lanes")?.className).toBe("lanes");
+  two.unmount();
+  const one = render(<DashboardView state={STATE} now={NOW} refresh={() => {}} view="lanes" laneColumns={1} />);
+  expect(one.container.querySelector(".lanes")?.className).toBe("lanes lanes-single");
+});
