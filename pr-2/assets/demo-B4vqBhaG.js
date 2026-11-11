@@ -1,1 +1,0 @@
-function e(){let e=globalThis.fetch;globalThis.fetch=async(n,r)=>{let i=new URL(n instanceof Request?n.url:n,location.href);return(i.origin===location.origin?t(i.pathname):void 0)??e(n,r)}}function t(e){if(e.endsWith(`/healthz`))return new Response(`ok`)}export{e as installDemo};
