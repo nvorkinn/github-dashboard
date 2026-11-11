@@ -261,7 +261,7 @@ publishes it as `ghcr.io/nvorkinn/github-dashboard:main`, and starts home-stack'
 
 Versioned releases are optional. Press **Run workflow** on the Release workflow (Actions > Release) and pick the bump: patch, minor or major. It tags the
 head of `main` with the next version after the latest `v*` tag (with no tag yet, patch gives `v0.0.1` and minor
-`v0.1.0`), builds the image for amd64 and arm64, starts each to check it serves the page, and then publishes:
+`v0.1.0`), builds the image for amd64, starts it to check it serves the page, and then publishes:
 
 - the image, as `ghcr.io/nvorkinn/github-dashboard:<tag>` (the tag as it is, `v` included) and `:latest`;
 - a GitHub Release for the tag, with the image's digest and the notes GitHub generates.

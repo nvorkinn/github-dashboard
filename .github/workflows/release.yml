@@ -3,7 +3,7 @@ name: Release
 # Shown on the GitHub dashboard among the running releases.
 # dashboard: release
 
-# Publishes the image for amd64 and arm64. A push to main publishes ghcr.io/nvorkinn/github-dashboard:main, which
+# Publishes the image, for amd64. A push to main publishes ghcr.io/nvorkinn/github-dashboard:main, which
 # home-stack runs, and then starts home-stack's Deploy workflow, which pulls it. A v* tag publishes :<tag> and :latest
 # and the GitHub Release for the tag with the image's digest in it, and deploys nothing.
 on:
@@ -82,24 +82,19 @@ jobs:
           fi
           echo "value=$tag" >> "$GITHUB_OUTPUT"
 
-  # One build per architecture, side by side, each on a runner of its own architecture (no emulation): amd64 for the x86
-  # home server, arm64 so the image also runs on an ARM host. Each is started and asked for the page and its health
-  # before anything is pushed, then pushed by digest, with BuildKit's provenance and SBOM beside it. The `image` job
-  # below joins the two into the tags.
-  build:
-    name: build (${{ matrix.arch }})
+  # Built for amd64, which is what the home server is. The image is started and asked for the page and its health before
+  # anything is pushed, then pushed under its tags: main, or the release's and latest.
+  image:
     needs: tag
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - {arch: amd64, runner: ubuntu-24.04}
-          - {arch: arm64, runner: ubuntu-24.04-arm}
+    outputs:
+      digest: ${{ steps.digest.outputs.value }}
     env:
+      TAG: ${{ needs.tag.outputs.value }}
       # The same labels on the build that is tested and the one that is pushed, so the second is the first, from cache.
       LABELS: |
         org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -117,7 +112,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
-          platforms: linux/${{ matrix.arch }}
+          platforms: linux/amd64
           labels: ${{ env.LABELS }}
           tags: github-dashboard
           load: true
@@ -146,80 +141,35 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Every layer comes from the build above, still in the builder's cache. BuildKit's own attestations are pushed
-      # beside the image as extra (unknown/unknown platform) manifests in the index of this digest; the join below keeps
-      # them, so a pull still picks its own platform's image.
-      - name: Build and push by digest
+      # beside the image as extra (unknown/unknown platform) manifests, under an index that the tags name.
+      # main's build is only :main; a release also moves :latest.
+      - name: Build and push
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
-          platforms: linux/${{ matrix.arch }}
+          platforms: linux/amd64
           labels: ${{ env.LABELS }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.TAG }}
+            ${{ env.TAG != 'main' && format('{0}:latest', env.IMAGE) || '' }}
+          push: true
           provenance: mode=max
           sbom: true
 
-      - name: Keep the digest for the join
+      - name: Report the digest
+        id: digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          mkdir -p "$RUNNER_TEMP/digests"
-          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: digests-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  # The architectures joined into one multi-platform tag: main, or the release's and latest.
-  image:
-    needs: [tag, build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      digest: ${{ steps.join.outputs.digest }}
-    env:
-      TAG: ${{ needs.tag.outputs.value }}
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: digests-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/digests
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-
-      - name: Tag the join of the architectures
-        id: join
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          # main's build is only :main; a release also moves :latest.
-          tags=(--tag "$IMAGE:$TAG")
-          [ "$TAG" = main ] || tags+=(--tag "$IMAGE:latest")
-          # shellcheck disable=SC2046  # one argument per digest file
-          docker buildx imagetools create "${tags[@]}" $(printf "$IMAGE@sha256:%s " *)
-          docker buildx imagetools inspect "$IMAGE:$TAG"
-          # The digest of the multi-platform index, which is what a pin by digest names.
-          digest="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)"
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for $IMAGE:$TAG: $digest" >&2; exit 1; }
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          # The digest of the index (the image and its attestations), which is what a pin by digest names.
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for $IMAGE:$TAG: $DIGEST" >&2; exit 1; }
+          echo "value=$DIGEST" >> "$GITHUB_OUTPUT"
           {
             echo "Pushed:"
             echo
             echo '```'
-            echo "$IMAGE:$TAG@$digest"
+            echo "$IMAGE:$TAG@$DIGEST"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

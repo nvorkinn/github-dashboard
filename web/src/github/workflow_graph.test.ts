@@ -29,8 +29,7 @@ const summary = (definitions: ReturnType<typeof workflowJobs>) =>
 test("reads this repository's release workflow", () => {
   expect(summary(workflowJobs(OWN_RELEASE))).toEqual([
     { key: "tag", label: "tag", needs: [], several: false },
-    { key: "build", label: "build", needs: ["tag"], several: true },
-    { key: "image", label: "image", needs: ["tag", "build"], several: false },
+    { key: "image", label: "image", needs: ["tag"], several: false },
     { key: "github-release", label: "github-release", needs: ["tag", "image"], several: false },
     { key: "deploy", label: "deploy", needs: ["tag", "image"], several: false },
   ]);
@@ -64,8 +63,6 @@ test.each([
 test("places a run's jobs on the file's jobs by name", () => {
   const jobs = [
     runJob("tag"),
-    runJob("build (amd64)"),
-    runJob("build (arm64)"),
     runJob("image"),
     runJob("github-release", { state: "queued" }),
     runJob("something the file has lost"),
@@ -73,7 +70,6 @@ test("places a run's jobs on the file's jobs by name", () => {
   const graph = jobGraph(workflowJobs(OWN_RELEASE), jobs);
   expect(graph.nodes.map((node) => [node.key, node.jobs.map((one) => one.name)])).toEqual([
     ["tag", ["tag"]],
-    ["build", ["build (amd64)", "build (arm64)"]],
     ["image", ["image"]],
     ["github-release", ["github-release"]],
     ["deploy", []],
@@ -148,7 +144,7 @@ test("reads the workflow file at the run's commit once, and keeps it", async () 
   const { auth, calls } = fakeGitHub(routes);
   const api = createApi(auth);
   const first = await workflowFile(api, "octo/app", ".github/workflows/release.yml", "abc");
-  expect(first?.map((one) => one.key)).toEqual(["tag", "build", "image", "github-release", "deploy"]);
+  expect(first?.map((one) => one.key)).toEqual(["tag", "image", "github-release", "deploy"]);
   // A run's path can carry the ref it ran from.
   const again = await Promise.all([
     workflowFile(api, "octo/app", ".github/workflows/release.yml@refs/heads/main", "abc"),
@@ -219,7 +215,7 @@ test("a release run gets its graph from the workflow file at its commit, or none
       id: 2,
       head_sha: "abc",
       path: ".github/workflows/release.yml",
-      jobs: [job(10, { name: "tag" }), job(11, { name: "build (amd64)" }), job(12, { name: "lost" })],
+      jobs: [job(10, { name: "tag" }), job(11, { name: "image" }), job(12, { name: "lost" })],
     },
   ]);
   withWorkflow(routes, "octo/app", { id: 4, name: "Deploy" }, [{ id: 3, head_sha: "def", jobs: [job(20)] }]);
@@ -229,8 +225,7 @@ test("a release run gets its graph from the workflow file at its commit, or none
   const release = data.releases.find((one) => one.id === 2);
   expect(release?.graph?.nodes.map((node) => [node.key, node.jobs.map((one) => one.id)])).toEqual([
     ["tag", [10]],
-    ["build", [11]],
-    ["image", []],
+    ["image", [11]],
     ["github-release", []],
     ["deploy", []],
   ]);
