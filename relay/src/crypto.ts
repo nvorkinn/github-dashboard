@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 // The sealed format: one version byte, a 12-byte nonce, the 16-byte tag, then the ciphertext, in base64url. The
 // version is there so the format can change later; it is authenticated along with the purpose.
@@ -50,6 +50,19 @@ export function randomToken(): string {
 export function sameString(a: string, b: string): boolean {
   // Hashing first gives timingSafeEqual the equal lengths it needs.
   return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
+}
+
+/** The signature GitHub puts in X-Hub-Signature-256 for a webhook body: its HMAC-SHA256 with the webhook secret. */
+export function webhookSignature(secret: string, body: Uint8Array): string {
+  return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+}
+
+/**
+ * Whether a webhook's signature header is the one its body and the secret give. A missing, short or garbled header
+ * is simply wrong: the comparison takes strings of any length and never throws.
+ */
+export function validWebhookSignature(secret: string, body: Uint8Array, header: string | undefined): boolean {
+  return header !== undefined && sameString(header, webhookSignature(secret, body));
 }
 
 /** The PKCE challenge for a verifier: its SHA-256, as GitHub's authorize page expects it. */

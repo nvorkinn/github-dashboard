@@ -37,7 +37,7 @@ test("loads for a moment, then has the sample data", () => {
   dashboard.start();
   expect(dashboard.state().status).toBe("loading");
   vi.advanceTimersByTime(400);
-  expect(dashboard.state()).toMatchObject({ status: "ready", refreshing: false, problem: undefined });
+  expect(dashboard.state()).toMatchObject({ status: "ready", refreshing: false, problem: undefined, live: true });
   dashboard.stop();
 });
 
@@ -181,8 +181,12 @@ test("can hold a state the script never reaches", () => {
   expect(data(empty)).toEqual({ projects: [], pulls: [], releases: [] });
 
   const problem = started("problem");
-  expect(problem.state()).toMatchObject({ status: "ready", problem: expect.stringContaining("GitHub") });
+  expect(problem.state()).toMatchObject({ status: "ready", problem: expect.stringContaining("GitHub"), live: true });
   expect(data(problem).pulls.length).toBeGreaterThan(0);
+
+  const offline = started("offline");
+  expect(offline.state()).toMatchObject({ status: "ready", problem: undefined, live: false });
+  expect(data(offline).pulls.length).toBeGreaterThan(0);
   // None of them runs the script.
   expect(vi.getTimerCount()).toBe(0);
 });

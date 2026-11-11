@@ -44,8 +44,8 @@ The cookie is encrypted (AES-256-GCM), HttpOnly, SameSite=Strict and sent only t
 the refresh token, 6 months from the last use. `POST /api/auth/logout` removes it. The relay stores nothing and has
 no list of users: the site sits behind Tinyauth at the reverse proxy, which decides who gets as far as signing in.
 
-The relay reads four variables. With none set it runs without sign-in (the endpoints answer 503); with some
-missing or wrong it refuses to start.
+The relay reads four variables for the sign-in. With none set it runs without sign-in (the endpoints answer 503);
+with some missing or wrong it refuses to start. The fifth is for the webhooks (see "Push") and optional on its own.
 
 | Variable                   | Value                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -53,6 +53,7 @@ missing or wrong it refuses to start.
 | `GITHUB_APP_CLIENT_SECRET` | A client secret generated on the app's page.                                                            |
 | `COOKIE_KEY`               | 32 random bytes in base64: `openssl rand -base64 32`. Changing it signs everyone out.                   |
 | `PUBLIC_URL`               | Where the browser reaches the relay, `https://github.vorkinn.org`. Cookies are Secure when it is https. |
+| `GITHUB_WEBHOOK_SECRET`    | The app's webhook secret: `openssl rand -hex 32`. Without it `/api/github/webhook` answers 503.         |
 
 The GitHub App (Settings, Developer settings, GitHub Apps):
 
@@ -60,19 +61,98 @@ The GitHub App (Settings, Developer settings, GitHub Apps):
   sign in while developing.
 - "Expire user authorization tokens": on. Without it GitHub gives no refresh token and the sign-in fails.
 - "Request user authorization (OAuth) during installation": as you like; the page starts the sign-in itself.
-- No webhook is needed for signing in.
+- No webhook is needed for signing in; "Push" below sets one up.
 
 To sign in locally, start the relay with the four variables and `PUBLIC_URL=http://localhost:5173`, and open the
 page from `npm run dev`: Vite passes `/api` on to the relay, so the browser sees one origin. Without Vite, use
 `PUBLIC_URL=http://localhost:8080` (and that callback URL in the app) with `npm run build && npm start`.
+
+## Push
+
+GitHub tells the relay when something changes, and the relay tells the open pages, which then fetch what changed
+from api.github.com themselves:
+
+1. GitHub sends the app's webhooks to `POST /api/github/webhook`. The relay checks the signature
+   (`X-Hub-Signature-256`, made with the webhook secret) and refuses anything unsigned with 401.
+2. Each open page holds `GET /api/events` open, and gets a short notice of every webhook as it arrives.
+
+The relay keeps nothing of this: a notice goes to the pages that are connected at that moment and is then gone. A
+page that connects later, or again after a break, is not told what it missed and reads the current state from
+GitHub.
+
+On the GitHub App's page, under Webhook:
+
+- Active: ticked.
+- Webhook URL: `https://github.vorkinn.org/api/github/webhook`.
+- Secret: the same value as `GITHUB_WEBHOOK_SECRET`.
+
+GitHub Apps always send their webhooks as JSON, which is the only form the relay reads.
+
+Under "Subscribe to events", tick the events below. GitHub only offers an event once the app has the permission it
+goes with, and a permission added later has to be accepted on the app's installation before its events arrive.
+
+| Event               | Permission it goes with (read is enough) |
+| ------------------- | ---------------------------------------- |
+| Pull request        | Pull requests                            |
+| Pull request review | Pull requests                            |
+| Check run           | Checks                                   |
+| Check suite         | Checks                                   |
+| Status              | Commit statuses                          |
+| Workflow run        | Actions                                  |
+| Workflow job        | Actions                                  |
+| Release             | Contents                                 |
+| Push                | Contents                                 |
+| Repository          | Metadata (every app has it)              |
+| Deployment review   | Deployments                              |
+
+Deployments is the one permission here beyond those the page already needs for its own calls (Actions, Checks,
+Commit statuses, Contents, Pull requests). If an event is missing
+from the list on the app's page, its permission is the thing to look at.
+
+At the reverse proxy, `/api/github/webhook` must be reachable without Tinyauth, since GitHub can't sign in there;
+everything else, `/api/events` included, stays behind it. The relay has no list of who may read the stream. The
+proxy must also pass the stream on unbuffered and leave it open while idle: the relay sends `X-Accel-Buffering: no`
+and a line every 20 seconds for that.
+
+### The event stream
+
+`GET /api/events` answers with `text/event-stream` (Server-Sent Events, what the browser's `EventSource` reads):
+
+```
+event: hello
+data: {}
+
+event: change
+data: {"kind":"pull_request","repo":"nvorkinn/github-dashboard","action":"synchronize","pull":12,"sha":"4f0c..."}
+
+: ping
+```
+
+- `hello` comes once, on connecting. A page that sees it after a break knows it may have missed changes.
+- `change` comes once per webhook. `kind` is the webhook's event name (`X-GitHub-Event`) and is always there. The
+  rest is there when the webhook has it: `repo` (the repository's full name), `action`, `pull` (the pull request's
+  number), `sha` (the head commit) and `run` (the workflow run's id). Nothing else from the webhook is passed on.
+- `: ping` is a comment line, sent every 20 seconds to keep the connection open. `EventSource` ignores it.
+
+GitHub's own `ping` webhook, sent when the webhook is set up, is answered and not passed on.
+
+To try it locally, with the relay started with `GITHUB_WEBHOOK_SECRET=secret`:
+
+```sh
+curl -N localhost:8080/api/events &
+body='{"action":"opened","repository":{"full_name":"nvorkinn/github-dashboard"},"pull_request":{"number":1}}'
+curl -X POST localhost:8080/api/github/webhook -H "X-GitHub-Event: pull_request" \
+  -H "X-Hub-Signature-256: sha256=$(printf %s "$body" | openssl dgst -sha256 -hmac secret -r | cut -d' ' -f1)" \
+  -d "$body"
+```
 
 ## Previews
 
 The demo is the page running on built-in sample data (`web/src/demo.ts` for the sign-in, `web/src/demo/` for the
 dashboard), with no relay, sign-in or GitHub behind it: it starts signed in as a sample user. One pull request's
 checks and one release run follow a script that moves every few seconds and then starts over, so the page can be
-seen updating. Adding `?show=problem`, `?show=failed`, `?show=empty` or `?show=loading` to the address holds the
-demo in a state the script never reaches.
+seen updating. Adding `?show=problem`, `?show=failed`, `?show=empty`, `?show=loading` or `?show=offline` (the event
+stream is down) to the address holds the demo in a state the script never reaches.
 The Preview workflow publishes it to GitHub Pages from the `gh-pages` branch:
 
 - each pull request's at `https://nvorkinn.github.io/github-dashboard/pr-<number>/`, linked from the pull request as
