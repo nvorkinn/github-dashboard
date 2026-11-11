@@ -1143,7 +1143,7 @@ button.action-confirm:hover:not(:disabled) {
   max-width: 100%;
   padding: 0.125rem 0.5rem;
   font-size: 0.8125rem;
-  background: color-mix(in srgb, var(--tone) 9%, transparent);
+  background: color-mix(in srgb, var(--tone) 9%, var(--job-bg, transparent));
   border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
   border-radius: 6px;
 }
@@ -1226,7 +1226,7 @@ button.action-confirm:hover:not(:disabled) {
 .job.job-tick {
   padding-block: 0;
   font-size: 0.75rem;
-  background: transparent;
+  background: var(--job-bg, transparent);
   border-color: color-mix(in srgb, var(--tone) 22%, transparent);
 }
 
@@ -1267,7 +1267,7 @@ button.action-confirm:hover:not(:disabled) {
 /* A matrix too big for a card per job: one box, its jobs in a grid. */
 .job-matrix {
   padding: 0.625rem 0.75rem;
-  background: color-mix(in srgb, var(--tone) 6%, transparent);
+  background: color-mix(in srgb, var(--tone) 6%, var(--job-bg, transparent));
   border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
   border-radius: 12px;
 }
@@ -1330,6 +1330,17 @@ button.action-confirm:hover:not(:disabled) {
   fill: none;
   stroke: var(--border);
   stroke-width: 1.5;
+}
+
+/* A line to a later stage runs behind the cards of the stages between, so a card on the graph is filled: its tint
+   over `--job-bg`, and nothing of the line shows through it. */
+.graph {
+  --job-bg: var(--panel);
+}
+
+/* Inside a matrix's box, which is filled already. */
+.graph .job-grid {
+  --job-bg: transparent;
 }
 
 .graph-stages {
