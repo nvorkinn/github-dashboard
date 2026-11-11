@@ -67,10 +67,37 @@ export type ReleaseRun = {
   finishedAt: string | undefined;
   jobs: Job[];
   /**
+   * The same jobs as its workflow file arranges them, at the run's commit: which waits for which. Unset when the
+   * file couldn't be read or understood; the jobs are then shown as they are listed.
+   */
+  graph?: JobGraph | undefined;
+  /**
    * While it waits for an approval: the environments waiting for one, such as production. Read only for runs that
    * wait, so empty for every other run.
    */
   approvals: Approval[];
+};
+
+/** A run's jobs on its workflow's graph. Every job of the run is in exactly one node, or in `unplaced`. */
+export type JobGraph = {
+  /** The workflow file's jobs, in the file's order. */
+  nodes: JobNode[];
+  /** The run's jobs that match no job of the file, such as one the file has since lost. */
+  unplaced: Job[];
+};
+
+/** One job of the workflow file, with the run's jobs that are it. */
+export type JobNode = {
+  /** Its id in the file, such as `build`. */
+  key: string;
+  /** What to call it: its name in the file, or its id when that name is worked out as it runs. */
+  name: string;
+  /** The keys of the jobs it waits for. */
+  needs: string[];
+  /** A matrix, or a call of a reusable workflow: one job in the file that runs as several. */
+  several: boolean;
+  /** The run's jobs of it: none yet for one not started, several for a matrix. */
+  jobs: Job[];
 };
 
 /** One protected environment a waiting run needs approved before its job goes on. */

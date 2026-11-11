@@ -3,6 +3,7 @@ import type { Dashboard, DashboardData, DashboardState, PullRequest } from "../m
 import { createApi, GitHubError } from "./api.ts";
 import { type Change, type Connect, createEvents } from "./events.ts";
 import { type Plan, planFor, readChanged, readDashboard } from "./read.ts";
+import { forgetWorkflowFiles } from "./workflow_graph.ts";
 
 // How often everything is read again while the relay's events don't arrive: as often as before there were any.
 export const REFRESH_MS = 60_000;
@@ -294,6 +295,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         document.removeEventListener("visibilitychange", onVisibility);
       }
       abort?.abort();
+      forgetWorkflowFiles();
       reading = undefined;
       notBefore = 0;
       missed = true;

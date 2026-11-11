@@ -1,6 +1,7 @@
 import type { Approval, Check, CheckState, DashboardData, Job, Project, PullRequest, ReleaseRun } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
+import { jobGraph, workflowFile } from "./workflow_graph.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
 // as a newer release replaces it.
@@ -51,6 +52,9 @@ type RawRun = {
   created_at: string;
   run_started_at?: string | null;
   updated_at: string;
+  head_sha?: string;
+  /** Its workflow file, such as `.github/workflows/release.yml`. */
+  path?: string;
 };
 type RawJob = {
   id: number;
@@ -555,8 +559,13 @@ export function shownRuns<T extends { id: number; status: string | null }>(runs:
 }
 
 async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: RawRun): Promise<ReleaseRun> {
-  // Without `filter`, GitHub gives the jobs of the run's latest attempt.
-  const rawJobs = await api.list<RawJob>(`repos/${repo}/actions/runs/${run.id}/jobs`, "jobs");
+  const path = run.path ?? workflow.path;
+  const [rawJobs, definitions] = await Promise.all([
+    // Without `filter`, GitHub gives the jobs of the run's latest attempt.
+    api.list<RawJob>(`repos/${repo}/actions/runs/${run.id}/jobs`, "jobs"),
+    // Which job waits for which, from the workflow file as it was at the run's commit.
+    path && run.head_sha ? workflowFile(api, repo, path, run.head_sha) : undefined,
+  ]);
   const jobs = rawJobs.map(job);
   let state = checkState(run.status, run.conclusion);
   // A run with one job waiting for approval and another running is "in progress" to GitHub, but what it needs is
@@ -577,6 +586,7 @@ async function releaseRun(api: Api, repo: string, workflow: RawWorkflow, run: Ra
     startedAt: run.run_started_at ?? run.created_at,
     finishedAt: run.status === "completed" ? run.updated_at : undefined,
     jobs,
+    graph: definitions && jobGraph(definitions, jobs),
     approvals,
   };
 }
