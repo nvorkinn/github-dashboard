@@ -380,8 +380,9 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       url: github("garden-sensors/actions/runs/4410"),
       state: "failed",
       actor: "hubot",
-      startedAt: before(46 * MINUTE),
-      finishedAt: before(40 * MINUTE),
+      // Just over: it shows folded, and leaves the page a few minutes into the demo.
+      startedAt: before(8 * MINUTE),
+      finishedAt: before(2 * MINUTE),
       jobs: [
         job("garden-sensors", 441001, "version", "passed", 46 * MINUTE, 11_000),
         job("garden-sensors", 441002, "build (esp32-c6)", "passed", 45 * MINUTE, 143_000),

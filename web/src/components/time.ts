@@ -51,6 +51,12 @@ export function duration(ms: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+/** Time left as minutes and seconds, such as "3:12". Counts whole seconds still to go, so it ends on "0:00". */
+export function countdown(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 /** The whole date and time, for a tooltip on a relative time. */
 export function exact(then: string | number): string {
   const date = new Date(then);
