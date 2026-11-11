@@ -91,15 +91,15 @@ export function columnOf(pull: PullRequest): PullColumn {
  * Every open pull request, of all projects, on a board of three columns by what each needs. The columns sit side by
  * side where there is room for them and one under the other where there isn't.
  */
-export function PullList({ pulls, now }: { pulls: PullRequest[]; now: number }) {
+export function PullList({ pulls, now, compact = false }: { pulls: PullRequest[]; now: number; compact?: boolean }) {
   const [order, setOrder] = useState(rememberedOrder);
   const sorted = sortPulls(pulls, order);
 
   return (
-    <section class="panel pulls" aria-labelledby="pulls-heading">
+    <section class={compact ? "panel pulls pulls-compact" : "panel pulls"} aria-labelledby="pulls-heading">
       <div class="panel-heading">
         <h2 id="pulls-heading">
-          Pull requests <span class="count">{pulls.length}</span>
+          {compact ? "Open pull requests" : "Pull requests"} <span class="count">{pulls.length}</span>
         </h2>
         <label class="order">
           <span class="quiet">Order</span>
@@ -121,6 +121,12 @@ export function PullList({ pulls, now }: { pulls: PullRequest[]; now: number }) 
       </div>
       {pulls.length === 0 ? (
         <p class="empty">No open pull requests</p>
+      ) : compact ? (
+        <ul class="cards pull-queue" aria-labelledby="pulls-heading">
+          {sorted.map((pull) => (
+            <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} foldable />
+          ))}
+        </ul>
       ) : (
         <div class="board">
           {COLUMNS.map(({ value, label }) => {
@@ -188,7 +194,7 @@ export function PullRow({ pull: read, now, foldable = false }: { pull: PullReque
       ? { ...read, autoMerge: done.what === "autoMergeOn" }
       : read;
   return (
-    <li class={folded ? "pull pull-folded" : "pull"}>
+    <li class={`${folded ? "pull pull-folded" : "pull"} pull-${columnOf(pull)}`}>
       {folded ? null : pull.authorAvatarUrl ? (
         <img class="avatar" src={pull.authorAvatarUrl} alt="" width="32" height="32" loading="lazy" />
       ) : (
@@ -213,6 +219,15 @@ export function PullRow({ pull: read, now, foldable = false }: { pull: PullReque
         <ExternalLink class="pull-title" href={pull.url}>
           <span class="number">#{pull.number}</span> {pull.title}
         </ExternalLink>
+        {folded && (
+          <p class="pull-compact-meta">
+            <code>{pull.head}</code>
+            <span>{pull.author}</span>
+            <span>
+              updated <Ago at={pull.updatedAt} now={now} />
+            </span>
+          </p>
+        )}
         {!folded && (
           <p class="meta">
             <span>{pull.author}</span>
