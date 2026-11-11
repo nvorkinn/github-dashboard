@@ -1,6 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { expect, test } from "vitest";
-import { readAuthConfig } from "./config.ts";
+import { readAuthConfig, readWebhookSecret } from "./config.ts";
+
+test("the webhook secret is optional and apart from the sign-in settings", () => {
+  expect(readWebhookSecret({})).toBeUndefined();
+  expect(readWebhookSecret({ GITHUB_WEBHOOK_SECRET: "" })).toBeUndefined();
+  expect(readWebhookSecret({ GITHUB_WEBHOOK_SECRET: "a secret" })).toBe("a secret");
+  expect(readAuthConfig({ GITHUB_WEBHOOK_SECRET: "a secret" })).toBeUndefined();
+});
 
 const env = {
   GITHUB_APP_CLIENT_ID: "Iv1.client",

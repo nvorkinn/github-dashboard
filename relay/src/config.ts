@@ -47,3 +47,11 @@ export function readAuthConfig(env: Record<string, string | undefined>): AuthCon
 
   return { clientId, clientSecret, cookieKey, publicOrigin: url.origin, secureCookies: url.protocol === "https:" };
 }
+
+/**
+ * Reads the secret GitHub signs its webhooks with (see README.md, "Push"). It is optional and stands apart from the
+ * sign-in settings: without it the relay runs, and its webhook endpoint answers 503.
+ */
+export function readWebhookSecret(env: Record<string, string | undefined>): string | undefined {
+  return env.GITHUB_WEBHOOK_SECRET || undefined;
+}
