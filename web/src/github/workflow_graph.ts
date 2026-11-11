@@ -121,6 +121,7 @@ const files = new Map<string, Promise<WorkflowJob[] | undefined>>();
 /** Forgets every workflow file read, such as on sign-out. */
 export function forgetWorkflowFiles(): void {
   files.clear();
+  marks.clear();
 }
 
 /**
@@ -181,6 +182,64 @@ async function readWorkflowFile(api: Api, repo: string, path: string, sha: strin
   } catch {
     return undefined;
   }
+}
+
+/** Where a repository keeps its workflow files. */
+export const WORKFLOWS_FOLDER = ".github/workflows";
+
+/**
+ * What marks a workflow file as a release for the dashboard: a comment line of its own saying `dashboard: release`,
+ * anywhere in the file.
+ */
+export const RELEASE_MARK = /^[ \t]*#[ \t]*dashboard:[ \t]*release[ \t]*$/im;
+
+// Per repository and blob: whether the file with that content carries the mark. A blob never changes, so it stays.
+const marks = new Map<string, Promise<boolean>>();
+
+/**
+ * The paths of the repository's workflow files, on its default branch, that carry the release mark. One request
+ * lists the folder; a file is read only the first time its content is seen. A repository without the folder, or
+ * one whose files GitHub won't show, has none; a rate limit, a sign-in GitHub no longer accepts or a failing network
+ * is thrown, as for every other read.
+ */
+export async function markedReleaseFiles(api: Api, repo: string): Promise<Set<string>> {
+  const quiet =
+    <T>(fallback: T) =>
+    (error: unknown): T => {
+      if (error instanceof GitHubError && error.retryAt === undefined && error.status !== 401) {
+        return fallback;
+      }
+      throw error;
+    };
+  const listing = await api
+    .get<{ type?: string; path?: string; sha?: string }[] | unknown>(`repos/${repo}/contents/${WORKFLOWS_FOLDER}`)
+    .catch(quiet(undefined));
+  const marked = new Set<string>();
+  if (!Array.isArray(listing)) {
+    return marked;
+  }
+  await Promise.all(
+    listing.map(async (entry: { type?: string; path?: string; sha?: string }) => {
+      const { path, sha } = entry;
+      if (entry.type !== "file" || !path || !sha || !/\.ya?ml$/.test(path)) {
+        return;
+      }
+      const key = `${repo}\n${sha}`;
+      let reading = marks.get(key);
+      if (!reading) {
+        reading = api
+          .get<{ content?: string; encoding?: string }>(`repos/${repo}/git/blobs/${sha}`)
+          .then((blob) => blob.encoding === "base64" && RELEASE_MARK.test(decodeBase64(blob.content ?? "")));
+        marks.set(key, reading);
+        // Not kept when it failed: it's asked again on the next read.
+        reading.catch(() => marks.delete(key));
+      }
+      if (await reading.catch(quiet(false))) {
+        marked.add(path);
+      }
+    }),
+  );
+  return marked;
 }
 
 function decodeBase64(text: string): string {

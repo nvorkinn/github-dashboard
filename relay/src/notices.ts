@@ -48,8 +48,9 @@ export function pageNotice({ type, key, repo, headline, url }: Notice): PageNoti
 /**
  * What to tell about a webhook, or nothing when it isn't worth a notice. Only what needs attention
  * gets one, as the dashboard in countdown-server did: a pull request merging or getting changes requested, a pull
- * request's checks failing, and a release run (a workflow whose name says release, promote or deploy, as the page
- * reads it) finishing or waiting for approval.
+ * request's checks failing, and a release run finishing or waiting for approval. A release run here is one of a workflow
+ * whose name says release, promote or deploy: the page goes by a mark in the workflow's file instead, which the relay,
+ * holding no token, can't read.
  *
  * The payload is read as `changeFrom` reads it: a value of an unexpected type counts as missing, and a webhook missing
  * something a notice needs gets none. `delivery` (`X-GitHub-Delivery`) only tells apart reviews that have no id.
@@ -150,6 +151,12 @@ function releaseFinished(repo: string, root: Record<string, unknown>): Notice | 
   if (root.action !== "completed" || !isReleaseName(name) || id === undefined) {
     return undefined;
   }
+  // A workflow GitHub runs by itself, such as "pages build and deployment", has no file in the repository and is
+  // no release, whatever its name.
+  const path = text(run.path);
+  if (path !== undefined && !path.startsWith(".github/workflows/")) {
+    return undefined;
+  }
   return notice(
     "release",
     repo,
@@ -186,7 +193,10 @@ function releaseWaiting(
   };
 }
 
-/** Whether a workflow is a release run, as the page decides it: its name says release, promote or deploy. */
+/**
+ * Whether a workflow is a release run, by its name: it says release, promote or deploy. The page decides it so too
+ * for a repository that marks none of its workflow files.
+ */
 export function isReleaseName(name: string | undefined): name is string {
   const lower = (name ?? "").toLowerCase();
   return lower.includes("release") || lower.includes("promote") || lower.includes("deploy");

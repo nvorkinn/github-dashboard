@@ -2,7 +2,7 @@ import type { Auth } from "../auth.ts";
 import type { Dashboard, Project, RunActions } from "../model.ts";
 import { RELEASE_TAG } from "../model.ts";
 import { type Api, createApi, GitHubError } from "./api.ts";
-import { approval, isReleaseName, PROMOTE_WORKFLOW, type RawPendingDeployment } from "./read.ts";
+import { approval, PROMOTE_WORKFLOW, type RawPendingDeployment, releaseWorkflows } from "./read.ts";
 import { ActionError, send as sendWrite, worded } from "./writes.ts";
 
 // What a finished job or run ends in when GitHub's re-run of its failed jobs runs it again (cancelled ones too).
@@ -12,7 +12,13 @@ const RERUNNABLE = new Set(["failure", "timed_out", "cancelled"]);
 export const APPROVED_COMMENT = "Approved from the GitHub dashboard.";
 export const REJECTED_COMMENT = "Rejected from the GitHub dashboard.";
 
-type RawRun = { id: number; name: string | null; status: string | null; conclusion: string | null };
+type RawRun = {
+  id: number;
+  name: string | null;
+  path?: string;
+  status: string | null;
+  conclusion: string | null;
+};
 type RawJob = { id: number; run_id: number; status: string; conclusion: string | null };
 type RawRelease = { tag_name: string; draft: boolean };
 type RawWorkflow = { id: number; path: string; state: string };
@@ -42,10 +48,10 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         if (now.status === "completed") {
           throw new ActionError("This run has finished, so it no longer waits for an approval. Refresh the dashboard.");
         }
-        if (!isReleaseName(now.name)) {
-          throw new ActionError(
-            "Only unfinished release, promote or deploy workflows can be approved from this dashboard.",
-          );
+        // A run's path can end in `@<ref>`.
+        const workflow = { name: now.name ?? "", path: now.path?.split("@")[0] };
+        if ((await releaseWorkflows(api, run.repo, [workflow])).length === 0) {
+          throw new ActionError("Only unfinished runs of release workflows can be approved from this dashboard.");
         }
         const pending = (await api.list<RawPendingDeployment>(`${path}/pending_deployments`)).map(approval);
         const found = pending.find((one) => one.environmentId === wanted.environmentId);
