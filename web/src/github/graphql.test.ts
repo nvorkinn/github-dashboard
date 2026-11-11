@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "vitest";
 import { GitHubError } from "./api.ts";
-import { PULLS_PER_REPO, queryFor, readEverything, workflowUrl } from "./graphql.ts";
+import { PULLS_PER_REPO, queryFor, REPOS_PER_REQUEST, readEverything, split, workflowUrl } from "./graphql.ts";
 import { account, fakeGitHub, job, type Routes, withPull, withWorkflow } from "./testing.ts";
 import { forgetWorkflowFiles } from "./workflow_graph.ts";
 
@@ -33,22 +33,25 @@ test("a first visit asks three times: which projects, what is in them, and how t
   expect(shape).toEqual({ "octo/app": [".github/workflows/3.yml"], "octo/lib": [] });
 });
 
-test("with the shape of the last read everything is one request, also on a page that has just loaded", async () => {
+test("with the shape of the last read everything is asked at once, also on a page that has just loaded", async () => {
   const routes = app();
   const first = await readEverything(fakeGitHub(routes).auth);
 
   const warm = fakeGitHub(routes);
   const again = await readEverything(warm.auth, { shape: first.shape, previous: first.data });
-  expect(warm.calls).toEqual(["graphql"]);
+  // The list, the projects and the workflows, side by side.
+  expect(warm.calls).toEqual(["graphql", "graphql", "graphql"]);
+  expect(warm.peak()).toBe(3);
   expect(again.data).toEqual(first.data);
   // The workflow files are known by now, so their text isn't asked for again.
-  expect(warm.queries[0]).not.toContain("... on Blob { text }");
+  expect(warm.queries.join("\n")).not.toContain("... on Blob { text }");
 
   forgetWorkflowFiles();
   const reloaded = fakeGitHub(routes);
   const fresh = await readEverything(reloaded.auth, { shape: first.shape });
-  expect(reloaded.calls).toEqual(["graphql"]);
-  expect(reloaded.queries[0]).toContain("... on Blob { text }");
+  expect(reloaded.calls).toHaveLength(3);
+  expect(reloaded.peak()).toBe(3);
+  expect(reloaded.queries.join("\n")).toContain("... on Blob { text }");
   expect(fresh.data).toEqual(first.data);
   expect(fresh.shape).toEqual(first.shape);
 });
@@ -72,7 +75,8 @@ test("of a hidden project only its row is read, and one that is new is read in f
   withPull(routes, "octo/new", 9);
   const second = fakeGitHub(routes);
   const later = await readEverything(second.auth, { hidden: new Set(["octo/app"]), shape, previous: data });
-  expect(second.calls).toEqual(["graphql", "graphql"]);
+  expect(second.calls).toEqual(["graphql", "graphql", "graphql"]);
+  expect(second.queries[2]).toContain('name: "new"');
   expect(later.data.projects.map((one) => one.repo).sort()).toEqual(["octo/app", "octo/lib", "octo/new"]);
   expect(later.data.pulls.map((one) => one.number).sort()).toEqual([7, 9]);
 });
@@ -84,12 +88,60 @@ test("a workflow file that changed is read once more, and a new release workflow
   withWorkflow(routes, "octo/app", { id: 5, name: "Deploy" }, [{ id: 6 }]);
   const { auth, queries } = fakeGitHub(routes);
   const { data, shape } = await readEverything(auth, { shape: first.shape, previous: first.data });
-  // The read as shaped; then the file that wasn't known; then the workflow it turned out to be.
-  expect(queries).toHaveLength(3);
-  expect(queries[1]).toMatch(/b0: repository\(owner: "octo", name: "app"\) \{ object\(oid: "/);
-  expect(queries[2]).toContain("actions/workflows/5.yml");
+  // The read as shaped, in three requests; then the file that wasn't known; then the workflow it turned out to be.
+  expect(queries).toHaveLength(5);
+  expect(queries[3]).toMatch(/b0: repository\(owner: "octo", name: "app"\) \{ object\(oid: "/);
+  expect(queries[4]).toContain("actions/workflows/5.yml");
   expect(data.releases.map((one) => one.id).sort()).toEqual([4, 6]);
   expect(shape["octo/app"]).toEqual([".github/workflows/3.yml", ".github/workflows/5.yml"]);
+});
+
+test("only the latest run comes in full; another one that is shown is asked for by itself", async () => {
+  const routes = account("octo/app");
+  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
+    { id: 9, status: "in_progress", conclusion: null, jobs: [job(91, { status: "in_progress", conclusion: null })] },
+    { id: 8, jobs: [job(81)] },
+    { id: 7, jobs: [job(71)] },
+  ]);
+  const { auth, queries } = fakeGitHub(routes);
+  const { data, problem } = await readEverything(auth);
+  expect(problem).toBeUndefined();
+  // The run under way, and the last one that finished.
+  expect(data.releases.map((one) => [one.id, one.jobs.map((each) => each.id)])).toEqual([
+    [9, [91]],
+    [8, [81]],
+  ]);
+  expect(queries.at(-1)).toContain('n0: node(id: "RUN:octo/app:3:8")');
+  expect(queries.join("\n")).not.toContain("RUN:octo/app:3:7");
+
+  // Once it has finished it is the only one shown, and nothing more is asked.
+  routes["repos/octo/app/actions/workflows/3/runs"] = {
+    workflow_runs: [{ id: 9 }, { id: 8 }, { id: 7 }].map((one) => ({
+      ...(routes["repos/octo/app/actions/workflows/3/runs"] as { workflow_runs: { id: number }[] }).workflow_runs.find(
+        (run) => run.id === one.id,
+      ),
+      status: "completed",
+      conclusion: "success",
+    })),
+  };
+  const later = fakeGitHub(routes);
+  const after = await readEverything(later.auth);
+  expect(after.data.releases.map((one) => one.id)).toEqual([9]);
+  expect(later.queries.join("\n")).not.toContain("node(id:");
+});
+
+test("a read is split into requests of a few projects or workflows each", () => {
+  const repos = Array.from({ length: REPOS_PER_REQUEST * 2 + 1 }, (_, index) => `octo/r${index}`);
+  const flows = [{ repo: "octo/r0", path: ".github/workflows/release.yml" }];
+  const parts = split({ list: { after: undefined }, repos, flows, runs: [], blobs: [], texts: true });
+  expect(parts.map((part) => [part.list !== undefined, part.repos.length, part.flows.length, part.texts])).toEqual([
+    [true, 0, 0, true],
+    [false, REPOS_PER_REQUEST, 0, true],
+    [false, REPOS_PER_REQUEST, 0, true],
+    [false, 1, 0, true],
+    [false, 0, 1, true],
+  ]);
+  expect(split({ list: undefined, repos: [], flows: [], runs: [], blobs: [], texts: false })).toEqual([]);
 });
 
 test("a project that is gone is asked about once more and then forgotten", async () => {
@@ -249,7 +301,7 @@ test.each([
 });
 
 test("the query asks only for what it is asked, and writes names as GraphQL strings", () => {
-  const nothing = { list: undefined, repos: [], flows: [], blobs: [], texts: false };
+  const nothing = { list: undefined, repos: [], flows: [], runs: [], blobs: [], texts: false };
   const list = queryFor({ ...nothing, list: { after: 'cur"sor' } });
   expect(list).toContain(String.raw`after: "cur\"sor"`);
   expect(list).toContain("fragment Listed on Repository");

@@ -234,63 +234,91 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     };
   }
 
+  /** A run's node id, which says where the fake finds it again. */
+  const runId = (repo: string, workflowId: number, run: Json) => `RUN:${repo}:${workflowId}:${run.id}`;
+
+  async function runsOf(repo: string, workflowId: number): Promise<Json[]> {
+    return (await get(`repos/${repo}/actions/workflows/${workflowId}/runs`))?.workflow_runs ?? [];
+  }
+
   async function workflow(repo: string, path: string, withText: boolean): Promise<Json> {
     const workflows: Json[] = (await get(`repos/${repo}/actions/workflows`))?.workflows ?? [];
     const found = workflows.find((one) => one.path === path);
     if (!found) {
       return null;
     }
-    const runs: Json[] = (await get(`repos/${repo}/actions/workflows/${found.id}/runs`))?.workflow_runs ?? [];
-    const nodes = await Promise.all(
-      runs.slice(0, 5).map(async (run) => {
-        const jobs: Json[] = (await get(`repos/${repo}/actions/runs/${run.id}/jobs`))?.jobs ?? [];
-        const pending: Json[] =
-          (await get(`repos/${repo}/actions/runs/${run.id}/pending_deployments`).catch((error) => {
-            if (error instanceof Whole) {
-              throw error;
-            }
-            return [];
-          })) ?? [];
-        const file = run.head_sha
-          ? await get(`repos/${repo}/contents/${path}?ref=${run.head_sha}`).catch(() => undefined)
-          : undefined;
-        const actor = run.triggering_actor ?? run.actor;
-        return {
+    const runs = (await runsOf(repo, found.id)).slice(0, 5);
+    return {
+      databaseId: found.id,
+      name: found.name,
+      state: upper(found.state),
+      recent: {
+        nodes: runs.map((run) => ({
+          id: runId(repo, found.id, run),
           databaseId: run.id,
-          displayTitle: run.display_title ?? null,
-          event: run.event,
-          url: run.html_url,
-          createdAt: run.created_at,
-          updatedAt: run.updated_at,
-          pendingDeploymentRequests: {
-            nodes: pending.map((one) => ({
-              currentUserCanApprove: one.current_user_can_approve,
-              environment: { databaseId: one.environment.id, name: one.environment.name },
+          checkSuite: { status: upper(run.status) },
+        })),
+      },
+      runs: { nodes: await Promise.all(runs.slice(0, 1).map((run) => runNode(repo, found.id, path, run, withText))) },
+    };
+  }
+
+  /** One run in full, asked for by its node id. */
+  async function runById(id: string, path: string, withText: boolean): Promise<Json> {
+    const [, repo = "", workflowId = "", number = ""] = id.split(":");
+    const run = (await runsOf(repo, Number(workflowId))).find((one) => String(one.id) === number);
+    return run ? runNode(repo, Number(workflowId), path, run, withText) : null;
+  }
+
+  async function runNode(repo: string, workflowId: number, path: string, run: Json, withText: boolean): Promise<Json> {
+    {
+      const jobs: Json[] = (await get(`repos/${repo}/actions/runs/${run.id}/jobs`))?.jobs ?? [];
+      const pending: Json[] =
+        (await get(`repos/${repo}/actions/runs/${run.id}/pending_deployments`).catch((error) => {
+          if (error instanceof Whole) {
+            throw error;
+          }
+          return [];
+        })) ?? [];
+      const file = run.head_sha
+        ? await get(`repos/${repo}/contents/${path}?ref=${run.head_sha}`).catch(() => undefined)
+        : undefined;
+      const actor = run.triggering_actor ?? run.actor;
+      return {
+        id: runId(repo, workflowId, run),
+        databaseId: run.id,
+        displayTitle: run.display_title ?? null,
+        event: run.event,
+        url: run.html_url,
+        createdAt: run.created_at,
+        updatedAt: run.updated_at,
+        pendingDeploymentRequests: {
+          nodes: pending.map((one) => ({
+            currentUserCanApprove: one.current_user_can_approve,
+            environment: { databaseId: one.environment.id, name: one.environment.name },
+          })),
+        },
+        checkSuite: {
+          status: upper(run.status),
+          conclusion: upper(run.conclusion),
+          branch: run.head_branch ? { name: run.head_branch } : null,
+          creator: actor ? { __typename: "User", login: actor.login } : null,
+          commit: { oid: run.head_sha ?? `head${run.id}`, file: file ? blobOf(text(file), withText) : null },
+          checkRuns: {
+            pageInfo: { hasNextPage: false },
+            nodes: jobs.map((one) => ({
+              databaseId: one.id,
+              name: one.name,
+              status: upper(one.status),
+              conclusion: upper(one.conclusion),
+              permalink: one.html_url,
+              startedAt: one.started_at,
+              completedAt: one.completed_at,
             })),
           },
-          checkSuite: {
-            status: upper(run.status),
-            conclusion: upper(run.conclusion),
-            branch: run.head_branch ? { name: run.head_branch } : null,
-            creator: actor ? { __typename: "User", login: actor.login } : null,
-            commit: { oid: run.head_sha ?? `head${run.id}`, file: file ? blobOf(text(file), withText) : null },
-            checkRuns: {
-              pageInfo: { hasNextPage: false },
-              nodes: jobs.map((one) => ({
-                databaseId: one.id,
-                name: one.name,
-                status: upper(one.status),
-                conclusion: upper(one.conclusion),
-                permalink: one.html_url,
-                startedAt: one.started_at,
-                completedAt: one.completed_at,
-              })),
-            },
-          },
-        };
-      }),
-    );
-    return { databaseId: found.id, name: found.name, state: upper(found.state), runs: { nodes } };
+        },
+      };
+    }
   }
 
   const data: Record<string, unknown> = {};
@@ -321,6 +349,11 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     )) {
       const path = `.github/workflows/${decodeURIComponent(file ?? "")}`;
       await field(alias ?? "", () => workflow(repo ?? "", path, (more ?? "").includes("{ oid object")));
+    }
+    for (const [, alias, id, path, more] of query.matchAll(
+      /^\s*(n\d+): node\(id: "([^"]+)"\)[^\n]*file\(path: "([^"]+)"\) \{ oid( object)?/gm,
+    )) {
+      await field(alias ?? "", () => runById(id ?? "", path ?? "", more !== undefined));
     }
     for (const [, alias, oid] of query.matchAll(/^\s*(b\d+): repository\([^)]*\) \{ object\(oid: "([0-9a-f]*)"\)/gm)) {
       data[alias ?? ""] = { object: { text: Buffer.from(oid ?? "", "hex").toString("utf8") } };

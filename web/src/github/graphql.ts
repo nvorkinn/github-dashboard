@@ -1,9 +1,9 @@
 /**
- * Reads everything the dashboard shows through GitHub's GraphQL API, in one request where the REST API takes a dozen
- * per project. What comes back is put into the shapes of the REST answers and then into the model by the same code
+ * Reads everything the dashboard shows through GitHub's GraphQL API, in a handful of requests sent side by side where
+ * the REST API takes a dozen per project. What comes back is put into the shapes of the REST answers and then into the model by the same code
  * as a read of changes (read.ts), so the two can't differ in what they make of GitHub's words.
  *
- * One request asks for:
+ * A read asks for:
  *
  * - every repository the signed-in user reaches through the app: what a project's row shows, nothing more;
  * - of each project that isn't hidden: its open pull requests with their checks, and its workflow files;
@@ -12,11 +12,11 @@
  * GraphQL has no list of a repository's workflows, so a workflow is asked for by its file's address on github.com,
  * and which files to ask for has to be known before asking: that is the `Shape`, which a read gives back for the
  * next one. A read that finds it wrong (no shape yet, a new project, a new release workflow, a workflow file not
- * seen before) asks again for what is missing, so only such a read takes more than one request.
+ * seen before) asks again for what is missing, so only such a read takes more than one round of requests.
  */
 import type { Auth } from "../auth.ts";
 import type { Approval, DashboardData, Job, PullRequest, ReleaseRun } from "../model.ts";
-import { createApi, GitHubError, retryAt } from "./api.ts";
+import { createApi, GitHubError, limiter, MAX_PARALLEL, retryAt } from "./api.ts";
 import {
   approval,
   isReleaseName,
@@ -60,12 +60,14 @@ export const PULLS_PER_REPO = 50;
 export const CHECKS_PER_PULL = 100;
 export const JOBS_PER_RUN = 100;
 const APPROVALS_PER_RUN = 20;
-// How many projects and workflows one request asks about; more of them take another request.
-export const REPOS_PER_REQUEST = 40;
-export const WORKFLOWS_PER_REQUEST = 80;
-const BLOBS_PER_REQUEST = 100;
-// A read never needs this many requests; one that would has gone wrong, and stops.
-const MAX_REQUESTS = 25;
+// How many projects and workflows one request asks about. GitHub answers a query's fields one after another, each
+// project and workflow taking about a tenth of a second, so a read sends its requests side by side: a few in each
+// is several times faster than all in one.
+export const REPOS_PER_REQUEST = 7;
+export const WORKFLOWS_PER_REQUEST = 7;
+const EXTRAS_PER_REQUEST = 50;
+// A read never needs this many rounds of requests; one that would has gone wrong, and stops.
+const MAX_ROUNDS = 10;
 const DEFAULT_BACKOFF_MS = 60_000;
 
 /**
@@ -147,6 +149,7 @@ type GqlJob = {
   completedAt: string | null;
 };
 type GqlRun = {
+  id: string;
   databaseId: number;
   displayTitle: string | null;
   event: string;
@@ -165,7 +168,15 @@ type GqlRun = {
     checkRuns: { pageInfo: { hasNextPage: boolean }; nodes: (GqlJob | null)[] } | null;
   } | null;
 };
-type GqlWorkflow = { databaseId: number; name: string; state: string; runs: { nodes: (GqlRun | null)[] } };
+type GqlWorkflow = {
+  databaseId: number;
+  name: string;
+  state: string;
+  /** Its latest runs, only as far as it takes to tell which of them the page shows. */
+  recent: { nodes: ({ id: string; databaseId: number; checkSuite: { status: string } | null } | null)[] };
+  /** The latest of them in full, which is nearly always the only one shown. */
+  runs: { nodes: (GqlRun | null)[] };
+};
 type GqlError = { type?: string; path?: (string | number)[]; message?: string };
 
 const LISTED = `fragment Listed on Repository {
@@ -196,7 +207,7 @@ const PULLS = `fragment Pulls on Repository {
 }`;
 
 const RUN = `fragment Run on WorkflowRun {
-  databaseId displayTitle event url createdAt updatedAt
+  id databaseId displayTitle event url createdAt updatedAt
   pendingDeploymentRequests(first: ${APPROVALS_PER_RUN}) {
     nodes { currentUserCanApprove environment { databaseId name } }
   }
@@ -213,12 +224,15 @@ const RUN = `fragment Run on WorkflowRun {
 
 type Flow = { repo: string; path: string };
 type BlobAsk = { repo: string; oid: string };
+/** A run by its node id, with the path of its workflow's file. */
+type RunAsk = { repo: string; path: string; id: string };
 
 /** What one request asks for. `texts`: with the workflow files' text, not only which files they are. */
 export type Asked = {
   list: { after: string | undefined } | undefined;
   repos: string[];
   flows: Flow[];
+  runs: RunAsk[];
   blobs: BlobAsk[];
   texts: boolean;
 };
@@ -239,8 +253,8 @@ export function workflowUrl(repo: string, path: string): string {
 }
 
 /**
- * The query for `asked`. Each project is the field `r<n>`, each workflow `w<n>` and each workflow file `b<n>`,
- * numbered as they are in `asked`.
+ * The query for `asked`. Each project is the field `r<n>`, each workflow `w<n>`, each run `n<n>` and each workflow
+ * file `b<n>`, numbered as they are in `asked`.
  */
 export function queryFor(asked: Asked): string {
   const blob = asked.texts ? " object { ... on Blob { text } }" : "";
@@ -260,14 +274,17 @@ export function queryFor(asked: Asked): string {
   }`);
   });
   asked.flows.forEach(({ repo, path }, index) => {
-    // The workflow file as it was at each run's commit says which job waits for which.
+    // Of its latest runs the page shows the unfinished ones and the last finished one, which is nearly always just
+    // the latest. So only that one is asked for in full, with its jobs, and the others only for whether they
+    // finished; one of those that is shown after all is asked for by itself (`n<n>`).
     fields.push(`w${index}: resource(url: ${quoted(workflowUrl(repo, path))}) { ... on Workflow {
     databaseId name state
-    runs(first: ${RECENT_RELEASES}, orderBy: {field: CREATED_AT, direction: DESC}) { nodes {
-      ...Run
-      checkSuite { commit { oid file(path: ${quoted(path)}) { oid${blob} } } }
-    } }
+    recent: runs(first: ${RECENT_RELEASES}, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { id databaseId checkSuite { status } } }
+    runs(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ${runFields(path, blob)} } }
   } }`);
+  });
+  asked.runs.forEach(({ path, id }, index) => {
+    fields.push(`n${index}: node(id: ${quoted(id)}) { ... on WorkflowRun { ${runFields(path, blob)} } }`);
   });
   asked.blobs.forEach(({ repo, oid }, index) => {
     fields.push(`b${index}: ${repository(repo)} { object(oid: ${quoted(oid)}) { ... on Blob { text } } }`);
@@ -275,9 +292,32 @@ export function queryFor(asked: Asked): string {
   const fragments = [
     ...(asked.list ? [LISTED] : []),
     ...(asked.repos.length > 0 ? [PULLS] : []),
-    ...(asked.flows.length > 0 ? [RUN] : []),
+    ...(asked.flows.length + asked.runs.length > 0 ? [RUN] : []),
   ];
   return [`query {\n  ${fields.join("\n  ")}\n}`, ...fragments].join("\n");
+}
+
+/** A run in full. The workflow file as it was at the run's commit says which job waits for which. */
+function runFields(path: string, blob: string): string {
+  return `...Run checkSuite { commit { oid file(path: ${quoted(path)}) { oid${blob} } } }`;
+}
+
+/** `asked` as the requests to send side by side: the list, then a few projects or workflows in each. */
+export function split(asked: Asked): Asked[] {
+  const nothing: Asked = { list: undefined, repos: [], flows: [], runs: [], blobs: [], texts: asked.texts };
+  const chunks = <T>(all: T[], size: number): T[][] =>
+    Array.from({ length: Math.ceil(all.length / size) }, (_, index) => all.slice(index * size, (index + 1) * size));
+  const extras = Math.max(asked.runs.length, asked.blobs.length);
+  return [
+    ...(asked.list ? [{ ...nothing, list: asked.list }] : []),
+    ...chunks(asked.repos, REPOS_PER_REQUEST).map((repos) => ({ ...nothing, repos })),
+    ...chunks(asked.flows, WORKFLOWS_PER_REQUEST).map((flows) => ({ ...nothing, flows })),
+    ...Array.from({ length: Math.ceil(extras / EXTRAS_PER_REQUEST) }, (_, index) => ({
+      ...nothing,
+      runs: asked.runs.slice(index * EXTRAS_PER_REQUEST, (index + 1) * EXTRAS_PER_REQUEST),
+      blobs: asked.blobs.slice(index * EXTRAS_PER_REQUEST, (index + 1) * EXTRAS_PER_REQUEST),
+    })),
+  ];
 }
 
 /**
@@ -334,6 +374,8 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
   let list: Asked["list"] = { after: undefined };
   const details = new Map<string, GqlDetails | undefined>();
   const workflows = new Map<string, GqlWorkflow | "none" | "failed">();
+  // The runs asked for by themselves, by node id.
+  const extraRuns = new Map<string, GqlRun | undefined>();
   // What a file says, for the files that couldn't be read or kept: only for this read.
   const unkept = new Map<string, WorkflowBlob>();
   // The projects GitHub wouldn't say everything of.
@@ -341,6 +383,7 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
 
   const repoQueue = queue<string>((repo) => repo);
   const flowQueue = queue<Flow>(flowKey);
+  const runQueue = queue<RunAsk>((run) => run.id);
   const blobQueue = queue<BlobAsk>(blobKey);
   for (const [repo, paths] of Object.entries(shape)) {
     if (!hidden.has(repo)) {
@@ -376,19 +419,11 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
     return paths;
   }
 
-  for (let request = 0; request < MAX_REQUESTS; request++) {
-    const asked: Asked = {
-      list,
-      repos: repoQueue.take(REPOS_PER_REQUEST),
-      flows: flowQueue.take(WORKFLOWS_PER_REQUEST),
-      blobs: blobQueue.take(BLOBS_PER_REQUEST),
-      texts,
-    };
-    if (!asked.list && asked.repos.length + asked.flows.length + asked.blobs.length === 0) {
-      break;
-    }
-    const { data, errors } = await send(auth, queryFor(asked), signal);
+  const limit = limiter(options.parallel ?? MAX_PARALLEL);
+  type Answer = Awaited<ReturnType<typeof send>>;
 
+  /** Takes in the answer to one request. */
+  function absorb(asked: Asked, { data, errors }: Answer): void {
     // What GitHub wouldn't say, by the field it is under. A run's approvals are the user's to see or not, and a run
     // without them shows without its buttons.
     const refusedFields = new Set<string>();
@@ -440,12 +475,39 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
         }
       }
     });
+    asked.runs.forEach((run, index) => {
+      const answer = data[`n${index}`] as Partial<GqlRun> | null | undefined;
+      const found = answer?.id === run.id && !refusedFields.has(`n${index}`) ? (answer as GqlRun) : undefined;
+      extraRuns.set(run.id, found);
+      const file = found?.checkSuite?.commit?.file;
+      if (file) {
+        known(run.repo, file.oid, file.object);
+      }
+    });
     asked.blobs.forEach((blob, index) => {
       const answer = data[`b${index}`] as { object?: GqlBlob } | null | undefined;
       if (!known(blob.repo, blob.oid, answer?.object)) {
         // Not a text, or not to be had: nothing is read out of it, and the next read asks again.
         unkept.set(blobKey(blob), readWorkflowBlob(""));
       }
+    });
+  }
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const requests = split({
+      list,
+      repos: repoQueue.take(),
+      flows: flowQueue.take(),
+      runs: runQueue.take(),
+      blobs: blobQueue.take(),
+      texts,
+    });
+    if (requests.length === 0) {
+      break;
+    }
+    const answers = await Promise.all(requests.map((asked) => limit(() => send(auth, queryFor(asked), signal))));
+    requests.forEach((asked, index) => {
+      absorb(asked, answers[index] as Answer);
     });
 
     // What this answer shows to be missing still.
@@ -467,8 +529,14 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
       }
     }
     for (const [key, workflow] of workflows) {
-      const repo = key.split("\n")[0] ?? "";
-      for (const run of shown(workflow)) {
+      const [repo = "", path = ""] = key.split("\n");
+      const { runs, missing } = shown(workflow, extraRuns);
+      for (const id of missing) {
+        if (!extraRuns.has(id)) {
+          runQueue.add({ repo, path, id });
+        }
+      }
+      for (const run of runs) {
         const file = run.checkSuite?.commit?.file;
         if (file && !blobOf(repo, file.oid)) {
           blobQueue.add({ repo, oid: file.oid });
@@ -547,16 +615,22 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
         );
         promoteWorkflow = active.find((one) => one.path === PROMOTE_WORKFLOW)?.workflow.databaseId;
         const names = new Set(releaseFiles(paths, repo, answer, blobOf));
-        releases = await part(async () => {
-          const runs = await Promise.all(
-            active
-              .filter((one) => names.has(one.path))
-              .flatMap(({ path, workflow }) =>
-                shown(workflow).map((run) => releaseRun(api, repo, path, workflow, run, blobOf)),
+        const shownOf = active
+          .filter((one) => names.has(one.path))
+          .map((one) => ({ ...one, ...shown(one.workflow, extraRuns) }));
+        if (shownOf.some((one) => one.missing.length > 0)) {
+          // A run that is shown couldn't be read in full: the releases stay as they were.
+          failed.add(repo);
+        } else {
+          releases = await part(async () => {
+            const runs = await Promise.all(
+              shownOf.flatMap(({ path, workflow, runs }) =>
+                runs.map((run) => releaseRun(api, repo, path, workflow, run, blobOf)),
               ),
-          );
-          return runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-        }, was.releases);
+            );
+            return runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+          }, was.releases);
+        }
       } else {
         failed.add(repo);
         if (shape[repo]) {
@@ -583,7 +657,7 @@ const flowKey = (flow: Flow) => `${flow.repo}\n${flow.path}`;
 const blobKey = (blob: BlobAsk) => `${blob.repo}\n${blob.oid}`;
 
 /** Things to ask for, each only once however often it is added. */
-function queue<T>(key: (one: T) => string): { add(one: T): void; take(max: number): T[] } {
+function queue<T>(key: (one: T) => string): { add(one: T): void; take(): T[] } {
   const seen = new Set<string>();
   const waiting: T[] = [];
   return {
@@ -593,7 +667,7 @@ function queue<T>(key: (one: T) => string): { add(one: T): void; take(max: numbe
         waiting.push(one);
       }
     },
-    take: (max) => waiting.splice(0, max),
+    take: () => waiting.splice(0),
   };
 }
 
@@ -617,15 +691,32 @@ function releaseFiles(
   });
 }
 
-/** Of a workflow's latest runs, the ones the page shows. */
-function shown(workflow: GqlWorkflow | "none" | "failed" | undefined): GqlRun[] {
+/**
+ * Of a workflow's latest runs, the ones the page shows, as far as they were read in full: the latest came with the
+ * workflow, another is in `extra` once it was asked for. `missing` are the node ids of the ones that weren't.
+ */
+function shown(
+  workflow: GqlWorkflow | "none" | "failed" | undefined,
+  extra: Map<string, GqlRun | undefined>,
+): { runs: GqlRun[]; missing: string[] } {
+  const runs: GqlRun[] = [];
+  const missing: string[] = [];
   if (typeof workflow !== "object") {
-    return [];
+    return { runs, missing };
   }
-  const runs = workflow.runs.nodes.filter((run) => run !== null);
-  return shownRuns(runs.map((run) => ({ id: run.databaseId, status: lower(run.checkSuite?.status), run }))).map(
-    (one) => one.run,
+  const recent = (workflow.recent?.nodes ?? []).filter((run) => run !== null);
+  const picked = shownRuns(
+    recent.map((run) => ({ id: run.databaseId, status: lower(run.checkSuite?.status), node: run.id })),
   );
+  for (const { node } of picked) {
+    const full = workflow.runs.nodes.find((run) => run?.id === node) ?? extra.get(node);
+    if (full) {
+      runs.push(full);
+    } else {
+      missing.push(node);
+    }
+  }
+  return { runs, missing };
 }
 
 function lower(word: string | null | undefined): string | null {

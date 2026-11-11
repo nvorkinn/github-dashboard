@@ -182,20 +182,25 @@ is never shown.
 
 ## Reading GitHub
 
-Everything on the page is read in one request to GitHub's GraphQL API (`web/src/github/graphql.ts`): at the start,
-on **Refresh**, every minute while the relay's events don't arrive, and every five minutes while they do. In between,
+Everything on the page is read through GitHub's GraphQL API (`web/src/github/graphql.ts`), in a handful of requests
+sent side by side: at the start, on **Refresh**, every minute while the relay's events don't arrive, and every five
+minutes while they do. In between,
 an event from the relay reads only what it names, through the REST API (`web/src/github/read.ts`). Both end in the
 same code, so a pull request reads the same either way.
 
-The one request asks for every repository the signed-in user reaches (what its row shows), and for the pull
-requests, checks, workflow files and release runs of the projects that aren't hidden. Of a hidden project nothing
+A read asks for every repository the signed-in user reaches (what its row shows), and for the pull requests, checks,
+workflow files and release runs of the projects that aren't hidden. GitHub answers the parts of one query one after
+another, so the read is one request for the list and one for every seven projects and every seven release
+workflows, all at once: about five requests and a second and a half for a dozen projects, where a single request
+took six seconds. Of a release workflow only the latest run is read in full; another run that the page shows (one
+still going behind it, or the last finished one while the latest is going) is asked for by itself after. Of a hidden project nothing
 but its row is read; showing it again reads it. A new repository is in the list of the next read, and so shows on
 the page by itself, within those one to five minutes or at once when GitHub's `repository` event arrives.
 
 GraphQL has no list of a repository's workflows: a workflow is asked for by its file, so the page has to know the
 release workflows' files before it asks. It learns them from each read and keeps them in the browser's local storage
-(names of projects and of workflow files, nothing else), which is what makes a reload one request as well. A first
-visit takes three, and a read that finds a new project, a new release workflow or a changed workflow file asks once
+(names of projects and of workflow files, nothing else), which is what lets a reload ask for everything at once as well. A first
+visit asks in three rounds, and a read that finds a new project, a new release workflow or a changed workflow file asks once
 or twice more for just that. More than 50 open pull requests in a project, 100 checks on a pull request or 100 jobs
 in a run don't fit into the answer and are read through the REST API.
 
