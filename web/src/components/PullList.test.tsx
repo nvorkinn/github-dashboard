@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, expect, test, vi } from "vitest";
 import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
 import { ActionsContext, CONFIRM_MS } from "./actions.tsx";
-import { PullList, sortChecks, sortPulls } from "./PullList.tsx";
+import { columnOf, PullList, sortChecks, sortPulls } from "./PullList.tsx";
 import { before, NOW, pull } from "./testing.ts";
 
 afterEach(() => {
@@ -15,7 +15,7 @@ const HOUR = 3_600_000;
 const checks = (...states: CheckState[]): Check[] =>
   states.map((state, index) => ({ name: `check ${index + 1}`, state, url: undefined }));
 
-/** The pull requests' numbers, in the order they are on the page. */
+/** The pull requests' numbers, in the order they are on the page: column by column, top to bottom in each. */
 function numbers(): string[] {
   return screen.getAllByRole("listitem").flatMap((item) => item.querySelector(".number")?.textContent ?? []);
 }
@@ -23,7 +23,7 @@ function numbers(): string[] {
 test("says so when there are none", () => {
   render(<PullList pulls={[]} now={NOW} />);
   expect(screen.getByText("No open pull requests")).toBeTruthy();
-  expect(screen.getByRole("heading").textContent).toBe("Open pull requests 0");
+  expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Pull requests 0");
 });
 
 test("draws a pull request", () => {
@@ -56,7 +56,7 @@ test("draws a pull request", () => {
   expect(within(row).getByText("No checks")).toBeTruthy();
   expect(within(row).queryByText("Draft")).toBeNull();
   expect(within(row).queryByText("Auto-merge")).toBeNull();
-  expect(screen.getByRole("heading").textContent).toBe("Open pull requests 1");
+  expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Pull requests 1");
 });
 
 test("does without an avatar when there is none", () => {
@@ -69,7 +69,7 @@ test("marks drafts and auto-merge", () => {
   expect(screen.getByText("Draft")).toBeTruthy();
   expect(screen.getByText("Auto-merge")).toBeTruthy();
   // A draft isn't ready to merge, whatever its branch is like.
-  expect(screen.queryByText("Ready to merge")).toBeNull();
+  expect(screen.queryByText("Ready to merge", { selector: ".chip" })).toBeNull();
 });
 
 test("says how the merge stands", () => {
@@ -160,23 +160,49 @@ test("starts with the newest first and reorders on request", () => {
   render(<PullList now={NOW} pulls={MIXED} />);
   const select = screen.getByLabelText("Order") as HTMLSelectElement;
   expect(select.value).toBe("newest");
-  expect(numbers()).toEqual(["#6", "#5", "#4", "#3", "#2", "#1"]);
-
-  fireEvent.change(select, { target: { value: "attention" } });
-  expect(numbers()).toEqual(["#5", "#4", "#3", "#2", "#6", "#1"]);
+  // Ready to merge, in progress, needs attention: the order holds within each column.
+  expect(numbers()).toEqual(["#6", "#1", "#3", "#2", "#5", "#4"]);
 
   fireEvent.change(select, { target: { value: "oldest" } });
-  expect(numbers()).toEqual(["#1", "#2", "#3", "#4", "#5", "#6"]);
+  expect(numbers()).toEqual(["#1", "#6", "#2", "#3", "#4", "#5"]);
 });
 
 test("remembers the chosen order", () => {
   render(<PullList now={NOW} pulls={MIXED} />);
-  fireEvent.change(screen.getByLabelText("Order"), { target: { value: "attention" } });
+  fireEvent.change(screen.getByLabelText("Order"), { target: { value: "oldest" } });
   cleanup();
 
   render(<PullList now={NOW} pulls={MIXED} />);
-  expect((screen.getByLabelText("Order") as HTMLSelectElement).value).toBe("attention");
-  expect(numbers()[0]).toBe("#5");
+  expect((screen.getByLabelText("Order") as HTMLSelectElement).value).toBe("oldest");
+  expect(numbers()[0]).toBe("#1");
+});
+
+test("puts each pull request in the column of what it needs", () => {
+  expect(MIXED.map((one) => [one.number, columnOf(one)])).toEqual([
+    [1, "ready"],
+    [2, "progress"],
+    [3, "progress"],
+    [4, "attention"],
+    [5, "attention"],
+    [6, "ready"],
+  ]);
+  // A draft, a branch GitHub won't merge yet, or one it hasn't worked out, is still in progress.
+  expect(columnOf(pull({ draft: true }))).toBe("progress");
+  expect(columnOf(pull({ mergeState: "blocked" }))).toBe("progress");
+  expect(columnOf(pull({ mergeState: "unknown" }))).toBe("progress");
+  // A base that moved on wants the branch updated, which is someone's to do.
+  expect(columnOf(pull({ mergeState: "behind" }))).toBe("attention");
+});
+
+test("draws the board's three columns, each with its count, and says None in an empty one", () => {
+  render(<PullList now={NOW} pulls={MIXED.slice(0, 3)} hiddenCount={2} />);
+  expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual([
+    "Ready to merge 1",
+    "In progress 2",
+    "Needs attention 0",
+  ]);
+  expect(screen.getByText("None")).toBeTruthy();
+  expect(screen.getByText("2 more in hidden projects")).toBeTruthy();
 });
 
 test("falls back to the newest first when what was remembered makes no sense", () => {
@@ -301,7 +327,7 @@ test("a confirmed merge shows while it runs, and then that it merged", async () 
 
   await finish();
   expect(screen.getByText("Merged")).toBeTruthy();
-  expect(screen.queryByText("Ready to merge")).toBeNull();
+  expect(screen.queryByText("Ready to merge", { selector: ".chip" })).toBeNull();
   expect(buttons()).toEqual([]);
 });
 

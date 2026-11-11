@@ -63,16 +63,44 @@ export function sortPulls(pulls: PullRequest[], order: PullOrder): PullRequest[]
   return sorted;
 }
 
-/** Every open pull request, of all projects, in one list. */
-export function PullList({ pulls, now }: { pulls: PullRequest[]; now: number }) {
+/**
+ * The board's three columns, by what a pull request needs: `ready` can be merged now, `attention` needs someone to
+ * fix it (a failed check, a conflict, a base that moved on), and `progress` is everything still under way.
+ */
+export type PullColumn = "ready" | "progress" | "attention";
+
+const COLUMNS: { value: PullColumn; label: string }[] = [
+  { value: "ready", label: "Ready to merge" },
+  { value: "progress", label: "In progress" },
+  { value: "attention", label: "Needs attention" },
+];
+
+export function columnOf(pull: PullRequest): PullColumn {
+  const checks = summarize(pull.checks);
+  if (checks === "failed" || pull.mergeState === "conflicts" || pull.mergeState === "behind") {
+    return "attention";
+  }
+  if (!pull.draft && pull.mergeState === "clean" && (checks === "passed" || checks === "none")) {
+    return "ready";
+  }
+  return "progress";
+}
+
+/**
+ * Every open pull request, of all projects, on a board of three columns by what each needs. The columns sit side by
+ * side where there is room for them and one under the other where there isn't.
+ */
+export function PullList({ pulls, now, hiddenCount = 0 }: { pulls: PullRequest[]; now: number; hiddenCount?: number }) {
   const [order, setOrder] = useState(rememberedOrder);
+  const sorted = sortPulls(pulls, order);
 
   return (
-    <section class="panel" aria-labelledby="pulls-heading">
+    <section class="panel pulls" aria-labelledby="pulls-heading">
       <div class="panel-heading">
         <h2 id="pulls-heading">
-          Open pull requests <span class="count">{pulls.length}</span>
+          Pull requests <span class="count">{pulls.length}</span>
         </h2>
+        {hiddenCount > 0 && <span class="quiet heading-note">{hiddenCount} more in hidden projects</span>}
         <label class="order">
           <span class="quiet">Order</span>
           <select
@@ -94,11 +122,27 @@ export function PullList({ pulls, now }: { pulls: PullRequest[]; now: number }) 
       {pulls.length === 0 ? (
         <p class="empty">No open pull requests</p>
       ) : (
-        <ul class="rows">
-          {sortPulls(pulls, order).map((pull) => (
-            <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} />
-          ))}
-        </ul>
+        <div class="board">
+          {COLUMNS.map(({ value, label }) => {
+            const these = sorted.filter((pull) => columnOf(pull) === value);
+            return (
+              <div key={value} class={`board-column column-${value}`}>
+                <h3 id={`column-${value}`}>
+                  {label} <span class="quiet">{these.length}</span>
+                </h3>
+                {these.length === 0 ? (
+                  <p class="column-empty quiet">None</p>
+                ) : (
+                  <ul class="cards" aria-labelledby={`column-${value}`}>
+                    {these.map((pull) => (
+                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} now={now} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </section>
   );
@@ -128,7 +172,7 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
   }
 }
 
-function PullRow({ pull: read, now }: { pull: PullRequest; now: number }) {
+export function PullRow({ pull: read, now }: { pull: PullRequest; now: number }) {
   const actions = useActions()?.pulls;
   const readFiles = useActions()?.files;
   const [doneState, setDone] = useState<Done | undefined>(undefined);

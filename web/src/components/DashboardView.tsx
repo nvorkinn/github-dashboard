@@ -101,12 +101,11 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
           {state.problem}
         </p>
       )}
-      <div class="overview">
-        <PullList pulls={pulls} now={now} />
-        <div class="activity">
-          <ReleaseList runs={releases} now={now} />
-          <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
-        </div>
+      {/* Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side. */}
+      <div class="stage">
+        <PullList pulls={pulls} now={now} hiddenCount={data.pulls.length - pulls.length} />
+        <ReleaseList runs={releases} now={now} />
+        <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
       </div>
     </>
   );
