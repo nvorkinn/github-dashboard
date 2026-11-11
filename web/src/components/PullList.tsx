@@ -3,6 +3,7 @@ import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles 
 import { summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
+import { ExternalLink } from "./ExternalLink.tsx";
 import type { Tone } from "./state.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
 
@@ -192,9 +193,9 @@ export function PullRow({ pull: read, now }: { pull: PullRequest; now: number })
         <span class="repo-label" title={pull.repo}>
           {shortName(pull.repo)}
         </span>
-        <a class="pull-title" href={pull.url}>
+        <ExternalLink class="pull-title" href={pull.url}>
           <span class="number">#{pull.number}</span> {pull.title}
-        </a>
+        </ExternalLink>
         <p class="meta">
           <span>{pull.author}</span>
           <span class="branches">
@@ -411,7 +412,7 @@ function FilesChanged({ pull, read }: { pull: PullRequest; read: ReadFiles }) {
           ))}
           {loaded.truncated && (
             <li class="file-more">
-              <a href={`${pull.url}/files`}>More files on GitHub</a>
+              <ExternalLink href={`${pull.url}/files`}>More files on GitHub</ExternalLink>
             </li>
           )}
         </ul>
@@ -498,7 +499,7 @@ function Checks({ checks }: { checks: Check[] }) {
             // Names can repeat (a matrix, a rerun), so the place in the list is part of the key.
             <li key={`${check.name}:${index}`} class={`tone-${tone}`}>
               <ToneIcon tone={tone} />
-              {check.url ? <a href={check.url}>{check.name}</a> : <span>{check.name}</span>}
+              {check.url ? <ExternalLink href={check.url}>{check.name}</ExternalLink> : <span>{check.name}</span>}
               <span class="check-state">{labelOf(check.state)}</span>
             </li>
           );

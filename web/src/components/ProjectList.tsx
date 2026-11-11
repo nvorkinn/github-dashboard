@@ -1,6 +1,7 @@
 import { type Project, promoteTag, type RunActions } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
+import { ExternalLink } from "./ExternalLink.tsx";
 import { RunAction } from "./RunAction.tsx";
 
 /**
@@ -38,9 +39,9 @@ export function ProjectList({
           {shown.map((project) => (
             <li key={project.repo} class="project">
               <div class="project-name">
-                <a href={project.url} title={project.repo}>
+                <ExternalLink href={project.url} title={project.repo}>
                   {project.name}
-                </a>
+                </ExternalLink>
                 {project.private && <span class="badge">Private</span>}
               </div>
               <div class="project-release">

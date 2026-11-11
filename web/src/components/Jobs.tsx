@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { Job, JobGraph, ReleaseRun, RunActions } from "../model.ts";
+import { ExternalLink } from "./ExternalLink.tsx";
 import { type Card, isLive, isTick, layoutGraph, pickShape } from "./graph_layout.ts";
 import { type Notice, RunAction } from "./RunAction.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
@@ -275,7 +276,7 @@ function JobChip({
   const live = isLive(job.state);
   const look = live ? " job-live" : isTick(job.state) ? " job-tick" : "";
   const text = <JobName name={job.name} matrix={matrix} />;
-  const name = job.url ? <a href={job.url}>{text}</a> : <span>{text}</span>;
+  const name = job.url ? <ExternalLink href={job.url}>{text}</ExternalLink> : <span>{text}</span>;
   return (
     <li class={`job tone-${tone}${look}`} title={labelOf(job.state)} {...(card ? { "data-card": card } : {})}>
       <ToneIcon tone={tone} />
