@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
+import { fakeDashboard, pull, ready } from "./components/testing.ts";
 import type { Call } from "./testing.ts";
 import { stubBackend, tokenAnswer } from "./testing.ts";
 
@@ -30,7 +31,7 @@ function signedIn(call: Call): Response {
 
 test("offers to sign in when signed out", async () => {
   stubBackend(signedOut);
-  render(<App auth={createAuth()} />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   const link = await screen.findByRole("link", { name: "Sign in with GitHub" });
   // Relative, so it also works where the page is served from a sub-path.
   expect(link.getAttribute("href")).toBe("api/auth/login");
@@ -40,7 +41,7 @@ test("offers to sign in when signed out", async () => {
 
 test("shows who is signed in", async () => {
   stubBackend(signedIn);
-  const { container } = render(<App auth={createAuth()} />);
+  const { container } = render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   expect(await screen.findByText("octocat")).toBeTruthy();
   expect(container.querySelector("img")?.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/583231");
   expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
@@ -49,7 +50,7 @@ test("shows who is signed in", async () => {
 
 test("signs out", async () => {
   const calls = stubBackend(signedIn);
-  render(<App auth={createAuth()} />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
   expect(await screen.findByRole("link", { name: "Sign in with GitHub" })).toBeTruthy();
   expect(screen.queryByText("octocat")).toBeNull();
@@ -58,7 +59,7 @@ test("signs out", async () => {
 
 test("says so when signing out didn't work", async () => {
   stubBackend((call) => (call.url === "/api/auth/logout" ? new Response(null, { status: 502 }) : signedIn(call)));
-  render(<App auth={createAuth()} />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Sign-out didn't work");
   expect(await screen.findByText("octocat")).toBeTruthy();
@@ -67,7 +68,7 @@ test("says so when signing out didn't work", async () => {
 test("says that a sign-in failed and offers another try", async () => {
   history.replaceState(null, "", "/?signin=failed");
   stubBackend(signedOut);
-  render(<App auth={createAuth()} />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   expect((await screen.findByRole("alert")).textContent).toContain("Sign-in didn't work");
   expect(screen.getByRole("link", { name: "Sign in with GitHub" })).toBeTruthy();
   expect(location.search).toBe("");
@@ -77,7 +78,7 @@ test("says so when the relay can't be reached", async () => {
   stubBackend(() => {
     throw new TypeError("network");
   });
-  render(<App auth={createAuth()} />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   expect((await screen.findByRole("alert")).textContent).toContain("Can't reach the sign-in service");
   expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).toBeNull();
 });
@@ -86,13 +87,87 @@ test("says so when GitHub doesn't tell who is signed in", async () => {
   stubBackend((call) =>
     call.url === "https://api.github.com/user" ? new Response(null, { status: 500 }) : signedIn(call),
   );
-  render(<App auth={createAuth()} />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   expect(await screen.findByText("Couldn't load your GitHub account")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
 });
 
 test("says so when it is the demo", async () => {
   stubBackend(signedOut);
-  render(<App auth={createAuth()} demo />);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} demo />);
   expect(await screen.findByRole("note")).toBeTruthy();
+});
+
+test("starts the dashboard once signed in, and not before", async () => {
+  stubBackend(signedOut);
+  const dashboard = fakeDashboard();
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  await screen.findByRole("link", { name: "Sign in with GitHub" });
+  expect(dashboard.start).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+  cleanup();
+
+  stubBackend(signedIn);
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  expect(await screen.findByText("Loading your projects…")).toBeTruthy();
+  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
+  expect(dashboard.stop).not.toHaveBeenCalled();
+});
+
+test("stops the dashboard on sign-out", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard(ready({ pulls: [pull({ title: "Somebody's work" })] }));
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  expect(await screen.findByText("Somebody's work")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+  await screen.findByRole("link", { name: "Sign in with GitHub" });
+  await waitFor(() => expect(dashboard.stop).toHaveBeenCalledOnce());
+  expect(screen.queryByText("Somebody's work")).toBeNull();
+});
+
+test("stops the dashboard when the page goes away", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard();
+  const { unmount } = render(<App auth={createAuth()} dashboard={dashboard} />);
+  await screen.findByText("Loading your projects…");
+  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
+  unmount();
+  await waitFor(() => expect(dashboard.stop).toHaveBeenCalledOnce());
+});
+
+test("draws what the dashboard has, as it changes", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard();
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  await screen.findByText("Loading your projects…");
+
+  dashboard.set(ready({ pulls: [pull({ title: "First" })] }));
+  expect(await screen.findByText("First")).toBeTruthy();
+  expect(screen.getByText(/^updated/, { selector: ".updated" })).toBeTruthy();
+
+  dashboard.set(ready({ pulls: [pull({ title: "Second" })] }, { problem: "GitHub didn't answer." }));
+  expect(await screen.findByText("Second")).toBeTruthy();
+  expect(screen.getByRole("alert").textContent).toBe("GitHub didn't answer.");
+
+  dashboard.set({ status: "failed", problem: "Not connected yet." });
+  expect(await screen.findByText("Not connected yet.")).toBeTruthy();
+});
+
+test("the Refresh button reads again and shows it", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard(ready());
+  let finish = () => {};
+  dashboard.refresh.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<App auth={createAuth()} dashboard={dashboard} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+  expect(dashboard.refresh).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("button", { name: "Refreshing…" })).toBeTruthy();
+  finish();
+  expect(await screen.findByRole("button", { name: "Refresh" })).toBeTruthy();
 });
