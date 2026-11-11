@@ -7,6 +7,7 @@ import { Icon, type IconName } from "./Icon.tsx";
 import { ProjectActions, ProjectList } from "./ProjectList.tsx";
 import { columnOf, PullList } from "./PullList.tsx";
 import { ReleaseList, shownRuns, sortRuns } from "./ReleaseList.tsx";
+import { RepositorySettings } from "./RepositorySettings.tsx";
 import "./Workspace.css";
 
 type Scope = string | undefined;
@@ -98,6 +99,8 @@ export function Workspace({
   const [scope, setScope] = useState<Scope>(undefined);
   const [tab, setTab] = useState<WorkspaceTab>("all");
   const [filter, setFilter] = useState("");
+  const [settingsRepo, setSettingsRepo] = useState<string>();
+  const repositoryConfig = useActions()?.repositories;
   const shown = projects.filter((project) => !hidden.has(project.repo));
 
   useEffect(() => {
@@ -286,10 +289,23 @@ export function Workspace({
           {selected && (
             <div class="workspace-intro-actions">
               <ExternalLink href={selected.url}>Open on GitHub</ExternalLink>
+              {repositoryConfig && (
+                <button
+                  type="button"
+                  aria-expanded={settingsRepo === selected.repo}
+                  onClick={() => setSettingsRepo(settingsRepo === selected.repo ? undefined : selected.repo)}
+                >
+                  Repository settings
+                </button>
+              )}
               {actions && <ProjectActions project={selected} actions={actions} />}
             </div>
           )}
         </header>
+
+        {selected && repositoryConfig && settingsRepo === selected.repo && (
+          <RepositorySettings key={selected.repo} repo={selected.repo} service={repositoryConfig} />
+        )}
 
         <section class="workspace-metrics" aria-label="Dashboard summary">
           <button

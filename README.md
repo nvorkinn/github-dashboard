@@ -72,15 +72,18 @@ The GitHub App (Settings, Developer settings, GitHub Apps):
 - Repository permissions: Actions write, Checks read, Commit statuses read, Contents write, Deployments write,
   Metadata read, Pull requests write; and Workflows write, needed only when a release points at a commit that changes
   workflow files. The page acts as the signed-in user, so the user needs the same access to the repository.
+  Repository configuration additionally needs Administration write access; accept the changed permissions on the
+  installation after updating the GitHub App. Repository configuration is read only for non-administrators.
 
 What each write is for (reading needs only read access to the same):
 
-| Permission (write) | Buttons that need it                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| Actions            | Re-run failed jobs and Re-run on a release run; Promote (starts the Promote workflow)  |
-| Contents           | Release (writes the notes and publishes); Merge on a pull request                      |
-| Deployments        | Approve and Reject on a run waiting for an environment (the user must be its reviewer) |
-| Pull requests      | Auto-merge and Update branch on a pull request                                         |
+| Permission (write) | Buttons that need it                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| Administration     | Repository settings and copying branch rules (Workspace → select a repository → Repository settings) |
+| Actions            | Re-run failed jobs and Re-run on a release run; Promote (starts the Promote workflow)                |
+| Contents           | Release (writes the notes and publishes); Merge on a pull request                                    |
+| Deployments        | Approve and Reject on a run waiting for an environment (the user must be its reviewer)               |
+| Pull requests      | Auto-merge and Update branch on a pull request                                                       |
 
 To sign in locally, start the relay with the four variables and `PUBLIC_URL=http://localhost:5173`, and open the
 page from `npm run dev`: Vite passes `/api` on to the relay, so the browser sees one origin. Without Vite, use
@@ -310,3 +313,39 @@ Pushing a `v*` tag by hand does the same for that tag. A release deploys nothing
 `main` takes changes only through pull requests, and requires one check, "Global PR Status". The All checks workflow
 completes it once every other workflow on the commit has passed; a new workflow that runs on pull requests has to be
 added to its list (`tests/workflows.test.ts` fails until it is).
+
+### Repository configuration
+
+In **Workspace**, select a repository and open **Repository settings**. This compact panel is separate from the
+pull request review overlay. It reads current values with `GET /repos/{owner}/{repo}` and saves only the changed
+field with `PATCH`: deleting branches after merging, auto-merge, and the three merge methods. Unknown values are
+unavailable, and at least one merge method must remain enabled. Administrator access is checked again before writes;
+GitHub remains the authority on App permissions, repository plans, and organization policy.
+
+**Copy Branch Rules** lists repositories accessible through the signed-in user's GitHub App installations, excluding
+the target. Preview reads all pages of classic protection rules through GraphQL (including wildcard patterns), and
+fetches full repository rulesets through REST, including inherited rules for context. The comparison shows additions,
+replacements and unchanged target rules. Nothing is selected automatically. Expand each comparison to review its
+current and proposed values, select individual changes, then explicitly confirm the destination before applying.
+Only matching classic patterns or repository rulesets with matching names and targets can be replaced; other target
+rules and inherited rules are preserved. A replacement intentionally replaces the entire selected rule.
+
+Names and patterns are preserved by default. The optional default-branch mapping changes only exact source default
+branch names, including exact `refs/heads/...` entries in ruleset includes/excludes. It never rewrites wildcard patterns;
+`~DEFAULT_BRANCH` continues to mean the destination's default. Mapping collisions block the affected rules.
+Overlapping classic patterns keep GitHub's precedence rules and should be reviewed before applying.
+
+Required check names and app identities must have been observed on the target default branch's current commit.
+A missing or inaccessible check history blocks the affected rule; the copier never drops checks or changes their
+required app. Run the checks there before copying. Actor IDs are retained only when verified in target protection
+allowances, target collaborators/teams, or existing target ruleset bypass actors. Teams are matched by identity, never
+by a coincidentally identical slug in another organization. Unverified apps, roles, or actors block copying rather than
+being substituted. Deployment requirements, inherited/non-branch rulesets, unknown rule types/parameters, undisclosed
+bypass lists, and actor lists beyond the first 100 entries are shown but blocked for manual configuration on GitHub.
+An incomplete source or target read blocks the whole operation rather than treating unread rules as absent.
+
+The copier rechecks the preview before writing and each target identity immediately before changing it. GitHub does
+not provide a transaction across rules. Writes run sequentially, stop on the first failure, and report applied, failed,
+and skipped items. Successful writes are retained; no automatic retry or rollback occurs. A response lost in transit
+may still represent an applied change, so the preview is consumed before writing. Settings and comparisons refresh
+afterward, including partial failures; make a fresh selection to continue. All tokens remain in page memory.
