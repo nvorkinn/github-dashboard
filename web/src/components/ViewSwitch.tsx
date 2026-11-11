@@ -4,9 +4,10 @@ import { useState } from "preact/hooks";
  * The two ways to lay out the dashboard. `stage`: pull requests, then running workflows, then the projects.
  * `lanes`: one lane per project, holding its own of each.
  */
-export type View = "stage" | "lanes";
+export type View = "stage" | "lanes" | "workspace";
 
 const VIEWS: { value: View; label: string; title: string }[] = [
+  { value: "workspace", label: "Workspace", title: "Repository command center with pull requests and workflow graphs" },
   { value: "stage", label: "Stage", title: "Pull requests, then running workflows, then projects" },
   { value: "lanes", label: "Lanes", title: "One lane per project" },
 ];

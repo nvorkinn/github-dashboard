@@ -7,6 +7,7 @@ import { ProjectList } from "./ProjectList.tsx";
 import { PullList } from "./PullList.tsx";
 import { ReleaseList } from "./ReleaseList.tsx";
 import type { LaneColumns, View } from "./ViewSwitch.tsx";
+import { Workspace } from "./Workspace.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
 export function useRefresh(dashboard: Dashboard): { refresh: () => void; pending: boolean } {
@@ -124,7 +125,9 @@ export function DashboardView({
           {state.problem}
         </p>
       )}
-      {view === "lanes" ? (
+      {view === "workspace" ? (
+        <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
+      ) : view === "lanes" ? (
         <LanesView
           projects={data.projects}
           pulls={pulls}
@@ -135,7 +138,6 @@ export function DashboardView({
           columns={laneColumns}
         />
       ) : (
-        // Pull requests first, then what is running, then the projects. On a wide screen the three stand side by side.
         <div class="stage">
           <PullList pulls={pulls} now={now} />
           <ReleaseList runs={releases} now={now} />
