@@ -4,6 +4,7 @@ import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
 import { useDashboardState, useNow } from "./components/hooks.ts";
+import { useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import type { Dashboard } from "./model.ts";
 
 /** The page: sign-in, and behind it the dashboard. Without `actions` the dashboard only shows. */
@@ -79,18 +80,20 @@ function SignedIn({ auth, dashboard, actions }: { auth: Auth; dashboard: Dashboa
   const state = useDashboardState(dashboard);
   const now = useNow();
   const { refresh, pending } = useRefresh(dashboard);
+  const [view, setView] = useView();
   return (
     <>
       <header class="top">
         <h1>GitHub dashboard</h1>
         <div class="top-controls">
+          <ViewSwitch view={view} onChange={setView} />
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
           <Account auth={auth} />
         </div>
       </header>
       <main>
         <ActionsContext.Provider value={actions}>
-          <DashboardView state={state} now={now} refresh={refresh} />
+          <DashboardView state={state} now={now} refresh={refresh} view={view} />
         </ActionsContext.Provider>
       </main>
     </>

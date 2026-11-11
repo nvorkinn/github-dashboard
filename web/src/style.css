@@ -1197,3 +1197,252 @@ button.action.secondary {
     min-height: 2rem;
   }
 }
+
+/* The view switch in the header: two buttons in one pill, the pressed one filled. */
+.view-switch {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.view-switch button {
+  min-height: 1.75rem;
+  padding: 0 0.875rem;
+  font-weight: 500;
+  color: var(--quiet);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+}
+
+.view-switch button[aria-pressed="true"] {
+  font-weight: 650;
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 1px 3px light-dark(rgb(16 24 40 / 0.12), rgb(0 0 0 / 0.4));
+}
+
+/* Lanes: one band per project, its head, its runs and its pull requests side by side where there is room. */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  overflow: hidden;
+}
+
+.lane:has(.release .tone-running) {
+  border-color: color-mix(in srgb, var(--running) 45%, var(--border));
+}
+
+.lane:has(.release .tone-waiting) {
+  border-color: color-mix(in srgb, var(--waiting) 55%, var(--border));
+}
+
+.lane-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 1rem 1.125rem;
+  background: var(--surface);
+}
+
+.lane-head h2 {
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+}
+
+.lane-release {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.lane-actions {
+  margin-top: 0.25rem;
+}
+
+.lane-runs,
+.lane-pulls {
+  min-width: 0;
+  padding: 1rem 1.125rem;
+}
+
+/* Its pull request cards take the narrow arrangement when the lane is narrow (see the board's container query). */
+.lane-pulls {
+  container-type: inline-size;
+}
+
+.lane-pulls h3 {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--quiet);
+}
+
+/* Inside a lane, the project's name is said once, at its head. */
+.lane-pulls .repo-label {
+  display: none;
+}
+
+/* Cards inside a lane sit on the lane, not on the page. */
+.lane .rows > li,
+.lane .cards > li {
+  background: var(--background);
+  box-shadow: none;
+}
+
+.lane-note {
+  font-size: 0.875rem;
+}
+
+/* A lane with nothing going on: one thin row. */
+.lane-quiet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.lane-quiet .lane-head {
+  flex: 1 1 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 1rem;
+  padding-block: 0.625rem;
+}
+
+.lane-quiet .lane-actions {
+  margin: 0 0 0 auto;
+  padding: 0;
+}
+
+.lane-quiet .lane-note {
+  padding: 0.625rem 1.125rem;
+}
+
+.dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.dock h2 {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--quiet);
+}
+
+.dock ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dock-project {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.dock-name {
+  font-weight: 600;
+}
+
+/* Wide enough for a lane's three parts side by side: head, runs, pull requests. */
+@media (min-width: 62rem) {
+  .lane:not(.lane-quiet) {
+    grid-template-columns: 13rem minmax(0, 1.25fr) minmax(0, 1fr);
+  }
+
+  .lane:not(.lane-quiet) .lane-pulls {
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* A big screen: the lanes become columns side by side, each its head over its runs over its pull requests, and the
+   dock a slim column at the end. More lanes than fit scroll sideways. */
+@media (min-width: 100rem) {
+  .lanes {
+    flex-direction: row;
+    align-items: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+
+  .lane:not(.lane-quiet) {
+    flex: 1 0 24rem;
+    grid-template-columns: minmax(0, 1fr);
+    max-height: calc(100dvh - 7rem);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .lane:not(.lane-quiet) .lane-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .lane:not(.lane-quiet) .lane-pulls {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .lane-quiet {
+    flex: 0 0 15rem;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lanes > .lane-quiet > .lane-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .lane-quiet .lane-actions {
+    margin: 0.25rem 0 0;
+  }
+
+  .dock {
+    flex: 0 0 13rem;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dock ul {
+    flex-direction: column;
+  }
+
+  .dock-project {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    padding-block: 0.375rem;
+    text-align: left;
+  }
+}
