@@ -3,12 +3,15 @@ name: Release
 # Shown on the GitHub dashboard among the running releases.
 # dashboard: release
 
-# Publishes the image home-stack runs: ghcr.io/nvorkinn/github-dashboard:<tag>, for amd64 and arm64, and the GitHub
-# Release for the tag with the image's digest in it. Nothing is deployed from here: home-stack pins the image by tag
-# and digest, and moving that pin is the deploy.
+# Publishes the image for amd64 and arm64. A push to main publishes ghcr.io/nvorkinn/github-dashboard:main, which
+# home-stack runs, and then starts home-stack's Deploy workflow, which pulls it. A v* tag publishes :<tag> and :latest
+# and the GitHub Release for the tag with the image's digest in it, and deploys nothing.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+    # Not evaluated for tags, so every tag still releases.
+    paths-ignore: ["**.md"]
   # The "Run workflow" button (Actions > Release): tags the head of main with the next version after the
   # latest v* tag, then releases it in this same run. A tag pushed with the workflow's own token starts no
   # second run.
@@ -22,6 +25,11 @@ on:
 
 permissions:
   contents: read
+
+# One run per ref at a time, so an older push to main can't move :main after a newer one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -62,10 +70,16 @@ jobs:
       - name: Extract tag
         id: tag
         run: |
-          # The tag just made by the button, else the pushed tag.
-          tag="${NEXT_TAG:-${GITHUB_REF#refs/tags/}}"
-          # It becomes the image's tag, so keep it to what a registry accepts.
-          [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
+          # The tag just made by the button, else the pushed tag, else main for a push to main.
+          if [ -n "${NEXT_TAG:-}" ]; then
+            tag="$NEXT_TAG"
+          elif [ "$GITHUB_REF" = refs/heads/main ]; then
+            tag=main
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+            # It becomes the image's tag, so keep it to what a registry accepts.
+            [[ "$tag" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Unsupported tag: $tag" >&2; exit 1; }
+          fi
           echo "value=$tag" >> "$GITHUB_OUTPUT"
 
   # One build per architecture, side by side, each on a runner of its own architecture (no emulation): amd64 for the x86
@@ -159,7 +173,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # The architectures joined into one multi-platform tag: the release's, and latest.
+  # The architectures joined into one multi-platform tag: main, or the release's and latest.
   image:
     needs: [tag, build]
     runs-on: ubuntu-latest
@@ -191,15 +205,18 @@ jobs:
         id: join
         working-directory: ${{ runner.temp }}/digests
         run: |
+          # main's build is only :main; a release also moves :latest.
+          tags=(--tag "$IMAGE:$TAG")
+          [ "$TAG" = main ] || tags+=(--tag "$IMAGE:latest")
           # shellcheck disable=SC2046  # one argument per digest file
-          docker buildx imagetools create --tag "$IMAGE:$TAG" --tag "$IMAGE:latest" $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools create "${tags[@]}" $(printf "$IMAGE@sha256:%s " *)
           docker buildx imagetools inspect "$IMAGE:$TAG"
           # The digest of the multi-platform index, which is what a pin by digest names.
           digest="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for $IMAGE:$TAG: $digest" >&2; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
-            echo "Pushed, for home-stack's compose.yaml:"
+            echo "Pushed:"
             echo
             echo '```'
             echo "$IMAGE:$TAG@$digest"
@@ -207,9 +224,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The GitHub Release for the tag: the image to pin, then the notes GitHub generates from the pull requests merged
-  # since the last one. It has no assets.
+  # since the last one. It has no assets. Not for main's build.
   github-release:
     needs: [tag, image]
+    if: needs.tag.outputs.value != 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -230,3 +248,20 @@ jobs:
           else
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --notes "$image"
           fi
+
+  # Main's build reaches the server: home-stack's Deploy workflow pulls :main and recreates the container. It runs there
+  # because the stack's secrets and the server's Docker are there. HOME_STACK_DEPLOY_TOKEN is a fine-grained token for
+  # nvorkinn/home-stack only, with Actions: read and write, which is all starting a workflow needs.
+  deploy:
+    needs: [tag, image]
+    if: needs.tag.outputs.value == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start home-stack's Deploy
+        env:
+          GH_TOKEN: ${{ secrets.HOME_STACK_DEPLOY_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::The HOME_STACK_DEPLOY_TOKEN secret isn't set"; exit 1; }
+          gh workflow run deploy.yml --repo nvorkinn/home-stack --ref main
+          echo "Started https://github.com/nvorkinn/home-stack/actions/workflows/deploy.yml" >> "$GITHUB_STEP_SUMMARY"
