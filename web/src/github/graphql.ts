@@ -280,11 +280,11 @@ export function queryFor(asked: Asked): string {
     fields.push(`w${index}: resource(url: ${quoted(workflowUrl(repo, path))}) { ... on Workflow {
     databaseId name state
     recent: runs(first: ${RECENT_RELEASES}, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { id databaseId checkSuite { status } } }
-    runs(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ${runFields(path, blob)} } }
+    runs(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ${runFields(path)} } }
   } }`);
   });
   asked.runs.forEach(({ path, id }, index) => {
-    fields.push(`n${index}: node(id: ${quoted(id)}) { ... on WorkflowRun { ${runFields(path, blob)} } }`);
+    fields.push(`n${index}: node(id: ${quoted(id)}) { ... on WorkflowRun { ${runFields(path)} } }`);
   });
   asked.blobs.forEach(({ repo, oid }, index) => {
     fields.push(`b${index}: ${repository(repo)} { object(oid: ${quoted(oid)}) { ... on Blob { text } } }`);
@@ -297,9 +297,13 @@ export function queryFor(asked: Asked): string {
   return [`query {\n  ${fields.join("\n  ")}\n}`, ...fragments].join("\n");
 }
 
-/** A run in full. The workflow file as it was at the run's commit says which job waits for which. */
-function runFields(path: string, blob: string): string {
-  return `...Run checkSuite { commit { oid file(path: ${quoted(path)}) { oid${blob} } } }`;
+/**
+ * A run in full. The workflow file as it was at the run's commit says which job waits for which; only which file it
+ * is, as it is nearly always the one the default branch has now, whose text comes with its project. The text of one
+ * that isn't is asked for by itself (`b<n>`).
+ */
+function runFields(path: string): string {
+  return `...Run checkSuite { commit { oid file(path: ${quoted(path)}) { oid } } }`;
 }
 
 /** `asked` as the requests to send side by side: the list, then a few projects or workflows in each. */

@@ -320,4 +320,9 @@ test("the query asks only for what it is asked, and writes names as GraphQL stri
   const flow = queryFor({ ...nothing, flows: [{ repo: "octo/app", path: ".github/workflows/my release.yml" }] });
   expect(flow).toContain('resource(url: "https://github.com/octo/app/actions/workflows/my%20release.yml")');
   expect(flow).toContain('file(path: ".github/workflows/my release.yml") { oid }');
+  // A run's file is asked for only by its id, also on a page that has just loaded: its text nearly always came
+  // with its project's files already.
+  expect(
+    queryFor({ ...nothing, flows: [{ repo: "octo/app", path: ".github/workflows/r.yml" }], texts: true }),
+  ).not.toContain("... on Blob");
 });
