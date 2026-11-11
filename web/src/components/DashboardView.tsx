@@ -4,6 +4,9 @@ import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
 import { LanesView } from "./LanesView.tsx";
 import { Workspace } from "./Workspace.tsx";
+import { ProjectList } from "./ProjectList.tsx";
+import { PullList } from "./PullList.tsx";
+import { ReleaseList } from "./ReleaseList.tsx";
 
 
 import type { LaneColumns, View } from "./ViewSwitch.tsx";
@@ -124,7 +127,9 @@ export function DashboardView({
           {state.problem}
         </p>
       )}
-      {view === "lanes" ? (
+      {view === "workspace" ? (
+        <Workspace projects={data.projects.filter((project) => !hidden.has(project.repo))} pulls={pulls} runs={releases} now={now} />
+      ) : view === "lanes" ? (
         <LanesView
           projects={data.projects}
           pulls={pulls}
@@ -135,7 +140,11 @@ export function DashboardView({
           columns={laneColumns}
         />
       ) : (
-        <Workspace projects={data.projects.filter((project) => !hidden.has(project.repo))} pulls={pulls} runs={releases} now={now} />
+        <div class="stage">
+          <PullList pulls={pulls} now={now} />
+          <ReleaseList runs={releases} now={now} />
+          <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
+        </div>
       )}
     </>
   );
