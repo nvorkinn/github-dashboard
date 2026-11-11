@@ -21,7 +21,7 @@ export type Notice = {
   url: string;
   /**
    * What the notice is about, such as `checks:owner/name:<sha>`. A later webhook with the same key is a repeat
-   * (GitHub delivering again, another job of the same run waiting, another failed check on the same commit).
+   * (GitHub delivering again, another failed check on the same commit).
    */
   key: string;
   /** Short plain text: the headline, then a link to each thing on github.com, one per line. */
@@ -83,12 +83,6 @@ const RULES: Record<string, Rule> = {
   check_suite: (repo, root) => checksFailed(repo, root, record(root.check_suite)),
   check_run: (repo, root) => checksFailed(repo, root, record(root.check_run)),
   workflow_run: releaseFinished,
-  workflow_job(repo, root) {
-    const job = record(root.workflow_job);
-    return root.action === "waiting"
-      ? releaseWaiting(repo, text(job.workflow_name), wholeNumber(job.run_id), wholeNumber(job.run_attempt))
-      : undefined;
-  },
   deployment_review(repo, root) {
     const run = record(root.workflow_run);
     return root.action === "requested"
@@ -167,9 +161,9 @@ function releaseFinished(repo: string, root: Record<string, unknown>): Notice | 
 }
 
 /**
- * A release run waiting for someone to approve a deployment. GitHub says so once per waiting job (`workflow_job`,
- * action `waiting`) and once per run (`deployment_review`, action `requested`), so the key is the run's attempt: one
- * notice per wait, however many jobs wait.
+ * A release run waiting for someone to approve a deployment: `deployment_review`, action `requested`, which GitHub
+ * sends only when an environment's reviewers are asked. A `workflow_job` with action `waiting` is no sign of it, as a
+ * job is also waiting while it has no runner yet. The key is the run's attempt: one notice per attempt.
  */
 function releaseWaiting(
   repo: string,
