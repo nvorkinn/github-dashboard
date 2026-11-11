@@ -1188,11 +1188,6 @@ button.action-confirm:hover:not(:disabled) {
     monospace;
 }
 
-.project-description {
-  grid-column: 1 / -1;
-  font-size: 0.8125rem;
-}
-
 .hidden-projects {
   display: flex;
   flex-wrap: wrap;

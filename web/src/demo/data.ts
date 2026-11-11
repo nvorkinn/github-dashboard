@@ -96,7 +96,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
     {
       repo: `${OWNER}/weather-station`,
       name: "weather-station",
-      description: "Reads the roof sensors and draws the charts",
       url: github("weather-station"),
       private: false,
       pushedAt: before(12 * MINUTE),
@@ -112,7 +111,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
     {
       repo: `${OWNER}/trail-maps`,
       name: "trail-maps",
-      description: "Offline hiking maps",
       url: github("trail-maps"),
       private: false,
       pushedAt: before(5 * HOUR),
@@ -124,7 +122,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
     {
       repo: `${OWNER}/home-ledger`,
       name: "home-ledger",
-      description: "Household bookkeeping",
       url: github("home-ledger"),
       private: true,
       pushedAt: before(26 * HOUR),
@@ -140,7 +137,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
     {
       repo: `${OWNER}/recipe-box`,
       name: "recipe-box",
-      description: undefined,
       url: github("recipe-box"),
       private: false,
       pushedAt: before(9 * DAY),
@@ -153,7 +149,6 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
     {
       repo: `${OWNER}/garden-sensors`,
       name: "garden-sensors",
-      description: "Firmware and gateway for the soil moisture probes",
       url: github("garden-sensors"),
       private: false,
       pushedAt: before(40 * MINUTE),

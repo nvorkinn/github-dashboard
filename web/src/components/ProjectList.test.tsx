@@ -84,7 +84,6 @@ test("draws a row per project, by name", () => {
         project({
           repo: "octocat/weather-station",
           name: "weather-station",
-          description: "Reads the roof sensors",
           latestRelease: {
             tag: "v2.4.1",
             url: "https://github.com/octocat/weather-station/releases/tag/v2.4.1",
@@ -114,7 +113,6 @@ test("draws a row per project, by name", () => {
     "https://github.com/octocat/weather-station/releases/tag/v2.4.1",
   );
   expect(within(weather).getByText("3d ago")).toBeTruthy();
-  expect(within(weather).getByText("Reads the roof sensors")).toBeTruthy();
 });
 
 test("a hidden project leaves the rows and waits under them to be shown again", () => {

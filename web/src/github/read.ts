@@ -23,7 +23,6 @@ export const PROMOTE_WORKFLOW = ".github/workflows/promote.yml";
 export type RawRepo = {
   full_name: string;
   name: string;
-  description: string | null;
   html_url: string;
   private: boolean;
   archived: boolean;
@@ -393,7 +392,6 @@ export function project(
   return {
     repo: repo.full_name,
     name: repo.name,
-    description: repo.description ?? undefined,
     url: repo.html_url,
     private: repo.private,
     pushedAt: repo.pushed_at ?? undefined,

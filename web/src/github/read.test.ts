@@ -121,7 +121,7 @@ test("projects are the installations' repositories, without archived ones, the l
     "user/installations/7/repositories": {
       total_count: 2,
       repositories: [
-        repo("octo/old", { pushed_at: "2026-01-01T00:00:00Z", description: null }),
+        repo("octo/old", { pushed_at: "2026-01-01T00:00:00Z" }),
         repo("octo/archived", { archived: true }),
       ],
     },
@@ -158,7 +158,6 @@ test("projects are the installations' repositories, without archived ones, the l
     {
       repo: "acme/new",
       name: "new",
-      description: "A sample",
       url: "https://github.com/acme/new",
       private: true,
       pushedAt: "2026-11-10T00:00:00Z",
@@ -173,7 +172,6 @@ test("projects are the installations' repositories, without archived ones, the l
     {
       repo: "octo/old",
       name: "old",
-      description: undefined,
       url: "https://github.com/octo/old",
       private: false,
       pushedAt: "2026-01-01T00:00:00Z",
