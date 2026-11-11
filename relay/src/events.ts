@@ -19,6 +19,8 @@ export type Change = {
   sha?: string;
   /** The id of the workflow run this is about. */
   run?: number;
+  /** That run's workflow file, such as `.github/workflows/release.yml`. */
+  path?: string;
 };
 
 /** Passes changes from the webhook endpoint to the event streams that are open at that moment. */

@@ -205,7 +205,7 @@ export type Dashboard = {
    * Says that something changed, as an event from the relay would, so that it is read again: such as after the page
    * itself merged a pull request. `kind` is a webhook's name and the rest says where, as in the relay's events.
    */
-  changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number }): void;
+  changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number; path?: string }): void;
   /** Calls `listener` with each notice that arrives while started; returns how to stop. Left out, none ever do. */
   onNotice?(listener: (notice: Notice) => void): () => void;
 };

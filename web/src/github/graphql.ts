@@ -7,7 +7,8 @@
  *
  * - every repository the signed-in user reaches through the app: what a project's row shows, nothing more;
  * - of each project that isn't hidden: its open pull requests with their checks, and its workflow files;
- * - of each release workflow: its latest runs with their jobs, pending approvals and workflow file.
+ * - of each release workflow: whether its latest runs finished, and the latest as its card shows it; of a run that
+ *   is going, asked for after, its jobs, pending approvals and workflow file.
  *
  * GraphQL has no list of a repository's workflows, so a workflow is asked for by its file's address on github.com,
  * and which files to ask for has to be known before asking: that is the `Shape`, which a read gives back for the
@@ -36,6 +37,7 @@ import {
   type RawStatus,
   RECENT_RELEASES,
   type ReadResult,
+  type ReleasePaths,
   refused,
   runJobs,
   runOf,
@@ -88,7 +90,11 @@ export type EverythingOptions = {
   parallel?: number | undefined;
 };
 
-export type EverythingResult = ReadResult & { shape: Shape };
+export type EverythingResult = ReadResult & {
+  shape: Shape;
+  /** Per project whose workflows could be read, its release workflows' files: for a read of changes to tell them by. */
+  releasePaths: ReleasePaths;
+};
 
 // The parts of GitHub's GraphQL answers that are used.
 type GqlRepo = {
@@ -155,7 +161,8 @@ type GqlRun = {
   url: string;
   createdAt: string;
   updatedAt: string;
-  pendingDeploymentRequests: {
+  /** Only of a run asked for with its details. */
+  pendingDeploymentRequests?: {
     nodes: ({ currentUserCanApprove: boolean; environment: { databaseId: number; name: string } } | null)[];
   } | null;
   checkSuite: {
@@ -163,8 +170,9 @@ type GqlRun = {
     conclusion: string | null;
     branch: { name: string } | null;
     creator: GqlActor;
-    commit: { oid: string; file: { oid: string; object?: GqlBlob } | null } | null;
-    checkRuns: { pageInfo: { hasNextPage: boolean }; nodes: (GqlJob | null)[] } | null;
+    /** These two only of a run asked for with its details. */
+    commit?: { oid: string; file: { oid: string; object?: GqlBlob } | null } | null;
+    checkRuns?: { pageInfo: { hasNextPage: boolean }; nodes: (GqlJob | null)[] } | null;
   } | null;
 };
 type GqlWorkflow = {
@@ -173,7 +181,7 @@ type GqlWorkflow = {
   state: string;
   /** Its latest runs, only as far as it takes to tell which of them the page shows. */
   recent: { nodes: ({ id: string; databaseId: number; checkSuite: { status: string } | null } | null)[] };
-  /** The latest of them in full, which is nearly always the only one shown. */
+  /** The latest of them as its card shows it, without its jobs. */
   runs: { nodes: (GqlRun | null)[] };
 };
 type GqlError = { type?: string; path?: (string | number)[]; message?: string };
@@ -204,15 +212,22 @@ const PULLS = `fragment Pulls on Repository {
   }
 }`;
 
+// A run as its card shows it.
 const RUN = `fragment Run on WorkflowRun {
   id databaseId displayTitle event url createdAt updatedAt
-  pendingDeploymentRequests(first: ${APPROVALS_PER_RUN}) {
-    nodes { currentUserCanApprove environment { databaseId name } }
-  }
   checkSuite {
     status conclusion
     branch { name }
     creator { __typename login }
+  }
+}`;
+
+// What only a run that is going shows: its jobs, and the environments it waits for.
+const GOING = `fragment Going on WorkflowRun {
+  pendingDeploymentRequests(first: ${APPROVALS_PER_RUN}) {
+    nodes { currentUserCanApprove environment { databaseId name } }
+  }
+  checkSuite {
     checkRuns(first: ${JOBS_PER_RUN}) {
       pageInfo { hasNextPage }
       nodes { databaseId name status conclusion permalink startedAt completedAt }
@@ -222,8 +237,8 @@ const RUN = `fragment Run on WorkflowRun {
 
 type Flow = { repo: string; path: string };
 type BlobAsk = { repo: string; oid: string };
-/** A run by its node id, with the path of its workflow's file. */
-type RunAsk = { repo: string; path: string; id: string };
+/** A run by its node id, with the path of its workflow's file. `going`: with its jobs, approvals and workflow file. */
+type RunAsk = { repo: string; path: string; id: string; going: boolean };
 
 /** What one request asks for. `texts`: with the workflow files' text, not only which files they are. */
 export type Asked = {
@@ -272,17 +287,21 @@ export function queryFor(asked: Asked): string {
   }`);
   });
   asked.flows.forEach(({ repo, path }, index) => {
-    // Of its latest runs the page shows the unfinished ones and the last finished one, which is nearly always just
-    // the latest. So only that one is asked for in full, with its jobs, and the others only for whether they
-    // finished; one of those that is shown after all is asked for by itself (`n<n>`).
+    // Of its latest runs the page shows the ones still going and, for a few minutes, the last one that finished.
+    // Most of the time that is nothing at all, so the workflow is asked only whether its latest runs finished,
+    // and for the latest as its card shows it. A run that is going is asked for by itself after (`n<n>`), with its
+    // jobs; so is one that just finished behind a run that is going.
     fields.push(`w${index}: resource(url: ${quoted(workflowUrl(repo, path))}) { ... on Workflow {
     databaseId name state
     recent: runs(first: ${RECENT_RELEASES}, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { id databaseId checkSuite { status } } }
-    runs(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ${runFields(path, blob)} } }
+    runs(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { ...Run } }
   } }`);
   });
-  asked.runs.forEach(({ path, id }, index) => {
-    fields.push(`n${index}: node(id: ${quoted(id)}) { ... on WorkflowRun { ${runFields(path, blob)} } }`);
+  asked.runs.forEach(({ path, id, going }, index) => {
+    // The workflow file as it was at the run's commit says which job waits for which; only which file it is, as its
+    // text is nearly always known already. The text of one that isn't is asked for by itself (`b<n>`).
+    const more = going ? ` ...Going checkSuite { commit { oid file(path: ${quoted(path)}) { oid } } }` : "";
+    fields.push(`n${index}: node(id: ${quoted(id)}) { ... on WorkflowRun { ...Run${more} } }`);
   });
   asked.blobs.forEach(({ repo, oid }, index) => {
     fields.push(`b${index}: ${repository(repo)} { object(oid: ${quoted(oid)}) { ... on Blob { text } } }`);
@@ -291,13 +310,9 @@ export function queryFor(asked: Asked): string {
     ...(asked.list ? [LISTED] : []),
     ...(asked.repos.length > 0 ? [PULLS] : []),
     ...(asked.flows.length + asked.runs.length > 0 ? [RUN] : []),
+    ...(asked.runs.some((run) => run.going) ? [GOING] : []),
   ];
   return [`query {\n  ${fields.join("\n  ")}\n}`, ...fragments].join("\n");
-}
-
-/** A run in full. The workflow file as it was at the run's commit says which job waits for which. */
-function runFields(path: string, blob: string): string {
-  return `...Run checkSuite { commit { oid file(path: ${quoted(path)}) { oid${blob} } } }`;
 }
 
 /** `asked` as the requests to send side by side: the list, then a few projects or workflows in each. */
@@ -466,12 +481,6 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
       if (isRefused) {
         troubled.add(flow.repo);
       }
-      for (const run of found?.runs.nodes ?? []) {
-        const file = run?.checkSuite?.commit?.file;
-        if (file) {
-          known(flow.repo, file.oid, file.object);
-        }
-      }
     });
     asked.runs.forEach((run, index) => {
       const answer = data[`n${index}`] as Partial<GqlRun> | null | undefined;
@@ -529,9 +538,9 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
     for (const [key, workflow] of workflows) {
       const [repo = "", path = ""] = key.split("\n");
       const { runs, missing } = shown(workflow, extraRuns);
-      for (const id of missing) {
+      for (const { id, going } of missing) {
         if (!extraRuns.has(id)) {
-          runQueue.add({ repo, path, id });
+          runQueue.add({ repo, path, id, going });
         }
       }
       for (const run of runs) {
@@ -550,6 +559,7 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
   });
   const failed = new Set<string>();
   const nextShape: Shape = {};
+  const releasePaths: ReleasePaths = {};
   const repos = [...listed.values()].sort((a, b) => (b.pushedAt ?? "").localeCompare(a.pushedAt ?? ""));
   const read = await Promise.all(
     repos.map(async (listedRepo) => {
@@ -613,6 +623,7 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
         );
         promoteWorkflow = active.find((one) => one.path === PROMOTE_WORKFLOW)?.workflow.databaseId;
         const names = new Set(releaseFiles(paths, repo, answer, blobOf));
+        releasePaths[repo] = [...names];
         const shownOf = active
           .filter((one) => names.has(one.path))
           .map((one) => ({ ...one, ...shown(one.workflow, extraRuns) }));
@@ -646,6 +657,7 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
     },
     problem: problemOf(failed),
     shape: nextShape,
+    releasePaths,
   };
 }
 
@@ -689,29 +701,38 @@ function releaseFiles(
   });
 }
 
+/** Whether a run is over, by its check suite's status. */
+function isFinished(status: string | null | undefined): boolean {
+  return status === "COMPLETED";
+}
+
 /**
- * Of a workflow's latest runs, the ones the page shows, as far as they were read in full: the latest came with the
- * workflow, another is in `extra` once it was asked for. `missing` are the node ids of the ones that weren't.
+ * Of a workflow's latest runs, the ones the page shows, as far as they were read: a finished one as its card shows
+ * it, which for the latest came with the workflow; one that is going with its jobs, which it has once it was asked
+ * for by itself and is in `extra`. `missing` are the ones still to ask for.
  */
 function shown(
   workflow: GqlWorkflow | "none" | "failed" | undefined,
   extra: Map<string, GqlRun | undefined>,
-): { runs: GqlRun[]; missing: string[] } {
+): { runs: GqlRun[]; missing: { id: string; going: boolean }[] } {
   const runs: GqlRun[] = [];
-  const missing: string[] = [];
+  const missing: { id: string; going: boolean }[] = [];
   if (typeof workflow !== "object") {
     return { runs, missing };
   }
   const recent = (workflow.recent?.nodes ?? []).filter((run) => run !== null);
   const picked = shownRuns(
-    recent.map((run) => ({ id: run.databaseId, status: lower(run.checkSuite?.status), node: run.id })),
+    recent.map((run) => ({ id: run.databaseId, status: lower(run.checkSuite?.status), node: run })),
   );
   for (const { node } of picked) {
-    const full = workflow.runs.nodes.find((run) => run?.id === node) ?? extra.get(node);
+    const going = !isFinished(node.checkSuite?.status);
+    const full = going
+      ? extra.get(node.id)
+      : (workflow.runs.nodes.find((run) => run?.id === node.id) ?? extra.get(node.id));
     if (full) {
       runs.push(full);
     } else {
-      missing.push(node);
+      missing.push({ id: node.id, going });
     }
   }
   return { runs, missing };
@@ -829,6 +850,10 @@ async function releaseRun(
     ...(suite?.commit ? { head_sha: suite.commit.oid } : {}),
     path,
   };
+  // A finished run shows as a link to it on GitHub; its jobs weren't asked for.
+  if (isFinished(suite?.status) || suite?.checkRuns === undefined) {
+    return runOf(repo, workflow, raw, [], undefined, []);
+  }
   const jobs: Job[] = suite?.checkRuns?.pageInfo.hasNextPage
     ? (await runJobs(api, repo, run.databaseId)).map(job)
     : (suite?.checkRuns?.nodes ?? [])

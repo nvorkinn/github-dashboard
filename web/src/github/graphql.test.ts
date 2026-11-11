@@ -28,7 +28,9 @@ test("a first visit asks three times: which projects, what is in them, and how t
   expect(problem).toBeUndefined();
   expect(data.projects.map((one) => one.repo)).toEqual(["octo/app", "octo/lib"]);
   expect(data.pulls.map((one) => one.number)).toEqual([1]);
-  expect(data.releases).toMatchObject([{ id: 4, workflow: "Release", jobs: [{ id: 41 }] }]);
+  // It has finished: a link to it is all it shows, so its jobs aren't read.
+  expect(data.releases).toMatchObject([{ id: 4, workflow: "Release", state: "passed", jobs: [] }]);
+  expect(queries.join("\n")).not.toContain("checkRuns");
   // Which workflows to ask about next time: only names.
   expect(shape).toEqual({ "octo/app": [".github/workflows/3.yml"], "octo/lib": [] });
 });
@@ -96,7 +98,7 @@ test("a workflow file that changed is read once more, and a new release workflow
   expect(shape["octo/app"]).toEqual([".github/workflows/3.yml", ".github/workflows/5.yml"]);
 });
 
-test("only the latest run comes in full; another one that is shown is asked for by itself", async () => {
+test("a run's jobs are read only while it is going, by asking for that run by itself", async () => {
   const routes = account("octo/app");
   withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
     { id: 9, status: "in_progress", conclusion: null, jobs: [job(91, { status: "in_progress", conclusion: null })] },
@@ -106,12 +108,16 @@ test("only the latest run comes in full; another one that is shown is asked for 
   const { auth, queries } = fakeGitHub(routes);
   const { data, problem } = await readEverything(auth);
   expect(problem).toBeUndefined();
-  // The run under way, and the last one that finished.
+  // The run under way with its jobs, and the last one that finished without.
   expect(data.releases.map((one) => [one.id, one.jobs.map((each) => each.id)])).toEqual([
     [9, [91]],
-    [8, [81]],
+    [8, []],
   ]);
-  expect(queries.at(-1)).toContain('n0: node(id: "RUN:octo/app:3:8")');
+  expect(queries.at(-1)).toMatch(
+    /n0: node\(id: "RUN:octo\/app:3:9"\) \{ \.\.\. on WorkflowRun \{ \.\.\.Run \.\.\.Going/,
+  );
+  // The one that finished behind it, only as its card shows it.
+  expect(queries.at(-1)).toContain('n1: node(id: "RUN:octo/app:3:8") { ... on WorkflowRun { ...Run } }');
   expect(queries.join("\n")).not.toContain("RUN:octo/app:3:7");
 
   // Once it has finished it is the only one shown, and nothing more is asked.
@@ -210,10 +216,12 @@ test("what doesn't fit into the answer is read through the REST API", async () =
   withPull(routes, "octo/app", 1);
   withPull(routes, "octo/app", 2);
   withPull(routes, "octo/lib", 3, { checkRuns: [{ name: "all of them", status: "completed", conclusion: "success" }] });
-  withWorkflow(routes, "octo/lib", { id: 3, name: "Release" }, [{ id: 4, jobs: [job(41), job(42)] }]);
+  withWorkflow(routes, "octo/lib", { id: 3, name: "Release" }, [
+    { id: 4, status: "in_progress", conclusion: null, jobs: [job(41), job(42)] },
+  ]);
   const { auth, calls } = altered(routes, (data) => {
     for (const [name, field] of Object.entries(data)) {
-      if (!/^[rw]\d+$/.test(name) || !field) {
+      if (!/^[rn]\d+$/.test(name) || !field) {
         continue;
       }
       // octo/app has more open pull requests than one answer holds.
@@ -227,8 +235,8 @@ test("what doesn't fit into the answer is read through the REST API", async () =
           one.statusCheckRollup.contexts = { pageInfo: { hasNextPage: true }, nodes: [] };
         }
       }
-      for (const run of field.runs?.nodes ?? []) {
-        run.checkSuite.checkRuns = { pageInfo: { hasNextPage: true }, nodes: [run.checkSuite.checkRuns.nodes[0]] };
+      if (field.checkSuite?.checkRuns) {
+        field.checkSuite.checkRuns = { pageInfo: { hasNextPage: true }, nodes: [field.checkSuite.checkRuns.nodes[0]] };
       }
     }
   });
@@ -319,5 +327,13 @@ test("the query asks only for what it is asked, and writes names as GraphQL stri
 
   const flow = queryFor({ ...nothing, flows: [{ repo: "octo/app", path: ".github/workflows/my release.yml" }] });
   expect(flow).toContain('resource(url: "https://github.com/octo/app/actions/workflows/my%20release.yml")');
-  expect(flow).toContain('file(path: ".github/workflows/my release.yml") { oid }');
+  // Of a workflow only whether its runs finished, and the latest as its card shows it: no jobs.
+  expect(flow).not.toContain("checkRuns");
+  expect(flow).not.toContain("fragment Going");
+  const going = queryFor({
+    ...nothing,
+    runs: [{ repo: "octo/app", path: ".github/workflows/my release.yml", id: "WFR_1", going: true }],
+  });
+  expect(going).toContain('file(path: ".github/workflows/my release.yml") { oid }');
+  expect(going).toContain("fragment Going");
 });

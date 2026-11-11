@@ -261,8 +261,11 @@ test.each<[string, string, unknown, Change]>([
   [
     "workflow run: head, pull request and run",
     "workflow_run",
-    { action: "requested", workflow_run: { id: 4242, head_sha: SHA, pull_requests: [{ number: 2 }] } },
-    { kind: "workflow_run", action: "requested", pull: 2, sha: SHA, run: 4242 },
+    {
+      action: "requested",
+      workflow_run: { id: 4242, head_sha: SHA, pull_requests: [{ number: 2 }], path: ".github/workflows/release.yml" },
+    },
+    { kind: "workflow_run", action: "requested", pull: 2, sha: SHA, run: 4242, path: ".github/workflows/release.yml" },
   ],
   [
     "workflow job: head and the run it belongs to",
@@ -308,7 +311,7 @@ test.each<[string, string, unknown, Change]>([
       action: 1,
       repository: { full_name: ["nvorkinn/home-stack"] },
       pull_request: { number: "12", head: { sha: 12 } },
-      workflow_run: { id: "4242", head_sha: "not a sha", pull_requests: "none" },
+      workflow_run: { id: "4242", head_sha: "not a sha", pull_requests: "none", path: 7 },
       workflow_job: { run_id: 1.5, head_sha: null },
     },
     { kind: "workflow_run" },

@@ -141,7 +141,7 @@ async function readBody(c: Context, limit: number): Promise<Buffer | undefined> 
 
 /**
  * What the pages are told about one webhook: its event name and, where the payload has them in the expected type,
- * the repository, the action, the pull request, the head commit and the workflow run. Each value is copied out by
+ * the repository, the action, the pull request, the head commit, the workflow run and its workflow file's path. Each value is copied out by
  * name; the payload itself, and anything else in it, goes no further.
  */
 export function changeFrom(kind: string, payload: unknown): Change {
@@ -191,6 +191,12 @@ export function changeFrom(kind: string, payload: unknown): Change {
   const run = wholeNumber(workflowRun.id) ?? wholeNumber(workflowJob.run_id);
   if (run !== undefined) {
     change.run = run;
+  }
+
+  // The run's workflow file, by which the page knows a release from CI without asking GitHub.
+  const path = text(workflowRun.path);
+  if (path !== undefined) {
+    change.path = path;
   }
 
   return change;

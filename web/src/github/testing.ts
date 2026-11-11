@@ -240,7 +240,7 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     return (await get(`repos/${repo}/actions/workflows/${workflowId}/runs`))?.workflow_runs ?? [];
   }
 
-  async function workflow(repo: string, path: string, withText: boolean): Promise<Json> {
+  async function workflow(repo: string, path: string): Promise<Json> {
     const workflows: Json[] = (await get(`repos/${repo}/actions/workflows`))?.workflows ?? [];
     const found = workflows.find((one) => one.path === path);
     if (!found) {
@@ -258,18 +258,39 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
           checkSuite: { status: upper(run.status) },
         })),
       },
-      runs: { nodes: await Promise.all(runs.slice(0, 1).map((run) => runNode(repo, found.id, path, run, withText))) },
+      // As its card shows it: no jobs.
+      runs: { nodes: await Promise.all(runs.slice(0, 1).map((run) => runNode(repo, found.id, path, run, false))) },
     };
   }
 
   /** One run in full, asked for by its node id. */
-  async function runById(id: string, path: string, withText: boolean): Promise<Json> {
+  async function runById(id: string, path: string, going: boolean): Promise<Json> {
     const [, repo = "", workflowId = "", number = ""] = id.split(":");
     const run = (await runsOf(repo, Number(workflowId))).find((one) => String(one.id) === number);
-    return run ? runNode(repo, Number(workflowId), path, run, withText) : null;
+    return run ? runNode(repo, Number(workflowId), path, run, going) : null;
   }
 
-  async function runNode(repo: string, workflowId: number, path: string, run: Json, withText: boolean): Promise<Json> {
+  /** A run as its card shows it; with `going`, also its jobs, approvals and workflow file. */
+  async function runNode(repo: string, workflowId: number, path: string, run: Json, going: boolean): Promise<Json> {
+    const actor = run.triggering_actor ?? run.actor;
+    const card = {
+      id: runId(repo, workflowId, run),
+      databaseId: run.id,
+      displayTitle: run.display_title ?? null,
+      event: run.event,
+      url: run.html_url,
+      createdAt: run.created_at,
+      updatedAt: run.updated_at,
+      checkSuite: {
+        status: upper(run.status),
+        conclusion: upper(run.conclusion),
+        branch: run.head_branch ? { name: run.head_branch } : null,
+        creator: actor ? { __typename: "User", login: actor.login } : null,
+      },
+    };
+    if (!going) {
+      return card;
+    }
     {
       const jobs: Json[] = (await get(`repos/${repo}/actions/runs/${run.id}/jobs`))?.jobs ?? [];
       const pending: Json[] =
@@ -282,15 +303,8 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
       const file = run.head_sha
         ? await get(`repos/${repo}/contents/${path}?ref=${run.head_sha}`).catch(() => undefined)
         : undefined;
-      const actor = run.triggering_actor ?? run.actor;
       return {
-        id: runId(repo, workflowId, run),
-        databaseId: run.id,
-        displayTitle: run.display_title ?? null,
-        event: run.event,
-        url: run.html_url,
-        createdAt: run.created_at,
-        updatedAt: run.updated_at,
+        ...card,
         pendingDeploymentRequests: {
           nodes: pending.map((one) => ({
             currentUserCanApprove: one.current_user_can_approve,
@@ -298,11 +312,8 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
           })),
         },
         checkSuite: {
-          status: upper(run.status),
-          conclusion: upper(run.conclusion),
-          branch: run.head_branch ? { name: run.head_branch } : null,
-          creator: actor ? { __typename: "User", login: actor.login } : null,
-          commit: { oid: run.head_sha ?? `head${run.id}`, file: file ? blobOf(text(file), withText) : null },
+          ...card.checkSuite,
+          commit: { oid: run.head_sha ?? `head${run.id}`, file: file ? blobOf(text(file), false) : null },
           checkRuns: {
             pageInfo: { hasNextPage: false },
             nodes: jobs.map((one) => ({
@@ -343,16 +354,16 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     )) {
       await field(alias ?? "", () => details(`${owner}/${name}`, treeText));
     }
-    for (const [, alias, repo, file, more] of query.matchAll(
+    for (const [, alias, repo, file] of query.matchAll(
       /^\s*(w\d+): resource\(url: "https:\/\/github\.com\/([^/"]+\/[^/"]+)\/actions\/workflows\/([^"]+)"\)([\s\S]*?)\n {2}\} \}/gm,
     )) {
       const path = `.github/workflows/${decodeURIComponent(file ?? "")}`;
-      await field(alias ?? "", () => workflow(repo ?? "", path, (more ?? "").includes("{ oid object")));
+      await field(alias ?? "", () => workflow(repo ?? "", path));
     }
-    for (const [, alias, id, path, more] of query.matchAll(
-      /^\s*(n\d+): node\(id: "([^"]+)"\)[^\n]*file\(path: "([^"]+)"\) \{ oid( object)?/gm,
+    for (const [, alias, id, path] of query.matchAll(
+      /^\s*(n\d+): node\(id: "([^"]+)"\) \{ \.\.\. on WorkflowRun \{ \.\.\.Run(?: \.\.\.Going[^\n]*file\(path: "([^"]+)"\))?/gm,
     )) {
-      await field(alias ?? "", () => runById(id ?? "", path ?? "", more !== undefined));
+      await field(alias ?? "", () => runById(id ?? "", path ?? "", path !== undefined));
     }
     for (const [, alias, oid] of query.matchAll(/^\s*(b\d+): repository\([^)]*\) \{ object\(oid: "([0-9a-f]*)"\)/gm)) {
       data[alias ?? ""] = { object: { text: Buffer.from(oid ?? "", "hex").toString("utf8") } };
