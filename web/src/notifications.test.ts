@@ -111,7 +111,9 @@ test("the browser's notifications are used only once allowed", () => {
 
   FakeNotification.permission = "granted";
   notifier.notify({ ...merged, key: "another" });
-  expect(made).toEqual([["Pull request merged", { body: merged.headline, tag: "another" }]]);
+  expect(made).toEqual([
+    ["Pull request merged", { body: merged.headline, tag: "another", icon: "/apple-touch-icon.png" }],
+  ]);
 });
 
 test("settings default to every kind, and keep what was chosen in this browser", () => {
