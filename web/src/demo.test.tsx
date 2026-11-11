@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
-import { createDemoDashboard } from "./demo/dashboard.ts";
+import { createDemoDashboard, demoPullActions } from "./demo/dashboard.ts";
 import { installDemo } from "./demo.ts";
 
 const realFetch = globalThis.fetch;
@@ -85,6 +85,36 @@ test("the page on the demo shows the sample dashboard", async () => {
   expect(screen.getByText("no release yet")).toBeTruthy();
   expect(screen.getByText("Private")).toBeTruthy();
   expect(screen.getByText("Live")).toBeTruthy();
+  unmount();
+});
+
+test("the page on the demo can act on its pull requests, and shows one action failing", async () => {
+  globalThis.fetch = vi.fn();
+  const auth = createAuth();
+  installDemo({ onSignIn: () => void auth.start() });
+  const dashboard = createDemoDashboard({ show: "offline" });
+  const pulls = demoPullActions(dashboard);
+  const { unmount } = render(<App auth={auth} dashboard={dashboard} actions={pulls ? { pulls } : {}} demo />);
+
+  const row = (title: string) => {
+    const item = screen.getByText(title, { exact: false }).closest("li");
+    if (!item) {
+      throw new Error(`No row for ${title}`);
+    }
+    return within(item);
+  };
+  await screen.findByText("Add a README");
+  fireEvent.click(row("Add a README").getByRole("button", { name: "Auto-merge" }));
+  expect(row("Add a README").getByRole("button", { name: "Turning on…" })).toBeTruthy();
+  expect((await row("Add a README").findByRole("alert", {}, { timeout: 3000 })).textContent).toContain(
+    "Auto-merge is off for this repository",
+  );
+
+  fireEvent.click(row("Rework the elevation profile").getByRole("button", { name: "Update branch" }));
+  await waitFor(() => expect(row("Rework the elevation profile").queryByText("Behind base")).toBeNull(), {
+    timeout: 3000,
+  });
+  expect(row("Rework the elevation profile").getByText("Running", { selector: "summary .chip" })).toBeTruthy();
   unmount();
 });
 

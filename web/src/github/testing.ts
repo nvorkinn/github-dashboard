@@ -4,13 +4,23 @@ import type { Change, Connect, EventStream } from "./events.ts";
 /** What a fake GitHub answers for a path: JSON, or a function for anything else (an error, headers, a delay). */
 export type Routes = Record<string, unknown>;
 
+/** A request the fake GitHub was sent: its method, path, and body read as JSON. */
+export type SentRequest = { method: string; path: string; body: unknown };
+
 /**
  * An `Auth` whose `github` answers from `routes`, keyed by the path as asked for (query included) or, failing that,
- * the path without its query. Anything else is a 404. `calls` are the paths asked for so far and `peak` the most
- * requests that were under way at once.
+ * the path without its query; a write is keyed by its method and path, such as `PUT repos/o/r/pulls/1/merge`.
+ * Anything else is a 404. `calls` are the paths asked for so far, `requests` everything about each, and `peak` the
+ * most requests that were under way at once.
  */
-export function fakeGitHub(routes: Routes): { auth: Auth; calls: string[]; peak: () => number } {
+export function fakeGitHub(routes: Routes): {
+  auth: Auth;
+  calls: string[];
+  requests: SentRequest[];
+  peak: () => number;
+} {
   const calls: string[] = [];
+  const requests: SentRequest[] = [];
   let running = 0;
   let peak = 0;
   const auth: Auth = {
@@ -18,12 +28,15 @@ export function fakeGitHub(routes: Routes): { auth: Auth; calls: string[]; peak:
     subscribe: () => () => {},
     start: async () => {},
     signOut: async () => true,
-    async github(path) {
+    async github(path, init) {
       calls.push(path);
+      const method = init?.method ?? "GET";
+      requests.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       running++;
       peak = Math.max(peak, running);
       try {
-        const route = path in routes ? routes[path] : routes[path.split("?")[0] ?? path];
+        const key = method === "GET" ? path : `${method} ${path}`;
+        const route = key in routes ? routes[key] : routes[key.split("?")[0] ?? key];
         if (route === undefined) {
           return Response.json({ message: "Not Found" }, { status: 404 });
         }
@@ -35,7 +48,7 @@ export function fakeGitHub(routes: Routes): { auth: Auth; calls: string[]; peak:
       }
     },
   };
-  return { auth, calls, peak: () => peak };
+  return { auth, calls, requests, peak: () => peak };
 }
 
 // Answers shaped like GitHub's, cut down to what the dashboard reads plus a little it must ignore.
@@ -72,6 +85,7 @@ export function pull(fullName: string, number: number, more: Record<string, unkn
     mergeable: true,
     mergeable_state: "clean",
     auto_merge: null,
+    node_id: `PR_node${number}`,
     ...more,
   };
 }
@@ -118,6 +132,13 @@ export function account(...fullNames: string[]): Routes {
     },
   };
   for (const name of fullNames) {
+    // Its own page has the merge settings, which the list leaves out.
+    routes[`repos/${name}`] = repo(name, {
+      allow_merge_commit: true,
+      allow_squash_merge: true,
+      allow_rebase_merge: true,
+      allow_auto_merge: true,
+    });
     routes[`repos/${name}/pulls`] = [];
     routes[`repos/${name}/actions/workflows`] = { total_count: 0, workflows: [] };
   }

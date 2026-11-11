@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
-import { afterEach, expect, test } from "vitest";
-import type { Check, CheckState } from "../model.ts";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
+import { afterEach, expect, test, vi } from "vitest";
+import type { Check, CheckState, PullActions, PullRequest } from "../model.ts";
+import { ActionsContext, CONFIRM_MS } from "./actions.tsx";
 import { PullList, sortChecks, sortPulls } from "./PullList.tsx";
 import { before, NOW, pull } from "./testing.ts";
 
@@ -182,4 +183,203 @@ test("falls back to the newest first when what was remembered makes no sense", (
   localStorage.setItem("github-dashboard:pull-order", "sideways");
   render(<PullList now={NOW} pulls={MIXED} />);
   expect((screen.getByLabelText("Order") as HTMLSelectElement).value).toBe("newest");
+});
+
+/** Pull request actions that wait until the test lets them finish. */
+function fakeActions() {
+  const pending: { resolve: (value: unknown) => void; reject: (error: unknown) => void }[] = [];
+  const wait = <T,>() =>
+    new Promise<T>((resolve, reject) => pending.push({ resolve: resolve as (value: unknown) => void, reject }));
+  const actions = {
+    setAutoMerge: vi.fn((_pull: PullRequest, _enabled: boolean) => wait<{ merged: boolean }>()),
+    merge: vi.fn((_pull: PullRequest) => wait<void>()),
+    updateBranch: vi.fn((_pull: PullRequest) => wait<void>()),
+  } satisfies PullActions;
+  return {
+    actions,
+    /** Lets the action under way finish with `value`, or fail with `error`. */
+    async finish(value?: unknown, error?: unknown) {
+      const one = pending.shift();
+      if (!one) {
+        throw new Error("No action is under way");
+      }
+      await act(async () => {
+        if (error === undefined) {
+          one.resolve(value);
+        } else {
+          one.reject(error);
+        }
+        // What the page does once it is through takes a few turns of the event loop's microtasks.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
+  };
+}
+
+function withActions(pulls: PullRequest[], actions: PullActions | null = fakeActions().actions) {
+  return render(
+    <ActionsContext.Provider value={actions ? { pulls: actions } : {}}>
+      <PullList now={NOW} pulls={pulls} />
+    </ActionsContext.Provider>,
+  );
+}
+
+const buttons = () => screen.queryAllByRole("button").map((button) => button.textContent);
+
+test("has no buttons where nothing can be done", () => {
+  render(<PullList now={NOW} pulls={[pull()]} />);
+  expect(buttons()).toEqual([]);
+  cleanup();
+  withActions([pull()], null);
+  expect(buttons()).toEqual([]);
+});
+
+test("offers what can be done now", () => {
+  const cases: [Partial<PullRequest>, string[]][] = [
+    [{ mergeState: "clean" }, ["Merge", "Auto-merge"]],
+    [{ mergeState: "clean", autoMerge: true }, ["Merge", "Cancel auto-merge"]],
+    [{ mergeState: "behind" }, ["Update branch", "Auto-merge"]],
+    [{ mergeState: "blocked" }, ["Auto-merge"]],
+    [{ mergeState: "conflicts" }, ["Auto-merge"]],
+    // A draft can't be merged or have auto-merge turned on, but can be updated, and auto-merge turned off.
+    [{ mergeState: "clean", draft: true }, []],
+    [{ mergeState: "behind", draft: true }, ["Update branch"]],
+    [{ mergeState: "blocked", draft: true, autoMerge: true }, ["Cancel auto-merge"]],
+  ];
+  for (const [fields, expected] of cases) {
+    withActions([pull(fields)]);
+    expect(buttons(), JSON.stringify(fields)).toEqual(expected);
+    if (expected.length > 0) {
+      expect(screen.getByRole("group").getAttribute("aria-label")).toBe("Actions for #1 in weather-station");
+    }
+    cleanup();
+  }
+});
+
+test("merging asks to confirm in place, and goes back to the plain button after a few seconds", () => {
+  vi.useFakeTimers();
+  try {
+    const { actions } = fakeActions();
+    withActions([pull()], actions);
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    expect(buttons()).toEqual(["Confirm merge", "Cancel", "Auto-merge"]);
+    expect(document.activeElement?.textContent).toBe("Confirm merge");
+    expect(actions.merge).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(buttons()).toEqual(["Merge", "Auto-merge"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    act(() => {
+      vi.advanceTimersByTime(CONFIRM_MS - 1);
+    });
+    expect(buttons()).toContain("Confirm merge");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(buttons()).toEqual(["Merge", "Auto-merge"]);
+    expect(actions.merge).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a confirmed merge shows while it runs, and then that it merged", async () => {
+  const { actions, finish } = fakeActions();
+  const shown = pull({ number: 7 });
+  withActions([shown], actions);
+  fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm merge" }));
+  expect(actions.merge).toHaveBeenCalledExactlyOnceWith(shown);
+  expect(buttons()).toEqual(["Merging…", "Auto-merge"]);
+  for (const button of screen.getAllByRole("button")) {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  }
+  // A second click while it runs starts nothing.
+  fireEvent.click(screen.getByRole("button", { name: "Auto-merge" }));
+  expect(actions.setAutoMerge).not.toHaveBeenCalled();
+
+  await finish();
+  expect(screen.getByText("Merged")).toBeTruthy();
+  expect(screen.queryByText("Ready to merge")).toBeNull();
+  expect(buttons()).toEqual([]);
+});
+
+test("turning auto-merge on and off shows at once, until the pull request is read again", async () => {
+  const { actions, finish } = fakeActions();
+  const shown = pull();
+  const { rerender } = withActions([shown], actions);
+  fireEvent.click(screen.getByRole("button", { name: "Auto-merge" }));
+  expect(actions.setAutoMerge).toHaveBeenCalledExactlyOnceWith(shown, true);
+  expect(buttons()).toEqual(["Merge", "Turning on…"]);
+  await finish({ merged: false });
+  expect(screen.getByText("Auto-merge", { selector: ".badge" })).toBeTruthy();
+  expect(buttons()).toEqual(["Merge", "Cancel auto-merge"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Cancel auto-merge" }));
+  expect(actions.setAutoMerge).toHaveBeenLastCalledWith(expect.objectContaining({ autoMerge: true }), false);
+  expect(buttons()).toEqual(["Merge", "Turning off…"]);
+  await finish({ merged: false });
+  expect(screen.queryByText("Auto-merge", { selector: ".badge" })).toBeNull();
+
+  // What GitHub says, once read again, is what shows.
+  rerender(
+    <ActionsContext.Provider value={{ pulls: actions }}>
+      <PullList now={NOW} pulls={[pull({ autoMerge: true })]} />
+    </ActionsContext.Provider>,
+  );
+  expect(screen.getByText("Auto-merge", { selector: ".badge" })).toBeTruthy();
+});
+
+test("auto-merge that merged at once, as nothing was required, shows that it merged", async () => {
+  const { actions, finish } = fakeActions();
+  withActions([pull({ mergeState: "blocked" })], actions);
+  fireEvent.click(screen.getByRole("button", { name: "Auto-merge" }));
+  await finish({ merged: true });
+  expect(screen.getByText("Merged")).toBeTruthy();
+  expect(buttons()).toEqual([]);
+});
+
+test("updating the branch shows until its head is the new commit", async () => {
+  const { actions, finish } = fakeActions();
+  const shown = pull({ mergeState: "behind", sha: "old" });
+  const { rerender } = withActions([shown], actions);
+  fireEvent.click(screen.getByRole("button", { name: "Update branch" }));
+  expect(actions.updateBranch).toHaveBeenCalledExactlyOnceWith(shown);
+  expect(buttons()).toEqual(["Updating…", "Auto-merge"]);
+  await finish();
+  expect(screen.getByText("Updating branch")).toBeTruthy();
+  expect(screen.queryByText("Behind base")).toBeNull();
+  expect(buttons()).toEqual(["Auto-merge"]);
+
+  const again = (fields: Partial<PullRequest>) =>
+    rerender(
+      <ActionsContext.Provider value={{ pulls: actions }}>
+        <PullList now={NOW} pulls={[pull({ mergeState: "behind", ...fields })]} />
+      </ActionsContext.Provider>,
+    );
+  // Read again before GitHub got to it: still the old head.
+  again({ sha: "old" });
+  expect(screen.getByText("Updating branch")).toBeTruthy();
+  again({ sha: "new", mergeState: "blocked" });
+  expect(screen.queryByText("Updating branch")).toBeNull();
+  expect(screen.getByText("Blocked")).toBeTruthy();
+});
+
+test("an action that fails says why next to its buttons, until the next one starts", async () => {
+  const { actions, finish } = fakeActions();
+  withActions([pull()], actions);
+  fireEvent.click(screen.getByRole("button", { name: "Auto-merge" }));
+  await finish(undefined, new Error("GitHub refused: Pull request is in unstable status."));
+  expect(screen.getByRole("alert").textContent).toBe("GitHub refused: Pull request is in unstable status.");
+  expect(screen.getByRole("alert").closest(".pull-actions")).toBeTruthy();
+  // Nothing changed, and it can be tried again.
+  expect(screen.queryByText("Auto-merge", { selector: ".badge" })).toBeNull();
+  const button = screen.getByRole("button", { name: "Auto-merge" }) as HTMLButtonElement;
+  expect(button.disabled).toBe(false);
+
+  fireEvent.click(button);
+  expect(screen.queryByRole("alert")).toBeNull();
+  await finish(undefined, "not an Error");
+  expect(screen.getByRole("alert").textContent).toBe("That didn't work.");
 });

@@ -23,6 +23,7 @@ export function pull(fields: Partial<PullRequest> = {}): PullRequest {
     mergeState: "clean",
     autoMerge: false,
     checks: [],
+    nodeId: "PR_kwDOAbc",
     ...fields,
   };
 }
@@ -53,6 +54,8 @@ export function project(fields: Partial<Project> = {}): Project {
     private: false,
     pushedAt: undefined,
     latestRelease: undefined,
+    mergeMethod: "merge",
+    autoMergeAllowed: true,
     ...fields,
   };
 }
@@ -84,6 +87,7 @@ export function fakeDashboard(initial: DashboardState = { status: "loading" }) {
     start: vi.fn(),
     refresh: vi.fn(async () => {}),
     stop: vi.fn(),
+    changed: vi.fn(),
     set(next: DashboardState) {
       state = next;
       for (const listener of listeners) {
