@@ -70,19 +70,19 @@ export function Workspace({ projects, pulls, runs, now }: {
             {actions && <ProjectActions project={selected} actions={actions} />}
           </div>}
         </div>
-        <div class="workspace-metrics" aria-label="Dashboard summary">
+        <div class="workspace-metrics" role="region" aria-label="Dashboard summary">
           <div class="workspace-metric"><span>OPEN PULL REQUESTS</span><strong>{visiblePulls.length}</strong><small>Across selected repositories</small></div>
           <div class="workspace-metric"><span>ACTIVE WORKFLOWS</span><strong>{running.length}</strong><small>Running or awaiting approval</small></div>
           <div class="workspace-metric"><span>NEEDS ATTENTION</span><strong class={attention.length ? "workspace-alert-number" : ""}>{attention.length}</strong><small>Failed checks or conflicts</small></div>
           <div class="workspace-metric"><span>REPOSITORIES</span><strong>{selected ? 1 : projects.length}</strong><small>{selected ? "Selected repository" : "In your workspace"}</small></div>
         </div>
-        <div class="workspace-tabs" role="group" aria-label="Content filter">
+        <fieldset class="workspace-tabs" aria-label="Content filter">
           {(["all", "pulls", "workflows"] as const).map((value) => (
             <button key={value} type="button" aria-pressed={tab === value} onClick={() => setTab(value)}>
               {value === "all" ? "Workspace" : value === "pulls" ? "Pull requests" : "Workflows"}
             </button>
           ))}
-        </div>
+        </fieldset>
         <div class={tab === "all" ? "workspace-content" : "workspace-content workspace-content-focused"}>
           {tab !== "workflows" && <PullList pulls={visiblePulls} now={now} />}
           {tab !== "pulls" && <ReleaseList runs={visibleRuns} now={now} />}
