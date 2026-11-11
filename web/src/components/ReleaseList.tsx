@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import type { Approval, CheckState, ReleaseRun, RunActions } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
+import { ExternalLink } from "./ExternalLink.tsx";
 import { Jobs } from "./Jobs.tsx";
 import { shortName } from "./PullList.tsx";
 import { type Notice, RunAction } from "./RunAction.tsx";
@@ -88,9 +89,9 @@ export function ReleaseCard({ run, now }: { run: ReleaseRun; now: number }) {
         </span>
         <StateChip state={run.state} />
       </div>
-      <a class="release-title" href={run.url}>
+      <ExternalLink class="release-title" href={run.url}>
         {run.title}
-      </a>
+      </ExternalLink>
       {end === undefined ? (
         <p class="meta">
           {run.actor && <span>started by {run.actor}</span>}
