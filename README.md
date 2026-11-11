@@ -255,7 +255,7 @@ requests from forks and from Dependabot get no preview.
 Every push to `main` (other than to Markdown files) runs the Release workflow, which builds and checks the image as below,
 publishes it as `ghcr.io/nvorkinn/github-dashboard:main`, and starts home-stack's Deploy workflow. home-stack runs
 `:main` and pulls it on every deploy, so merging is the deploy. Starting the workflow needs the repository secret
-`HOME_STACK_DEPLOY_TOKEN`: a fine-grained token for `nvorkinn/home-stack` only, with *Actions: read and write*.
+`HOME_STACK_DEPLOY_TOKEN`: a fine-grained token for `nvorkinn/home-stack` only, with _Actions: read and write_.
 
 Versioned releases are optional. Press **Run workflow** on the Release workflow (Actions > Release) and pick the bump: patch, minor or major. It tags the
 head of `main` with the next version after the latest `v*` tag (with no tag yet, patch gives `v0.0.1` and minor
