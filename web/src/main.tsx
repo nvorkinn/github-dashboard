@@ -3,6 +3,10 @@ import { App, type DemoPull } from "./App.tsx";
 import { createAuth } from "./auth.ts";
 import { makeActions, makeDashboard } from "./dashboard_source.ts";
 import "./style.css";
+import { applyTheme, rememberedTheme } from "./theme.ts";
+
+// Before anything renders, so a chosen theme doesn't flash the system's first.
+applyTheme(rememberedTheme());
 
 const auth = createAuth();
 

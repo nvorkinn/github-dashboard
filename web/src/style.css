@@ -22,6 +22,16 @@
   --skipped: light-dark(#6e7781, #7d8590);
 }
 
+/* A theme chosen in Settings pins the scheme; without one it follows the system (see theme.ts). The Workspace keeps
+   its own dark palette either way. */
+:root[data-theme="light"]:not(:has(.workspace)) {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"]:not(:has(.workspace)) {
+  color-scheme: dark;
+}
+
 *,
 *::before,
 *::after {
