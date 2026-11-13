@@ -20,7 +20,8 @@ export type IconName =
   | "layers"
   | "refresh"
   | "info"
-  | "eye";
+  | "eye"
+  | "key";
 
 const paths: Record<IconName, ComponentChildren> = {
   settings: (
@@ -95,6 +96,13 @@ const paths: Record<IconName, ComponentChildren> = {
     <>
       <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" />
       <path d="M10 21h4" />
+    </>
+  ),
+  key: (
+    <>
+      <circle cx="8" cy="15" r="4" />
+      <path d="m11 12 9-9" />
+      <path d="m16 7 3 3" />
     </>
   ),
   overview: (

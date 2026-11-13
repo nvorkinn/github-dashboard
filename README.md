@@ -74,6 +74,7 @@ The GitHub App (Settings, Developer settings, GitHub Apps):
 - Repository permissions: Actions write, Checks read, Commit statuses read, Contents write, Deployments write,
   Metadata read, Pull requests write; and Workflows write, needed only when a release points at a commit that changes
   workflow files. The page acts as the signed-in user, so the user needs the same access to the repository.
+  Copying secrets additionally needs Secrets write access (see "Copying secrets").
   Repository configuration additionally needs Administration write access; accept the changed permissions on the
   installation after updating the GitHub App. Repository configuration is read only for non-administrators.
 
@@ -82,10 +83,29 @@ What each write is for (reading needs only read access to the same):
 | Permission (write) | Buttons that need it                                                                      |
 | ------------------ | ----------------------------------------------------------------------------------------- |
 | Administration     | Repository settings and copying branch rules (Workspace → select a repository → Settings) |
-| Actions            | Re-run failed jobs and Re-run on a release run; Promote (starts the Promote workflow)     |
-| Contents           | Release (writes the notes and publishes); Merge on a pull request                         |
+| Actions            | Re-run failed jobs and Re-run on a release run; Promote; copying secrets (its run)        |
+| Contents           | Release (writes the notes and publishes); Merge on a pull request; copying secrets        |
 | Deployments        | Approve and Reject on a run waiting for an environment (the user must be its reviewer)    |
 | Pull requests      | Auto-merge and Update branch on a pull request                                            |
+| Secrets            | Copying secrets (Workspace → select a repository → Settings)                              |
+| Workflows          | Copying secrets (the branch it pushes holds a workflow file)                              |
+
+### Copying secrets
+
+GitHub never gives a secret's value back, so the page has a workflow in the source repository carry it:
+
+1. The page reads the target repository's public key for secrets.
+2. It pushes a branch `dashboard/secret-copy-<time>` to the source repository: one commit with no parent, holding
+   nothing but a workflow that runs on that push. No other workflow of the repository runs for it.
+3. The runner seals each chosen secret with the target's public key (libsodium's sealed box, from the PHP that
+   GitHub's runners come with) and writes the result as a notice.
+4. The page reads the notices, stores each as the secret in the target, and deletes the branch and the run.
+
+The value never leaves the runner. What the page reads only GitHub can open, and only for the target repository; on
+a public source repository it is readable, and shows how long the secret is, until the run is deleted. A copy that
+was cut off leaves its branch behind; branches older than 15 minutes are removed the next time someone picks that
+repository to copy from. Only repository secrets are copied, not environment or organisation ones. The relay has no
+part in it.
 
 To sign in locally, start the relay with the four variables and `PUBLIC_URL=http://localhost:5173`, and open the
 page from `npm run dev`: Vite passes `/api` on to the relay, so the browser sees one origin. Without Vite, use

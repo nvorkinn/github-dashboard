@@ -102,6 +102,7 @@ export function Workspace({
   const [tab, setTab] = useState<WorkspaceTab>("all");
   const [filter, setFilter] = useState("");
   const repositoryConfig = useActions()?.repositories;
+  const secretCopy = useActions()?.secrets;
   const shown = projects.filter((project) => !hidden.has(project.repo));
 
   useEffect(() => {
@@ -298,7 +299,12 @@ export function Workspace({
         </header>
 
         {selected && repositoryConfig && activeTab === "settings" && (
-          <RepositorySettings key={selected.repo} repo={selected.repo} service={repositoryConfig} />
+          <RepositorySettings
+            key={selected.repo}
+            repo={selected.repo}
+            service={repositoryConfig}
+            secrets={secretCopy}
+          />
         )}
 
         {activeTab !== "settings" && (

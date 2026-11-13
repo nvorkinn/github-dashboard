@@ -9,6 +9,7 @@ import { createPullActions } from "./github/pull_actions.ts";
 import { createRepositoryConfig } from "./github/repository_config.ts";
 import { createReviewService } from "./github/review.ts";
 import { createRunActions } from "./github/run_actions.ts";
+import { createSecretCopy } from "./github/secret_copy.ts";
 import type { Dashboard } from "./model.ts";
 
 /**
@@ -65,6 +66,7 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
   return {
     review: createReviewService(auth, dashboard),
     repositories: createRepositoryConfig(auth, dashboard),
+    secrets: createSecretCopy(auth),
     pulls: createPullActions(auth, dashboard),
     runs: createRunActions(auth, dashboard),
     files: createFilesReader(createApi(auth)),
