@@ -79,6 +79,14 @@
   color: #48caff;
   filter: drop-shadow(0 0 8px rgb(36 193 255 / 0.3));
 }
+:where(.repository-secrets) .repository-card-heading > .ui-icon {
+  color: #f2c14e;
+  filter: drop-shadow(0 0 8px rgb(242 193 78 / 0.3));
+}
+.repository-secrets {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
 .repository-merge fieldset {
   min-width: 0;
   margin: 0;

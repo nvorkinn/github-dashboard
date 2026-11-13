@@ -8,8 +8,10 @@ import {
   type RuleChange,
   type Setting,
 } from "../github/repository_config.ts";
+import type { SecretCopy } from "../github/secret_copy.ts";
 import { ConfirmButton, reasonOf, useAction } from "./actions.tsx";
 import { Icon, type IconName } from "./Icon.tsx";
+import { SecretCopyCard } from "./SecretCopy.tsx";
 import "./RepositorySettings.css";
 
 const SETTING_DETAILS: Record<Setting, { icon: IconName; description: string }> = {
@@ -27,7 +29,16 @@ const SETTING_DETAILS: Record<Setting, { icon: IconName; description: string }> 
 };
 
 /** Mounted with a repository key: late answers can never change another repository's settings. */
-export function RepositorySettings({ repo, service }: { repo: string; service: RepositoryConfig }) {
+export function RepositorySettings({
+  repo,
+  service,
+  secrets,
+}: {
+  repo: string;
+  service: RepositoryConfig;
+  /** Copies secrets into `repo`; without it that card isn't shown. */
+  secrets?: SecretCopy | undefined;
+}) {
   const [current, setCurrent] = useState<Repository>();
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [readProblem, setReadProblem] = useState("");
@@ -306,6 +317,9 @@ export function RepositorySettings({ repo, service }: { repo: string; service: R
             </ul>
           )}
         </section>
+        {secrets && current && (
+          <SecretCopyCard repo={repo} repositories={repositories} canEdit={canEdit} service={secrets} />
+        )}
       </div>
       <div class="repository-settings-feedback" aria-live="polite">
         {action.problem && (

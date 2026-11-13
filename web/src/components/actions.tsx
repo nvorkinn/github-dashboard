@@ -9,6 +9,8 @@ import type { PullActions, PullRequest, ReadFiles, RunActions } from "../model.t
  */
 export type Actions = {
   repositories?: import("../github/repository_config.ts").RepositoryConfig;
+  /** Copies Actions secrets between repositories. */
+  secrets?: import("../github/secret_copy.ts").SecretCopy;
   review?: import("../github/review.ts").ReviewService;
   /** On pull requests. */
   pulls?: PullActions;
