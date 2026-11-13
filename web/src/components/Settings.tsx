@@ -29,6 +29,7 @@ export function Settings({
   current = permission,
   laneColumns = 2,
   onLaneColumns,
+  safariTab = isSafariTab(),
 }: {
   notifier: Notifier;
   /** How to ask for the browser's permission, and read it; tests pass their own. */
@@ -37,6 +38,8 @@ export function Settings({
   /** How many lanes stand side by side on a wide screen, and how to choose; without `onLaneColumns` it isn't asked. */
   laneColumns?: LaneColumns | undefined;
   onLaneColumns?: ((columns: LaneColumns) => void) | undefined;
+  /** Whether the page is open in a Safari tab, rather than as a web app in the Dock; tests pass their own. */
+  safariTab?: boolean;
 }) {
   const [settings, setSettings] = useState<NotificationSettings>(readSettings);
   const [allowed, setAllowed] = useState<Permission>(current);
@@ -87,6 +90,13 @@ export function Settings({
             )}
             {allowed === "unsupported" && <span class="problem">This browser can't show notifications.</span>}
           </div>
+          {safariTab && (
+            <p class="quiet">
+              Safari puts its own logo on a tab's notifications, whatever the page asks for. To have the dashboard's
+              icon on them, add it to the Dock (File, Add to Dock), open it from there, and allow notifications once
+              more.
+            </p>
+          )}
 
           <fieldset>
             <legend>Show a notification when</legend>
@@ -154,4 +164,20 @@ export function Settings({
       )}
     </>
   );
+}
+
+/**
+ * Whether this is a Safari tab: Safari on a Mac, and not the dashboard opened from the Dock, which is a window of its
+ * own whose notifications carry its own icon. Chrome, Edge and Firefox use the icon the page gives them.
+ */
+export function isSafariTab(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const agent = navigator.userAgent;
+  const safari = agent.includes("Safari/") && !/Chrome\/|Chromium\/|Edg\/|Firefox\//.test(agent);
+  const standalone =
+    (navigator as { standalone?: boolean }).standalone === true ||
+    (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches);
+  return safari && !standalone;
 }
