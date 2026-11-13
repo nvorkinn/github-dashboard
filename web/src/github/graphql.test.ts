@@ -1,15 +1,9 @@
 import { beforeEach, expect, test } from "vitest";
+import type { Unreleased } from "../model.ts";
 import { GitHubError } from "./api.ts";
-import {
-  PULLS_PER_REPO,
-  queryFor,
-  REPOS_PER_REQUEST,
-  readEverything,
-  split,
-  unreleasedOf,
-  workflowUrl,
-} from "./graphql.ts";
+import { PULLS_PER_REPO, queryFor, REPOS_PER_REQUEST, readEverything, split, workflowUrl } from "./graphql.ts";
 import { account, fakeGitHub, job, type Routes, withPull, withWorkflow } from "./testing.ts";
+import { type GqlComparison, unreleasedFrom } from "./unreleased.ts";
 import { forgetWorkflowFiles } from "./workflow_graph.ts";
 
 beforeEach(() => {
@@ -147,7 +141,7 @@ test("a run's jobs are read only while it is going, by asking for that run by it
 test("a read is split into requests of a few projects or workflows each", () => {
   const repos = Array.from({ length: REPOS_PER_REQUEST * 2 + 1 }, (_, index) => `octo/r${index}`);
   const flows = [{ repo: "octo/r0", path: ".github/workflows/release.yml" }];
-  const parts = split({ list: { after: undefined }, repos, flows, runs: [], blobs: [], texts: true });
+  const parts = split({ list: { after: undefined }, repos, flows, runs: [], blobs: [], compares: [], texts: true });
   expect(parts.map((part) => [part.list !== undefined, part.repos.length, part.flows.length, part.texts])).toEqual([
     [true, 0, 0, true],
     [false, REPOS_PER_REQUEST, 0, true],
@@ -155,7 +149,7 @@ test("a read is split into requests of a few projects or workflows each", () => 
     [false, 1, 0, true],
     [false, 0, 1, true],
   ]);
-  expect(split({ list: undefined, repos: [], flows: [], runs: [], blobs: [], texts: false })).toEqual([]);
+  expect(split({ list: undefined, repos: [], flows: [], runs: [], blobs: [], compares: [], texts: false })).toEqual([]);
 });
 
 test("a project that is gone is asked about once more and then forgotten", async () => {
@@ -318,7 +312,7 @@ test.each([
 });
 
 test("the query asks only for what it is asked, and writes names as GraphQL strings", () => {
-  const nothing = { list: undefined, repos: [], flows: [], runs: [], blobs: [], texts: false };
+  const nothing = { list: undefined, repos: [], flows: [], runs: [], blobs: [], compares: [], texts: false };
   const list = queryFor({ ...nothing, list: { after: 'cur"sor' } });
   expect(list).toContain(String.raw`after: "cur\"sor"`);
   expect(list).toContain("fragment Listed on Repository");
@@ -347,41 +341,106 @@ test("the query asks only for what it is asked, and writes names as GraphQL stri
   expect(going).toContain("fragment Going");
 });
 
-test("what is unreleased is read with what is in a project, from the history counts at both ends", async () => {
+const RELEASE = {
+  tag_name: "v1.0.0",
+  html_url: "https://github.com/octo/app/releases/tag/v1.0.0",
+  created_at: "2026-11-01T00:00:00Z",
+  published_at: "2026-11-01T10:00:00Z",
+};
+
+test("what is unreleased is read from the comparison of the latest release with the default branch", async () => {
   const routes = app();
-  routes["repos/octo/app/releases/latest"] = {
-    tag_name: "v1.0.0",
-    html_url: "https://github.com/octo/app/releases/tag/v1.0.0",
-    created_at: "2026-11-01T00:00:00Z",
-    published_at: "2026-11-01T10:00:00Z",
-  };
-  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 3 };
+  routes["repos/octo/app/releases/latest"] = RELEASE;
+  // Two pull requests, one of two commits and a merge commit, and a commit pushed without one.
+  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 5, merged: [7, 7, 7, 8] };
   const { auth, calls, queries } = fakeGitHub(routes);
-  const { data } = await readEverything(auth);
+  const first = await readEverything(auth);
   expect(calls.every((path) => path === "graphql")).toBe(true);
   expect(queries[0]).toContain("defaultBranchRef { name }");
-  expect(queries[1]).toContain("latestRelease { tagCommit { history(first: 1) { totalCount } } }");
-  expect(data.projects.map((one) => [one.repo, one.defaultBranch, one.unreleased])).toEqual([
-    ["octo/app", "main", 3],
+  expect(queries.join("\n")).toContain('ref(qualifiedName: "refs/tags/v1.0.0") { compare(headRef: "main")');
+  expect(first.data.projects.map((one) => [one.repo, one.defaultBranch, one.unreleased])).toEqual([
+    ["octo/app", "main", { commits: 5, pulls: 2 }],
     // No release: nothing to compare with.
     ["octo/lib", "main", undefined],
   ]);
+
+  // The next read asks by the tag it knows, with everything else.
+  const again = fakeGitHub(routes);
+  const second = await readEverything(again.auth, { previous: first.data, shape: first.shape });
+  expect(again.queries.filter((query) => query.includes("compare(")).length).toBe(1);
+  expect(second.data.projects[0]?.unreleased).toEqual({ commits: 5, pulls: 2 });
+
+  // A new release is compared once the list of projects tells of it.
+  routes["repos/octo/app/releases/latest"] = { ...RELEASE, tag_name: "v1.1.0" };
+  routes["repos/octo/app/compare/v1.1.0...main"] = { ahead_by: 0 };
+  const third = await readEverything(fakeGitHub(routes).auth, { previous: second.data, shape: second.shape });
+  expect(third.data.projects[0]?.unreleased).toEqual({ commits: 0, pulls: 0 });
 });
 
-test.each([
-  ["the branch ahead", 120, 117, 3],
-  ["nothing since", 117, 117, 0],
-  ["a release that isn't on the branch", 100, 117, undefined],
-  ["no release", 100, undefined, undefined],
-  ["no branch", undefined, 117, undefined],
-])("unreleased, %s", (_, branch, release, expected) => {
-  const counted = (count: number | undefined) => (count === undefined ? null : { history: { totalCount: count } });
-  expect(
-    unreleasedOf({
-      workflows: null,
-      pullRequests: { pageInfo: { hasNextPage: false }, nodes: [] },
-      defaultBranchRef: branch === undefined ? null : { target: counted(branch) },
-      latestRelease: release === undefined ? null : { tagCommit: counted(release) },
-    }),
-  ).toBe(expected);
+test("what is unreleased isn't known of a release whose tag is gone, and stays as it was when it can't be read", async () => {
+  const routes = app();
+  routes["repos/octo/app/releases/latest"] = RELEASE;
+  const gone = await readEverything(fakeGitHub(routes).auth);
+  expect(gone.data.projects[0]?.unreleased).toBeUndefined();
+  expect(gone.problem).toBeUndefined();
+
+  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 1, merged: [7] };
+  const read = await readEverything(fakeGitHub(routes).auth);
+  routes["repos/octo/app/compare/v1.0.0...main"] = () => Response.json({}, { status: 500 });
+  const refused = await readEverything(fakeGitHub(routes).auth, { previous: read.data, shape: read.shape });
+  expect(refused.data.projects[0]?.unreleased).toEqual({ commits: 1, pulls: 1 });
+  expect(refused.problem).toBe("Couldn't read everything from octo/app.");
 });
+
+test.each<[string, GqlComparison, Unreleased | undefined]>([
+  ["commits of merged pull requests, each counted once", compared(3, [[7], [7], [8]]), { commits: 3, pulls: 2 }],
+  ["a commit without a pull request", compared(2, [[7], []]), { commits: 2, pulls: 1 }],
+  [
+    "pull requests that aren't merged into the branch",
+    {
+      ref: {
+        compare: {
+          aheadBy: 1,
+          commits: {
+            nodes: [
+              {
+                associatedPullRequests: {
+                  nodes: [
+                    { number: 7, merged: true, baseRefName: "main" },
+                    { number: 6, merged: true, baseRefName: "feature" },
+                    { number: 9, merged: false, baseRefName: "main" },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+    { commits: 1, pulls: 1 },
+  ],
+  ["nothing since", compared(0, []), { commits: 0, pulls: 0 }],
+  ["more commits than were read", compared(250, [[7]]), { commits: 250, pulls: undefined }],
+  ["a tag that is gone", { ref: null }, undefined],
+  ["no answer", null, undefined],
+])("unreleased, %s", (_, answer, expected) => {
+  expect(unreleasedFrom(answer, "main")).toEqual(expected);
+});
+
+/** A comparison `ahead` commits ahead, with the numbers of each read commit's pull requests. */
+function compared(ahead: number, commits: number[][]): GqlComparison {
+  return {
+    ref: {
+      compare: {
+        aheadBy: ahead,
+        commits: {
+          nodes: commits.map((numbers) => ({
+            associatedPullRequests: {
+              nodes: numbers.map((number) => ({ number, merged: true, baseRefName: "main" })),
+            },
+          })),
+        },
+      },
+    },
+  };
+}

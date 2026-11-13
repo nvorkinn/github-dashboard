@@ -148,7 +148,7 @@ test("projects are the installations' repositories, without archived ones, the l
       created_at: "2026-11-09T00:00:00Z",
       published_at: "2026-11-09T10:00:00Z",
     },
-    "repos/acme/new/compare/v2.1.0...main": { ahead_by: 4 },
+    "repos/acme/new/compare/v2.1.0...main": { ahead_by: 4, merged: [3, 3, 5] },
     "repos/octo/old/pulls": [],
     "repos/octo/old/actions/workflows": { total_count: 0, workflows: [] },
     "repos/acme/new/pulls": [],
@@ -171,8 +171,8 @@ test("projects are the installations' repositories, without archived ones, the l
         publishedAt: "2026-11-09T10:00:00Z",
       },
       defaultBranch: "main",
-      // Commits on main since v2.1.0.
-      unreleased: 4,
+      // On main since v2.1.0.
+      unreleased: { commits: 4, pulls: 2 },
       mergeMethod: "squash",
       autoMergeAllowed: false,
     },
@@ -817,11 +817,7 @@ test("a release reads the repository's latest release", async () => {
     ],
     before,
   );
-  expect(calls).toEqual([
-    "repos/octo/app/compare/v1.1.0...main?per_page=1",
-    "repos/octo/app/releases/latest",
-    "repos/octo/lib/releases/latest",
-  ]);
+  expect(calls).toEqual(["graphql", "repos/octo/app/releases/latest", "repos/octo/lib/releases/latest"]);
   expect(data.projects).toEqual([
     {
       ...before.projects[0],
@@ -831,7 +827,7 @@ test("a release reads the repository's latest release", async () => {
         publishedAt: "2026-11-05T00:00:00Z",
       },
       // Nothing on main since the release.
-      unreleased: 0,
+      unreleased: { commits: 0, pulls: 0 },
     },
     before.projects[1],
   ]);
@@ -841,15 +837,15 @@ test("a release reads the repository's latest release", async () => {
 test("a push reads every pull request of the repository, as their base may have moved, and what is unreleased", async () => {
   const { routes, before } = await everything();
   routes["repos/octo/app/pulls/1"] = { ...(routes["repos/octo/app/pulls/1"] as object), mergeable_state: "behind" };
-  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 2 };
+  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 2, merged: [4, 4] };
   withPull(routes, "octo/app", 3);
   const { data, calls } = await changed(routes, [{ kind: "push", repo: "octo/app", sha: "main2" }], before);
   expect(before.projects[0]?.unreleased).toBeUndefined();
-  expect(data.projects[0]?.unreleased).toBe(2);
+  expect(data.projects[0]?.unreleased).toEqual({ commits: 2, pulls: 1 });
   expect(calls).toEqual(
     [
       "repos/octo/app/releases/latest",
-      "repos/octo/app/compare/v1.0.0...main?per_page=1",
+      "graphql",
       "repos/octo/app/pulls?state=open&per_page=100",
       ...pullCalls("octo/app", 1),
       ...pullCalls("octo/app", 2),

@@ -26,7 +26,13 @@ export type Api = {
   get<T>(path: string): Promise<T>;
   /** Reads every page of a list. `key` names the list in answers that wrap it, such as `check_runs`. */
   list<T>(path: string, key?: string): Promise<T[]>;
+  /** Sends one GraphQL query, as `sendQuery` does. */
+  query(query: string): Promise<QueryAnswer>;
 };
+
+export type QueryError = { type?: string; path?: (string | number)[]; message?: string };
+/** What GitHub answered a GraphQL query: the data, and what it wouldn't say of single fields. */
+export type QueryAnswer = { data: Record<string, unknown>; errors: QueryError[] };
 
 export type ApiOptions = {
   /** How many requests may be under way at once. */
@@ -74,7 +80,39 @@ export function createApi(auth: Auth, options: ApiOptions = {}): Api {
       }
       return found;
     },
+
+    query: (query) => limit(() => sendQuery(auth, query, options.signal)),
   };
+}
+
+/**
+ * Sends one GraphQL query. Throws what fails every call (a rate limit, a sign-in GitHub no longer accepts, GitHub in
+ * trouble, a failing network); what GitHub wouldn't say of one field comes back in `errors`, beside the rest.
+ */
+export async function sendQuery(auth: Auth, query: string, signal: AbortSignal | undefined): Promise<QueryAnswer> {
+  signal?.throwIfAborted();
+  const response = await auth.github("graphql", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) {
+    throw new GitHubError("graphql", response.status, await retryAt(response));
+  }
+  const body = (await response.json().catch(() => undefined)) as { data?: unknown; errors?: unknown } | undefined;
+  const errors = Array.isArray(body?.errors) ? (body.errors as QueryError[]) : [];
+  // GraphQL's own rate limit is an answer like any other, with the error inside.
+  if (errors.some((error) => error?.type === "RATE_LIMITED")) {
+    const reset = response.headers.get("x-ratelimit-reset") ?? "";
+    const at = /^\d+$/.test(reset) ? Number(reset) * 1000 : 0;
+    throw new GitHubError("graphql", 403, Math.max(at, Date.now() + (at ? 1000 : DEFAULT_BACKOFF_MS)));
+  }
+  const data = body?.data;
+  if (typeof data !== "object" || data === null) {
+    throw new GitHubError("graphql", 502, undefined);
+  }
+  return { data: data as Record<string, unknown>, errors };
 }
 
 function withParam(path: string, name: string, value: string): string {
