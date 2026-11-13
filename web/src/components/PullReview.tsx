@@ -1,5 +1,6 @@
 import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui-slim.js";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { DIFF_FONT_SIZES, type DiffFontSize, rememberDiffFontSize, rememberedDiffFontSize } from "../diff_font.ts";
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
@@ -49,7 +50,17 @@ export function wrapsByDefault(path: string): boolean {
   );
 }
 
-function FileDiff({ file, split, wrap }: { file: ChangedFile; split: boolean; wrap: boolean }) {
+function FileDiff({
+  file,
+  split,
+  wrap,
+  fontSize,
+}: {
+  file: ChangedFile;
+  split: boolean;
+  wrap: boolean;
+  fontSize: DiffFontSize;
+}) {
   const target = useRef<HTMLDivElement>(null);
   const usable = usablePatch(file);
   useEffect(() => {
@@ -119,7 +130,8 @@ function FileDiff({ file, split, wrap }: { file: ChangedFile; split: boolean; wr
       );
     });
     return () => observer?.disconnect();
-  }, [file, split, usable, wrap]);
+    // The font size changes how lines wrap, so the rows are measured again.
+  }, [file, split, usable, wrap, fontSize]);
   return usable ? (
     <div ref={target} class={`review-diff ${wrap ? "review-diff-wrap" : ""}`} />
   ) : (
@@ -242,6 +254,7 @@ export function PullReview({
   const [split, setSplit] = useState(true);
   const [wrapping, setWrapping] = useState<Record<string, boolean>>({});
   const [tree, setTree] = useState(true);
+  const [fontSize, setFontSize] = useState<DiffFontSize>(rememberedDiffFontSize);
   const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
   // Auto-merge as last turned on or off here, until the review is read again.
@@ -301,6 +314,7 @@ export function PullReview({
     <dialog
       ref={dialog}
       class="pull-review"
+      data-diff-font={fontSize}
       aria-labelledby="review-title"
       onCancel={(event) => {
         event.preventDefault();
@@ -391,6 +405,8 @@ export function PullReview({
               onDone={({ enabled, merged }) => {
                 setAutoMerge(enabled);
                 if (merged) setDone("Merged");
+                // Nothing is left to do here once the PR merges, or will merge, by itself.
+                if (enabled) onClose();
               }}
             />
           )}
@@ -548,6 +564,25 @@ export function PullReview({
                 Unified
               </button>
             </fieldset>
+            <fieldset class="review-view-controls review-font-controls" aria-label="Code text size">
+              {DIFF_FONT_SIZES.map(({ value, label }) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={fontSize === value}
+                  aria-label={`${label} text`}
+                  title={`${label} text`}
+                  onClick={() => {
+                    setFontSize(value);
+                    rememberDiffFontSize(value);
+                  }}
+                >
+                  <span class={`review-font-glyph review-font-${value}`} aria-hidden="true">
+                    A
+                  </span>
+                </button>
+              ))}
+            </fieldset>
             <button type="button" aria-expanded={tree} onClick={() => setTree(!tree)}>
               {tree ? "Hide" : "Show"} files
             </button>
@@ -564,7 +599,7 @@ export function PullReview({
           </div>
           <section class="review-code-scroll" key={`${key}:${file?.path}:${split}`} aria-label="Scrollable code diff">
             {file ? (
-              <FileDiff file={file} split={split} wrap={wrap} />
+              <FileDiff file={file} split={split} wrap={wrap} fontSize={fontSize} />
             ) : (
               <p class="empty">
                 {problem

@@ -143,8 +143,9 @@ test("uses per-file counts, retains wrap choices, and keeps positions independen
   expect(screen.getByRole("button", { name: "Wrap lines" }).getAttribute("aria-pressed")).toBe("true");
 });
 
-test("turns auto-merge on and off from the review, like the board", async () => {
+test("turns auto-merge on and off from the review, like the board, closing it when turned on", async () => {
   const initial = pull();
+  const close = vi.fn();
   const setAutoMerge = vi.fn(async () => ({ merged: false }));
   const review = {
     read: async () => ({ pull: initial, description: "", canApprove: true, canMerge: true, reviews: [] }),
@@ -158,7 +159,7 @@ test("turns auto-merge on and off from the review, like the board", async () => 
         pulls: { setAutoMerge, merge: vi.fn(), updateBranch: vi.fn() },
       }}
     >
-      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+      <PullReview initial={initial} pulls={[initial]} onClose={close} />
     </ActionsContext.Provider>,
   );
   const on = await screen.findByRole("button", { name: "Auto-merge" });
@@ -167,9 +168,12 @@ test("turns auto-merge on and off from the review, like the board", async () => 
   const off = await screen.findByRole("button", { name: "Cancel auto-merge" });
   expect(setAutoMerge).toHaveBeenLastCalledWith(initial, true);
   expect(document.querySelector(".review-metadata")?.textContent).toContain("Auto-merge");
+  expect(close).toHaveBeenCalledOnce();
   fireEvent.click(off);
   await screen.findByRole("button", { name: "Auto-merge" });
   expect(setAutoMerge).toHaveBeenLastCalledWith(expect.objectContaining({ autoMerge: true }), false);
+  // Cancelling leaves the review open.
+  expect(close).toHaveBeenCalledOnce();
 });
 
 test("says merged when turning auto-merge on merges at once", async () => {
@@ -208,4 +212,21 @@ test("offers no auto-merge for a draft", async () => {
   );
   await screen.findByRole("button", { name: /example.ts/ });
   expect(screen.queryByRole("button", { name: /auto-merge/i })).toBeNull();
+});
+
+test("draws code at the remembered text size and remembers a new choice", async () => {
+  localStorage.setItem("github-dashboard:diff-font-size", "small");
+  const initial = pull();
+  render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [file], truncated: false }) }}>
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.dataset.diffFont).toBe("small");
+  expect(screen.getByRole("button", { name: "Small text" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Large text" }));
+  expect(dialog.dataset.diffFont).toBe("large");
+  expect(localStorage.getItem("github-dashboard:diff-font-size")).toBe("large");
+  localStorage.clear();
 });
