@@ -1,6 +1,6 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
-import type { PullActions, ReadFiles, RunActions } from "../model.ts";
+import type { PullActions, PullRequest, ReadFiles, RunActions } from "../model.ts";
 
 /**
  * What the page can do, beyond showing: GitHub's for real, the demo's on its sample data. Each part is missing where
@@ -127,6 +127,48 @@ export function ConfirmButton({
   return (
     <button type="button" class="action" disabled={disabled} onClick={() => setAsking(true)}>
       {label}
+    </button>
+  );
+}
+
+/**
+ * Turns auto-merge on for a pull request, or off when it is on; the same button on the board and in the review.
+ * `onDone` hears whether it is now on, and whether GitHub merged at once instead (see `PullActions.setAutoMerge`).
+ */
+export function AutoMergeButton({
+  pull,
+  actions,
+  busy,
+  disabled,
+  run,
+  onDone,
+}: {
+  pull: PullRequest;
+  actions: PullActions;
+  busy: boolean;
+  disabled: boolean;
+  run: (name: string, task: () => Promise<unknown>) => void;
+  onDone: (result: { enabled: boolean; merged: boolean }) => void;
+}) {
+  return (
+    <button
+      type="button"
+      class="action"
+      disabled={disabled}
+      title={
+        pull.autoMerge
+          ? undefined
+          : "Merge once the required checks pass, or now if nothing is required and every check passed"
+      }
+      onClick={() =>
+        run("autoMerge", async () => {
+          const enabled = !pull.autoMerge;
+          const { merged } = await actions.setAutoMerge(pull, enabled);
+          onDone({ enabled, merged });
+        })
+      }
+    >
+      {busy ? (pull.autoMerge ? "Turning off…" : "Turning on…") : pull.autoMerge ? "Cancel auto-merge" : "Auto-merge"}
     </button>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
 import { summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
-import { ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
+import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { PullReview } from "./PullReview.tsx";
 import type { Tone } from "./state.tsx";
@@ -554,31 +554,16 @@ function PullButtons({
           </button>
         )}
         {canAutoMerge && (
-          <button
-            type="button"
-            class="action"
+          <AutoMergeButton
+            pull={pull}
+            actions={actions}
+            busy={busy === "autoMerge"}
             disabled={busy !== undefined}
-            title={
-              pull.autoMerge
-                ? undefined
-                : "Merge once the required checks pass, or now if nothing is required and every check passed"
+            run={run}
+            onDone={({ enabled, merged }) =>
+              onDone({ of: pull, what: merged ? "merged" : enabled ? "autoMergeOn" : "autoMergeOff" })
             }
-            onClick={() =>
-              run("autoMerge", async () => {
-                const enabled = !pull.autoMerge;
-                const { merged } = await actions.setAutoMerge(pull, enabled);
-                onDone({ of: pull, what: merged ? "merged" : enabled ? "autoMergeOn" : "autoMergeOff" });
-              })
-            }
-          >
-            {busy === "autoMerge"
-              ? pull.autoMerge
-                ? "Turning off…"
-                : "Turning on…"
-              : pull.autoMerge
-                ? "Cancel auto-merge"
-                : "Auto-merge"}
-          </button>
+          />
         )}
       </div>
       {problem && (

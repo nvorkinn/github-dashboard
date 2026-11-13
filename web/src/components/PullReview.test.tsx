@@ -142,3 +142,70 @@ test("uses per-file counts, retains wrap choices, and keeps positions independen
   await waitFor(() => expect(screen.getByText("1 of 2 files")).toBeTruthy());
   expect(screen.getByRole("button", { name: "Wrap lines" }).getAttribute("aria-pressed")).toBe("true");
 });
+
+test("turns auto-merge on and off from the review, like the board", async () => {
+  const initial = pull();
+  const setAutoMerge = vi.fn(async () => ({ merged: false }));
+  const review = {
+    read: async () => ({ pull: initial, description: "", canApprove: true, canMerge: true, reviews: [] }),
+    approve: async () => {},
+  };
+  render(
+    <ActionsContext.Provider
+      value={{
+        files: async () => ({ files: [file], truncated: false }),
+        review,
+        pulls: { setAutoMerge, merge: vi.fn(), updateBranch: vi.fn() },
+      }}
+    >
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  const on = await screen.findByRole("button", { name: "Auto-merge" });
+  await waitFor(() => expect((on as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(on);
+  const off = await screen.findByRole("button", { name: "Cancel auto-merge" });
+  expect(setAutoMerge).toHaveBeenLastCalledWith(initial, true);
+  expect(document.querySelector(".review-metadata")?.textContent).toContain("Auto-merge");
+  fireEvent.click(off);
+  await screen.findByRole("button", { name: "Auto-merge" });
+  expect(setAutoMerge).toHaveBeenLastCalledWith(expect.objectContaining({ autoMerge: true }), false);
+});
+
+test("says merged when turning auto-merge on merges at once", async () => {
+  const initial = pull();
+  render(
+    <ActionsContext.Provider
+      value={{
+        files: async () => ({ files: [file], truncated: false }),
+        review: {
+          read: async () => ({ pull: initial, description: "", canApprove: true, canMerge: true, reviews: [] }),
+          approve: async () => {},
+        },
+        pulls: { setAutoMerge: async () => ({ merged: true }), merge: vi.fn(), updateBranch: vi.fn() },
+      }}
+    >
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  const on = await screen.findByRole("button", { name: "Auto-merge" });
+  await waitFor(() => expect((on as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(on);
+  expect((await screen.findByRole("status")).textContent).toBe("Merged");
+});
+
+test("offers no auto-merge for a draft", async () => {
+  const initial = pull({ draft: true });
+  render(
+    <ActionsContext.Provider
+      value={{
+        files: async () => ({ files: [file], truncated: false }),
+        pulls: { setAutoMerge: vi.fn(), merge: vi.fn(), updateBranch: vi.fn() },
+      }}
+    >
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await screen.findByRole("button", { name: /example.ts/ });
+  expect(screen.queryByRole("button", { name: /auto-merge/i })).toBeNull();
+});

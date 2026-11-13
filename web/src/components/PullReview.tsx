@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
-import { ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
+import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { Icon } from "./Icon.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
@@ -237,6 +237,8 @@ export function PullReview({
   const [tree, setTree] = useState(true);
   const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
+  // Auto-merge as last turned on or off here, until the review is read again.
+  const [autoMerge, setAutoMerge] = useState<boolean>();
   const action = useAction();
   const key = `${current.repo}#${current.number}`;
   const index = Math.max(0, files?.files.findIndex((f) => f.path === paths[key]) ?? 0);
@@ -264,6 +266,7 @@ export function PullReview({
     setInfo(undefined);
     setProblem(undefined);
     setDone("");
+    setAutoMerge(undefined);
     (async () => {
       const loaded = await actions?.files?.(current);
       const details = await actions?.review?.read(current);
@@ -283,7 +286,8 @@ export function PullReview({
       active = false;
     };
   }, [actions, current.repo, current.number, current.sha, revision]);
-  const pull = info?.pull ?? current;
+  const read = info?.pull ?? current;
+  const pull = autoMerge === undefined ? read : { ...read, autoMerge };
   const fresh =
     info?.pull.sha === current.sha && info.pull.repo === current.repo && info.pull.number === current.number;
   return (
@@ -326,6 +330,7 @@ export function PullReview({
             {(pull.draft || pull.mergeState !== "clean") && (
               <span class="review-state">{pull.draft ? "Draft" : pull.mergeState}</span>
             )}
+            {pull.autoMerge && <span class="review-state">Auto-merge</span>}
           </div>
         </div>
         <div class="review-controls">
@@ -367,6 +372,19 @@ export function PullReview({
           >
             <Icon name="check" /> Approve
           </button>
+          {actions?.pulls && (pull.autoMerge || !pull.draft) && (
+            <AutoMergeButton
+              pull={pull}
+              actions={actions.pulls}
+              busy={action.busy === "autoMerge"}
+              disabled={!fresh || action.busy !== undefined || done === "Merged"}
+              run={action.run}
+              onDone={({ enabled, merged }) => {
+                setAutoMerge(enabled);
+                if (merged) setDone("Merged");
+              }}
+            />
+          )}
           <span class="review-merge">
             <ConfirmButton
               label="Merge"
