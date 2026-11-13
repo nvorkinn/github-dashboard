@@ -1505,6 +1505,21 @@ button.action-confirm:hover:not(:disabled) {
     monospace;
 }
 
+/* Unreleased changes: a link to the comparison when there are some, a quiet note when there are none. */
+.unreleased {
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-decoration: none;
+}
+
+a.unreleased:hover {
+  text-decoration: underline;
+}
+
+.unreleased-none {
+  color: var(--quiet);
+}
+
 .hidden-projects {
   display: flex;
   flex-wrap: wrap;

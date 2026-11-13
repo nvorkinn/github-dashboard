@@ -108,6 +108,7 @@ type GqlRepo = {
   rebaseMergeAllowed: boolean;
   autoMergeAllowed: boolean;
   latestRelease: { tagName: string; url: string; publishedAt: string | null; createdAt: string } | null;
+  defaultBranchRef: { name: string } | null;
 };
 type GqlBlob = { text?: string | null } | null;
 type GqlEntry = { path: string; type: string; oid: string; object?: GqlBlob };
@@ -139,8 +140,13 @@ type GqlPull = {
   author: GqlActor;
   statusCheckRollup: { contexts: { pageInfo: { hasNextPage: boolean }; nodes: (GqlContext | null)[] } } | null;
 };
-type GqlDetails = {
+/** A commit with how many commits its history has, itself included. */
+type GqlCounted = { history?: { totalCount?: number } | null } | null;
+export type GqlDetails = {
   workflows: { entries?: GqlEntry[] } | null;
+  /** The two ends of what is unreleased: the default branch's head and the latest release's commit. */
+  defaultBranchRef?: { target?: GqlCounted } | null;
+  latestRelease?: { tagCommit?: GqlCounted } | null;
   pullRequests: { pageInfo: { hasNextPage: boolean }; nodes: (GqlPull | null)[] };
 };
 type GqlJob = {
@@ -189,6 +195,7 @@ const LISTED = `fragment Listed on Repository {
   nameWithOwner name url isPrivate pushedAt
   mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed
   latestRelease { tagName url publishedAt createdAt }
+  defaultBranchRef { name }
 }`;
 
 const PULLS = `fragment Pulls on Repository {
@@ -282,6 +289,8 @@ export function queryFor(asked: Asked): string {
   asked.repos.forEach((repo, index) => {
     fields.push(`r${index}: ${repository(repo)} {
     workflows: object(expression: ${quoted(`HEAD:${WORKFLOWS_FOLDER}`)}) { ... on Tree { entries { path type oid${blob} } } }
+    defaultBranchRef { target { ... on Commit { history(first: 1) { totalCount } } } }
+    latestRelease { tagCommit { history(first: 1) { totalCount } } }
     ...Pulls
   }`);
   });
@@ -594,18 +603,24 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
       }
 
       const answer = details.get(repo);
+      const before = previous?.projects.find(of(repo));
       const was = {
         pulls: previous?.pulls.filter(of(repo)) ?? [],
         releases: previous?.releases.filter(of(repo)) ?? [],
-        promoteWorkflow: previous?.projects.find(of(repo))?.promoteWorkflow,
+        promoteWorkflow: before?.promoteWorkflow,
       };
+      // Kept only while it is the same release.
+      const wasUnreleased = before?.latestRelease?.tag === latestRelease?.tag ? before?.unreleased : undefined;
       if (!answer) {
         // Not answered, or never asked because the read stopped short.
         failed.add(repo);
         if (shape[repo]) {
           nextShape[repo] = shape[repo];
         }
-        return { project: project(raw, latestRelease, settingsOf(raw), was.promoteWorkflow), ...was };
+        return {
+          project: project(raw, latestRelease, settingsOf(raw), was.promoteWorkflow, wasUnreleased),
+          ...was,
+        };
       }
 
       const pulls = await part(() => pullsOf(api, repo, answer), was.pulls);
@@ -645,7 +660,8 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
           nextShape[repo] = shape[repo];
         }
       }
-      return { project: project(raw, latestRelease, settingsOf(raw), promoteWorkflow), pulls, releases };
+      const unreleased = unreleasedOf(answer) ?? wasUnreleased;
+      return { project: project(raw, latestRelease, settingsOf(raw), promoteWorkflow, unreleased), pulls, releases };
     }),
   );
   return {
@@ -678,6 +694,20 @@ function queue<T>(key: (one: T) => string): { add(one: T): void; take(): T[] } {
     },
     take: () => waiting.splice(0),
   };
+}
+
+/**
+ * How many commits the default branch has that the latest release hasn't: its history's count less the release
+ * commit's. That holds while the release was made from the default branch, as this page's are; a release that isn't
+ * on it (a count less than none) can't be told this way.
+ */
+export function unreleasedOf(answer: GqlDetails): number | undefined {
+  const branch = answer.defaultBranchRef?.target?.history?.totalCount;
+  const release = answer.latestRelease?.tagCommit?.history?.totalCount;
+  if (typeof branch !== "number" || typeof release !== "number" || branch < release) {
+    return undefined;
+  }
+  return branch - release;
 }
 
 /** The workflow files of a project: the YAML files directly in its workflows folder. */
@@ -754,6 +784,7 @@ function rawRepo(repo: GqlRepo): RawRepo {
     private: repo.isPrivate,
     archived: false,
     pushed_at: repo.pushedAt,
+    ...(repo.defaultBranchRef ? { default_branch: repo.defaultBranchRef.name } : {}),
     allow_merge_commit: repo.mergeCommitAllowed,
     allow_squash_merge: repo.squashMergeAllowed,
     allow_rebase_merge: repo.rebaseMergeAllowed,

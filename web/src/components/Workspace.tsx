@@ -8,6 +8,7 @@ import { ProjectActions, ProjectList } from "./ProjectList.tsx";
 import { columnOf, PullList } from "./PullList.tsx";
 import { ReleaseList, shownRuns, sortRuns } from "./ReleaseList.tsx";
 import { RepositorySettings } from "./RepositorySettings.tsx";
+import { Unreleased } from "./Unreleased.tsx";
 import "./Workspace.css";
 
 type Scope = string | undefined;
@@ -282,6 +283,7 @@ export function Workspace({
               <h2>{selected ? selected.name : "Overview"}</h2>
               {selected && <span class="badge">{selected.private ? "Private" : "Public"}</span>}
               {selected?.latestRelease && <span class="badge badge-accent">{selected.latestRelease.tag}</span>}
+              {selected && <Unreleased project={selected} />}
             </div>
             <p class="quiet">
               {selected

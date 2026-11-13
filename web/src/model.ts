@@ -129,6 +129,13 @@ export type Project = {
   pushedAt: string | undefined;
   /** The newest published release, if there is one. */
   latestRelease: { tag: string; url: string; publishedAt: string } | undefined;
+  /** The branch releases are made from, such as `main`, when known. */
+  defaultBranch: string | undefined;
+  /**
+   * How many commits the default branch has that the latest release hasn't: changes waiting to go out. Undefined
+   * without a release, or when it couldn't be told.
+   */
+  unreleased: number | undefined;
   /** How the page merges its pull requests: the first way the repository allows, a merge commit first. */
   mergeMethod: MergeMethod;
   /** Whether the repository allows auto-merge. True when its settings couldn't be read: GitHub then says. */
@@ -291,4 +298,13 @@ export const RELEASE_TAG = /^v\d+\.\d+\.\d+$/;
 export function promoteTag(project: Project): string | undefined {
   const tag = project.latestRelease?.tag;
   return project.promoteWorkflow !== undefined && tag !== undefined && RELEASE_TAG.test(tag) ? tag : undefined;
+}
+
+/** GitHub's comparison of the latest release with the default branch: the changes that would go out next. */
+export function unreleasedUrl(project: Project): string | undefined {
+  const tag = project.latestRelease?.tag;
+  const branch = project.defaultBranch;
+  return tag === undefined || branch === undefined
+    ? undefined
+    : `${project.url}/compare/${encodeURIComponent(tag)}...${encodeURIComponent(branch)}`;
 }

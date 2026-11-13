@@ -141,3 +141,23 @@ test("says so when every project is hidden", () => {
   render(<ProjectList now={NOW} projects={[project()]} hidden={new Set(["octocat/weather-station"])} />);
   expect(screen.getByText("Every project is hidden")).toBeTruthy();
 });
+
+test("a project shows how many commits wait for a release, linking to the comparison, or that it is up to date", () => {
+  render(
+    <ProjectList
+      now={NOW}
+      projects={[
+        project({ repo: "octocat/a", name: "a", latestRelease: released("v1.2.3"), unreleased: 3 }),
+        project({ repo: "octocat/b", name: "b", latestRelease: released("v2.0.0"), unreleased: 0 }),
+        project({ repo: "octocat/c", name: "c", latestRelease: undefined, unreleased: undefined }),
+      ]}
+    />,
+  );
+  const [a, b, c] = screen.getAllByRole("listitem");
+  const link = within(a as HTMLElement).getByRole("link", { name: "3 unreleased" });
+  expect(link.getAttribute("href")).toBe("https://github.com/octocat/weather-station/compare/v1.2.3...main");
+  expect(link.getAttribute("title")).toBe("3 commits on main since v1.2.3, waiting for a release. Compare on GitHub.");
+  expect(within(b as HTMLElement).getByText("up to date")).toBeTruthy();
+  expect(within(b as HTMLElement).queryByText(/unreleased/)).toBeNull();
+  expect(within(c as HTMLElement).queryByText(/unreleased|up to date/)).toBeNull();
+});

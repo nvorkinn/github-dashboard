@@ -1,6 +1,14 @@
 import { beforeEach, expect, test } from "vitest";
 import { GitHubError } from "./api.ts";
-import { PULLS_PER_REPO, queryFor, REPOS_PER_REQUEST, readEverything, split, workflowUrl } from "./graphql.ts";
+import {
+  PULLS_PER_REPO,
+  queryFor,
+  REPOS_PER_REQUEST,
+  readEverything,
+  split,
+  unreleasedOf,
+  workflowUrl,
+} from "./graphql.ts";
 import { account, fakeGitHub, job, type Routes, withPull, withWorkflow } from "./testing.ts";
 import { forgetWorkflowFiles } from "./workflow_graph.ts";
 
@@ -337,4 +345,43 @@ test("the query asks only for what it is asked, and writes names as GraphQL stri
   });
   expect(going).toContain('file(path: ".github/workflows/my release.yml") { oid }');
   expect(going).toContain("fragment Going");
+});
+
+test("what is unreleased is read with what is in a project, from the history counts at both ends", async () => {
+  const routes = app();
+  routes["repos/octo/app/releases/latest"] = {
+    tag_name: "v1.0.0",
+    html_url: "https://github.com/octo/app/releases/tag/v1.0.0",
+    created_at: "2026-11-01T00:00:00Z",
+    published_at: "2026-11-01T10:00:00Z",
+  };
+  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 3 };
+  const { auth, calls, queries } = fakeGitHub(routes);
+  const { data } = await readEverything(auth);
+  expect(calls.every((path) => path === "graphql")).toBe(true);
+  expect(queries[0]).toContain("defaultBranchRef { name }");
+  expect(queries[1]).toContain("latestRelease { tagCommit { history(first: 1) { totalCount } } }");
+  expect(data.projects.map((one) => [one.repo, one.defaultBranch, one.unreleased])).toEqual([
+    ["octo/app", "main", 3],
+    // No release: nothing to compare with.
+    ["octo/lib", "main", undefined],
+  ]);
+});
+
+test.each([
+  ["the branch ahead", 120, 117, 3],
+  ["nothing since", 117, 117, 0],
+  ["a release that isn't on the branch", 100, 117, undefined],
+  ["no release", 100, undefined, undefined],
+  ["no branch", undefined, 117, undefined],
+])("unreleased, %s", (_, branch, release, expected) => {
+  const counted = (count: number | undefined) => (count === undefined ? null : { history: { totalCount: count } });
+  expect(
+    unreleasedOf({
+      workflows: null,
+      pullRequests: { pageInfo: { hasNextPage: false }, nodes: [] },
+      defaultBranchRef: branch === undefined ? null : { target: counted(branch) },
+      latestRelease: release === undefined ? null : { tagCommit: counted(release) },
+    }),
+  ).toBe(expected);
 });

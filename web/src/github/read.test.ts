@@ -148,6 +148,7 @@ test("projects are the installations' repositories, without archived ones, the l
       created_at: "2026-11-09T00:00:00Z",
       published_at: "2026-11-09T10:00:00Z",
     },
+    "repos/acme/new/compare/v2.1.0...main": { ahead_by: 4 },
     "repos/octo/old/pulls": [],
     "repos/octo/old/actions/workflows": { total_count: 0, workflows: [] },
     "repos/acme/new/pulls": [],
@@ -169,6 +170,9 @@ test("projects are the installations' repositories, without archived ones, the l
         url: "https://github.com/acme/new/releases/tag/v2.1.0",
         publishedAt: "2026-11-09T10:00:00Z",
       },
+      defaultBranch: "main",
+      // Commits on main since v2.1.0.
+      unreleased: 4,
       mergeMethod: "squash",
       autoMergeAllowed: false,
     },
@@ -180,6 +184,8 @@ test("projects are the installations' repositories, without archived ones, the l
       pushedAt: "2026-01-01T00:00:00Z",
       // A 404 from releases/latest.
       latestRelease: undefined,
+      defaultBranch: "main",
+      unreleased: undefined,
       mergeMethod: "merge",
       autoMergeAllowed: true,
     },
@@ -503,7 +509,11 @@ test.each<[string, Change[], Plan]>([
     [{ kind: "deployment_review", repo: "octo/app", run: 9 }],
     plan({ "octo/app": { releases: true, pulls: "all" } }),
   ],
-  ["a push", [{ kind: "push", repo: "octo/app", sha: "main2" }], plan({ "octo/app": { pulls: "all" } })],
+  [
+    "a push",
+    [{ kind: "push", repo: "octo/app", sha: "main2" }],
+    plan({ "octo/app": { pulls: "all", latestRelease: true } }),
+  ],
   ["a release", [{ kind: "release", repo: "octo/lib" }], plan({ "octo/lib": { latestRelease: true } })],
   [
     "a burst",
@@ -524,7 +534,7 @@ test.each<[string, Change[], Plan]>([
       { kind: "push", repo: "octo/app" },
       { kind: "check_run", repo: "octo/app", pull: 2 },
     ],
-    plan({ "octo/app": { pulls: "all" } }),
+    plan({ "octo/app": { pulls: "all", latestRelease: true } }),
   ],
   ["a repository that changed", [{ kind: "repository", repo: "octo/app", action: "archived" }], "everything"],
   ["an installation", [{ kind: "installation", action: "created" }], "everything"],
@@ -798,6 +808,7 @@ test("a release reads the repository's latest release", async () => {
     created_at: "2026-11-05T00:00:00Z",
     published_at: null,
   };
+  routes["repos/octo/app/compare/v1.1.0...main"] = { ahead_by: 0 };
   const { data, calls } = await changed(
     routes,
     [
@@ -806,7 +817,11 @@ test("a release reads the repository's latest release", async () => {
     ],
     before,
   );
-  expect(calls).toEqual(["repos/octo/app/releases/latest", "repos/octo/lib/releases/latest"]);
+  expect(calls).toEqual([
+    "repos/octo/app/compare/v1.1.0...main?per_page=1",
+    "repos/octo/app/releases/latest",
+    "repos/octo/lib/releases/latest",
+  ]);
   expect(data.projects).toEqual([
     {
       ...before.projects[0],
@@ -815,19 +830,26 @@ test("a release reads the repository's latest release", async () => {
         url: "https://github.com/octo/app/releases/tag/v1.1.0",
         publishedAt: "2026-11-05T00:00:00Z",
       },
+      // Nothing on main since the release.
+      unreleased: 0,
     },
     before.projects[1],
   ]);
   expect(data.pulls).toEqual(before.pulls);
 });
 
-test("a push reads every pull request of the repository, as their base may have moved", async () => {
+test("a push reads every pull request of the repository, as their base may have moved, and what is unreleased", async () => {
   const { routes, before } = await everything();
   routes["repos/octo/app/pulls/1"] = { ...(routes["repos/octo/app/pulls/1"] as object), mergeable_state: "behind" };
+  routes["repos/octo/app/compare/v1.0.0...main"] = { ahead_by: 2 };
   withPull(routes, "octo/app", 3);
   const { data, calls } = await changed(routes, [{ kind: "push", repo: "octo/app", sha: "main2" }], before);
+  expect(before.projects[0]?.unreleased).toBeUndefined();
+  expect(data.projects[0]?.unreleased).toBe(2);
   expect(calls).toEqual(
     [
+      "repos/octo/app/releases/latest",
+      "repos/octo/app/compare/v1.0.0...main?per_page=1",
       "repos/octo/app/pulls?state=open&per_page=100",
       ...pullCalls("octo/app", 1),
       ...pullCalls("octo/app", 2),

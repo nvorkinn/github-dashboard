@@ -27,6 +27,7 @@ export type RawRepo = {
   private: boolean;
   archived: boolean;
   pushed_at: string | null;
+  default_branch?: string;
   // Only in some answers (a repository's own page, for a user who can push to it), so each may be missing.
   allow_merge_commit?: boolean;
   allow_squash_merge?: boolean;
@@ -34,6 +35,7 @@ export type RawRepo = {
   allow_auto_merge?: boolean;
 };
 export type RawRelease = { tag_name: string; html_url: string; published_at: string | null; created_at: string };
+export type RawComparison = { ahead_by: number };
 export type RawPull = {
   number: number;
   state: string;
@@ -101,6 +103,7 @@ export type RepoPlan = {
   releases: boolean;
   /** Only the runs with these ids, each read by itself. Left out, none. */
   runs?: Set<number>;
+  /** The latest release, and how many commits on the default branch it hasn't. */
   latestRelease: boolean;
 };
 
@@ -143,7 +146,8 @@ const SHOWN = new Set([
  *   pull request it is about. Whether it is one is known from the workflow file's path, which a `workflow_run`
  *   carries, and the project's `releasePaths`; a change without a path is found out by reading the run. A change
  *   that names no run, or a project whose release workflows aren't known, reads all the repository's release runs.
- * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged.
+ * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged; and the
+ *   latest release, as the default branch may have moved past it.
  * - `release`: the repository's latest release.
  *
  * The pull request a change is about is the one it numbers, or else the ones whose head is its commit: none for a
@@ -210,6 +214,7 @@ export function planFor(
       }
       case "push":
         repo.pulls = "all";
+        repo.latestRelease = true;
         break;
       case "release":
         repo.latestRelease = true;
@@ -264,7 +269,14 @@ export async function readChanged(
   );
   const projects = previous.projects.map((one) => {
     const parts = read.get(one.repo);
-    return parts ? { ...one, latestRelease: parts.latestRelease, promoteWorkflow: parts.promoteWorkflow } : one;
+    return parts
+      ? {
+          ...one,
+          latestRelease: parts.latestRelease,
+          unreleased: parts.unreleased,
+          promoteWorkflow: parts.promoteWorkflow,
+        }
+      : one;
   });
   return {
     data: {
@@ -289,6 +301,7 @@ export function problemOf(failed: Set<string>): string | undefined {
 
 type RepoParts = {
   latestRelease: Project["latestRelease"];
+  unreleased: Project["unreleased"];
   pulls: PullRequest[];
   releases: ReleaseRun[];
   promoteWorkflow: Project["promoteWorkflow"];
@@ -308,6 +321,7 @@ async function readRepo(
 ): Promise<RepoParts> {
   const was: RepoParts = {
     latestRelease: previous?.projects.find(of(repo))?.latestRelease,
+    unreleased: previous?.projects.find(of(repo))?.unreleased,
     pulls: previous?.pulls.filter(of(repo)) ?? [],
     releases: previous?.releases.filter(of(repo)) ?? [],
     promoteWorkflow: previous?.projects.find(of(repo))?.promoteWorkflow,
@@ -329,8 +343,16 @@ async function readRepo(
   }
 
   const numbers = wanted.pulls;
-  const [latestRelease, pulls, releases] = await Promise.all([
-    part(wanted.latestRelease, () => latest(api, repo), was.latestRelease),
+  const branch = previous?.projects.find(of(repo))?.defaultBranch;
+  const [{ latestRelease, unreleased }, pulls, releases] = await Promise.all([
+    part(
+      wanted.latestRelease,
+      async () => {
+        const found = await latest(api, repo);
+        return { latestRelease: found, unreleased: await unreleasedOf(api, repo, found?.tag, branch) };
+      },
+      { latestRelease: was.latestRelease, unreleased: was.unreleased },
+    ),
     part(
       numbers === "all" || numbers.size > 0,
       () => (numbers === "all" ? pullRequests(api, repo) : somePullRequests(api, repo, numbers, was.pulls)),
@@ -349,7 +371,7 @@ async function readRepo(
       { runs: was.releases, promoteWorkflow: was.promoteWorkflow },
     ),
   ]);
-  return { latestRelease, pulls, releases: releases.runs, promoteWorkflow: releases.promoteWorkflow };
+  return { latestRelease, unreleased, pulls, releases: releases.runs, promoteWorkflow: releases.promoteWorkflow };
 }
 
 export type MergeSettings = Pick<Project, "mergeMethod" | "autoMergeAllowed">;
@@ -388,6 +410,7 @@ export function project(
   latestRelease: Project["latestRelease"],
   settings: MergeSettings,
   promoteWorkflow: Project["promoteWorkflow"],
+  unreleased: Project["unreleased"] = undefined,
 ): Project {
   return {
     repo: repo.full_name,
@@ -396,6 +419,8 @@ export function project(
     private: repo.private,
     pushedAt: repo.pushed_at ?? undefined,
     latestRelease,
+    defaultBranch: repo.default_branch,
+    unreleased: latestRelease ? unreleased : undefined,
     mergeMethod: settings.mergeMethod,
     autoMergeAllowed: settings.autoMergeAllowed,
     promoteWorkflow,
@@ -405,6 +430,24 @@ export function project(
 async function latest(api: Api, repo: string): Promise<Project["latestRelease"]> {
   // GitHub answers 404 for a repository without a published release.
   return latestOf(await unlessGone(api.get<RawRelease>(`repos/${repo}/releases/latest`)));
+}
+
+/**
+ * How many commits `branch` has that the release `tag` hasn't, from GitHub's comparison of the two; undefined
+ * without a release or a branch to compare. Asks for one commit of the list only: the count is what is used.
+ */
+async function unreleasedOf(
+  api: Api,
+  repo: string,
+  tag: string | undefined,
+  branch: string | undefined,
+): Promise<number | undefined> {
+  if (tag === undefined || branch === undefined) {
+    return undefined;
+  }
+  const path = `repos/${repo}/compare/${encodeURIComponent(tag)}...${encodeURIComponent(branch)}?per_page=1`;
+  const comparison = await unlessGone(api.get<RawComparison>(path));
+  return typeof comparison?.ahead_by === "number" ? comparison.ahead_by : undefined;
 }
 
 export function latestOf(release: RawRelease | undefined): Project["latestRelease"] {
