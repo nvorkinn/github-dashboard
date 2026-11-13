@@ -480,42 +480,45 @@ export function PullRow({
         )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
       </div>
-      {readFiles && (
-        <button type="button" class="action" onClick={() => setReviewOpen(true)}>
-          Review changes
-        </button>
-      )}
       {reviewOpen && <PullReview initial={pull} pulls={reviewPulls ?? [pull]} onClose={() => setReviewOpen(false)} />}
       <Checks checks={pull.checks} folded={folded} />
-      {actions && done?.what !== "merged" && (
-        <PullButtons pull={pull} actions={actions} updated={done?.what === "updated"} onDone={setDone} />
-      )}
+      <PullButtons
+        pull={pull}
+        actions={done?.what === "merged" ? undefined : actions}
+        updated={done?.what === "updated"}
+        onDone={setDone}
+        onReview={readFiles && (() => setReviewOpen(true))}
+      />
       {readFiles && !folded && <FilesChanged pull={pull} read={readFiles} />}
     </li>
   );
 }
 
 /**
- * The buttons for what can be done to a pull request now, and why the last one didn't work. Auto-merge can be turned
- * on for one that isn't a draft, and off for any; a pull request that is ready can be merged, after a confirmation
- * as that can't be undone; one that is behind its base can have its branch updated.
+ * The buttons for what can be done to a pull request now, and why the last one didn't work. Its changes can be
+ * reviewed when the files can be read (`onReview`). With `actions`: auto-merge can be turned on for one that isn't a
+ * draft, and off for any; a pull request that is ready can be merged, after a confirmation as that can't be undone;
+ * one that is behind its base can have its branch updated. They all sit in the one group, which wraps as a whole
+ * rather than letting a button land on the states or checks beside it.
  */
 function PullButtons({
   pull,
   actions,
   updated,
   onDone,
+  onReview,
 }: {
   pull: PullRequest;
-  actions: PullActions;
+  actions: PullActions | undefined;
   updated: boolean;
   onDone: (done: Done) => void;
+  onReview: (() => void) | undefined;
 }) {
   const { busy, problem, run } = useAction();
-  const canMerge = pull.mergeState === "clean" && !pull.draft;
-  const canUpdate = pull.mergeState === "behind" && !updated;
-  const canAutoMerge = pull.autoMerge || !pull.draft;
-  if (!canMerge && !canUpdate && !canAutoMerge) {
+  const canMerge = actions !== undefined && pull.mergeState === "clean" && !pull.draft;
+  const canUpdate = actions !== undefined && pull.mergeState === "behind" && !updated;
+  const canAutoMerge = actions !== undefined && (pull.autoMerge || !pull.draft);
+  if (!onReview && !canMerge && !canUpdate && !canAutoMerge) {
     return null;
   }
   const subject = `#${pull.number} in ${shortName(pull.repo)}`;
@@ -523,7 +526,12 @@ function PullButtons({
     <div class="pull-actions">
       {/* biome-ignore lint/a11y/useSemanticElements: a fieldset would bring a border and a legend it doesn't need. */}
       <div class="action-buttons" role="group" aria-label={`Actions for ${subject}`}>
-        {canMerge && (
+        {onReview && (
+          <button type="button" class="action" onClick={onReview}>
+            Review changes
+          </button>
+        )}
+        {actions && canMerge && (
           <ConfirmButton
             label="Merge"
             confirmLabel="Confirm merge"
@@ -538,7 +546,7 @@ function PullButtons({
             }
           />
         )}
-        {canUpdate && (
+        {actions && canUpdate && (
           <button
             type="button"
             class="action"
@@ -553,7 +561,7 @@ function PullButtons({
             {busy === "update" ? "Updating…" : "Update branch"}
           </button>
         )}
-        {canAutoMerge && (
+        {actions && canAutoMerge && (
           <AutoMergeButton
             pull={pull}
             actions={actions}
