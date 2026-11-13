@@ -494,9 +494,39 @@
 .review-diff :where(.d2h-file-side-diff) + .d2h-file-side-diff {
   border-left: 1px solid var(--review-border);
 }
+/* The chosen text size is a step from 0 (small) to 2 (large); large is the size the diff always had. */
+.pull-review {
+  --diff-step: 1;
+}
+.pull-review[data-diff-font="small"] {
+  --diff-step: 0;
+}
+.pull-review[data-diff-font="large"] {
+  --diff-step: 2;
+}
+.review-diff {
+  --diff-font-size: calc(11px + var(--diff-step) * 1px);
+  --diff-line-height: calc(19px + var(--diff-step) * 2px);
+}
+.review-font-controls button {
+  min-width: 2.2em;
+}
+.review-font-glyph {
+  line-height: 1;
+  font-weight: 600;
+}
+.review-font-small {
+  font-size: 0.72rem;
+}
+.review-font-medium {
+  font-size: 0.88rem;
+}
+.review-font-large {
+  font-size: 1.05rem;
+}
 .review-diff .d2h-diff-table {
   font:
-    13px / 23px ui-monospace,
+    var(--diff-font-size) / var(--diff-line-height) ui-monospace,
     SFMono-Regular,
     Menlo,
     Consolas,
@@ -595,9 +625,9 @@
   color: var(--review-muted);
 }
 @media (min-width: 2200px) {
-  .review-diff .d2h-diff-table {
-    font-size: 14px;
-    line-height: 25px;
+  .review-diff {
+    --diff-font-size: calc(12px + var(--diff-step) * 1px);
+    --diff-line-height: calc(21px + var(--diff-step) * 2px);
   }
 }
 @media (max-width: 1300px) {
@@ -648,8 +678,8 @@
   .review-tree {
     padding: 10px 5px;
   }
-  .review-diff .d2h-diff-table {
-    font-size: 12px;
+  .review-diff {
+    --diff-font-size: calc(10px + var(--diff-step) * 1px);
   }
 }
 @media (max-width: 520px) {
@@ -696,7 +726,7 @@
   min-width: 98px;
 }
 .review-diff .d2h-code-side-emptyplaceholder {
-  min-height: 23px;
+  min-height: var(--diff-line-height);
 }
 
 /* Alignment placeholders represent absent lines, never blank source lines. */
