@@ -80,7 +80,7 @@ test("filters the compact file tree without changing the selected diff", async (
     </ActionsContext.Provider>,
   );
   await screen.findByRole("button", { name: /example.ts/ });
-  expect(screen.getByText("nested/folder/")).toBeTruthy();
+  expect(screen.getByText("nested/folder")).toBeTruthy();
   const search = screen.getByRole("searchbox", { name: "Filter changed files" });
   fireEvent.input(search, { target: { value: "OTHER" } });
   expect(screen.queryByRole("button", { name: /example.ts/ })).toBeNull();
