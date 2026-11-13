@@ -408,6 +408,37 @@ const buttons = () =>
     .filter((button) => !button.classList.contains("fold-toggle"))
     .map((button) => button.textContent);
 
+// Left on its own, a button would take a free cell of the row's grid, such as the avatar's column, and lie on the states.
+test("keeps Review changes with the other buttons, in the one group that wraps", () => {
+  const files = () => Promise.resolve({ files: [], truncated: false });
+  const { unmount } = render(
+    <ActionsContext.Provider value={{ pulls: fakeActions().actions, files }}>
+      <PullList now={NOW} pulls={[pull({ mergeState: "clean" })]} />
+    </ActionsContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Details of #1 in weather-station" }));
+  const group = screen.getByRole("group", { name: "Actions for #1 in weather-station" });
+  expect(
+    within(group)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Review changes", "Merge", "Auto-merge"]);
+  unmount();
+
+  // With files to read but nothing to do to the pull request, Review changes still has its place.
+  render(
+    <ActionsContext.Provider value={{ files }}>
+      <PullList now={NOW} pulls={[pull()]} />
+    </ActionsContext.Provider>,
+  );
+  const alone = screen.getByRole("group", { name: "Actions for #1 in weather-station" });
+  expect(
+    within(alone)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Review changes"]);
+});
+
 test("has no buttons where nothing can be done", () => {
   render(<PullList now={NOW} pulls={[pull()]} />);
   expect(buttons()).toEqual([]);

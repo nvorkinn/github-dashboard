@@ -1474,25 +1474,34 @@ button.action-confirm:hover:not(:disabled) {
 
 /* Projects */
 
+/*
+ * The name, with the release at the line's end while both fit; when they don't, the release goes under the name
+ * rather than squeezing it a letter to a line.
+ */
 .project {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
   align-items: baseline;
+  gap: 0.25rem 0.75rem;
 }
 
 .project-name {
+  flex: 1 1 auto;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem 0.5rem;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .project-release {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: 0.25rem 0.5rem;
   font-size: 0.8125rem;
   white-space: nowrap;
 }
@@ -1571,7 +1580,7 @@ a.unreleased:hover {
 }
 
 .project-actions {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
   margin-top: 0.5rem;
 }
 
