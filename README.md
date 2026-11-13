@@ -9,6 +9,8 @@ It replaces the dashboard inside countdown-server once it does everything that o
 ## Layout
 
 - `web/`: the page, Preact and TypeScript, built by Vite into `dist/web`.
+  The diff's file and folder icons are from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)
+  (MIT), a chosen few listed in `web/src/components/file_icons.ts`.
 - `web/public/`: files copied into the build as they are: the favicon (`favicon.svg`, with `favicon.ico` and
   `apple-touch-icon.png` rendered from it for browsers and home screens that don't take SVG).
 - `relay/`: the relay, TypeScript that Node runs as it is (no compile step). It serves the built page.

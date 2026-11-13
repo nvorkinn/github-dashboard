@@ -5,6 +5,7 @@ import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
+import { fileIcon, folderIcon } from "./file_icons.ts";
 import { Icon } from "./Icon.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
 
@@ -128,18 +129,25 @@ function FileDiff({ file, split, wrap }: { file: ChangedFile; split: boolean; wr
   );
 }
 
+/** A folder's open or closed state, larger than a text arrow so that folders read apart from files. */
+function Chevron() {
+  return (
+    <svg class="review-chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="m6 3.5 4.5 4.5L6 12.5" />
+    </svg>
+  );
+}
+
 function FileTree({
   files,
   selected,
   choose,
   prefix = "",
-  depth = 0,
 }: {
   files: ChangedFile[];
   selected: string | undefined;
   choose: (path: string) => void;
   prefix?: string;
-  depth?: number;
 }) {
   const folders = new Map<string, ChangedFile[]>();
   const leaves: ChangedFile[] = [];
@@ -171,21 +179,18 @@ function FileTree({
             folder += `${next[0]}/`;
           }
         }
+        const name = folder.slice(0, -1);
         return (
           <details key={folder} open>
-            <summary>
-              <Icon name="folder" />
-              <span>{folder}</span>
+            <summary title={`${prefix}${name}`}>
+              <Chevron />
+              <img class="review-file-icon review-folder-closed" src={folderIcon(name, false)} alt="" />
+              <img class="review-file-icon review-folder-open" src={folderIcon(name, true)} alt="" />
+              <span class="review-folder-name">{name}</span>
               <span class="review-count">{group.length}</span>
             </summary>
-            <div class={depth < 2 ? "review-folder" : "review-folder review-folder-deep"}>
-              <FileTree
-                files={group}
-                selected={selected}
-                choose={choose}
-                prefix={`${prefix}${folder}`}
-                depth={depth + 1}
-              />
+            <div class="review-folder">
+              <FileTree files={group} selected={selected} choose={choose} prefix={`${prefix}${folder}`} />
             </div>
           </details>
         );
@@ -194,11 +199,13 @@ function FileTree({
         <button
           type="button"
           key={file.path}
+          class={`review-file review-status-${file.status}`}
           aria-current={file.path === selected ? "true" : undefined}
           title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}
           onClick={() => choose(file.path)}
         >
-          <Icon name="file" />
+          <span class="review-chevron-space" />
+          <img class="review-file-icon" src={fileIcon(file.path)} alt="" />
           <span class="review-filename">{file.path.slice(prefix.length)}</span>
           <span
             class="review-stats"
@@ -500,7 +507,11 @@ export function PullReview({
         <section class="review-code" aria-label="File diff">
           <div class="review-toolbar">
             <div class="review-file-title">
-              <Icon name="file" size={20} />
+              {file ? (
+                <img class="review-file-icon" src={fileIcon(file.path)} alt="" width="20" height="20" />
+              ) : (
+                <Icon name="file" size={20} />
+              )}
               <strong title={file?.path}>{file?.path ?? "File diff"}</strong>
               {file && (
                 <span class="review-stats">

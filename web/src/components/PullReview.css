@@ -252,55 +252,111 @@
   min-height: 0;
   scrollbar-width: thin;
 }
+/* Each level steps in by a chevron and a gap, so a child's chevron sits under its folder's icon, as in an IDE. A
+   guide runs down from the folder's chevron to its last child. */
 .review-folder {
-  padding-left: 12px;
+  --indent: 22px;
+  margin-left: 12px;
+  padding-left: calc(var(--indent) - 13px);
+  border-left: 1px solid #4a476580;
 }
-.review-tree summary {
+.review-tree details:has(> summary:hover) > .review-folder {
+  border-left-color: #8c79bc99;
+}
+.review-tree summary,
+.review-tree button {
   display: flex;
   align-items: center;
-  gap: 7px;
-  cursor: pointer;
-  padding: 7px 5px;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  margin: 1px 0;
+  padding: 5px 8px 5px 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   font-size: 0.88rem;
+  text-align: left;
 }
-.review-tree summary::before {
-  content: "▸";
-  font-size: 0.7rem;
-  width: 8px;
+.review-tree summary {
+  list-style: none;
+  cursor: pointer;
+  color: #e4e1f4;
+}
+.review-tree summary::-webkit-details-marker {
+  display: none;
+}
+.review-tree summary:hover {
+  background: #ffffff0a;
+}
+.review-tree summary:focus-visible {
+  outline: 2px solid var(--review-purple);
+  outline-offset: -2px;
+}
+.review-chevron,
+.review-chevron-space {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+.review-chevron {
+  fill: none;
+  stroke: #c9c3e3;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 120ms ease;
+}
+.review-tree summary:hover .review-chevron {
+  stroke: #fff;
+}
+.review-tree details[open] > summary .review-chevron {
+  transform: rotate(90deg);
+}
+.review-file-icon {
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
 }
-.review-tree details[open] > summary::before {
-  content: "▾";
+.review-file-title .review-file-icon {
+  width: 20px;
+  height: 20px;
 }
-.review-tree :where(summary) .ui-icon {
-  color: #b4a4d9;
-  fill: #b4a4d933;
-  flex-shrink: 0;
+.review-tree details:not([open]) > summary .review-folder-open,
+.review-tree details[open] > summary .review-folder-closed {
+  display: none;
 }
-.review-tree summary > span:first-of-type {
+.review-folder-name {
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .review-tree summary .review-count {
   margin-left: auto;
 }
 .review-tree button {
-  display: flex;
-  width: 100%;
-  text-align: left;
   justify-content: flex-start;
-  margin: 2px 0;
-  padding: 7px 8px;
   background: transparent;
-  border-color: transparent;
   white-space: normal;
+  font-weight: 400;
 }
-.review-tree :where(button) .ui-icon {
-  flex-shrink: 0;
-  color: #d4c9f3;
+.review-tree button:hover {
+  background: #ffffff0f;
 }
 .review-filename {
   overflow-wrap: anywhere;
   min-width: 0;
+}
+/* Names in the colours an IDE gives changes: green new, red struck-through gone, blue moved. */
+.review-status-added .review-filename {
+  color: var(--review-green);
+}
+.review-status-removed .review-filename {
+  color: var(--review-red);
+  text-decoration: line-through;
+  text-decoration-color: #f3a0ac99;
+}
+.review-status-renamed .review-filename,
+.review-status-copied .review-filename {
+  color: #8cc8ff;
 }
 .review-stats {
   display: inline-flex;
@@ -409,10 +465,6 @@
 }
 .review-shortcut {
   display: none;
-}
-.review-folder-deep {
-  padding-left: 6px;
-  border-left: 1px solid #48456355;
 }
 .review-diff {
   min-width: 0;
@@ -591,7 +643,7 @@
     flex-basis: 100%;
   }
   .review-folder {
-    padding-left: 10px;
+    --indent: 18px;
   }
   .review-tree {
     padding: 10px 5px;
