@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { DEFAULT_SETTINGS, type Notifier, type Permission, readSettings } from "../notifications.ts";
-import { Settings } from "./Settings.tsx";
+import { isSafariTab, Settings } from "./Settings.tsx";
 
 afterEach(() => {
   cleanup();
@@ -90,4 +90,45 @@ test("offers auto, light and dark, starting on auto, and applies the one chosen"
   fireEvent.click(auto);
   expect(auto.checked).toBe(true);
   expect(document.documentElement.dataset.theme).toBeUndefined();
+});
+
+test("in a Safari tab, says how to get the dashboard's icon on notifications", () => {
+  render(<Settings notifier={notifier()} current={() => "granted"} safariTab />);
+  expect(screen.getByText(/add it to the Dock/)).toBeTruthy();
+  cleanup();
+  render(<Settings notifier={notifier()} current={() => "granted"} safariTab={false} />);
+  expect(screen.queryByText(/add it to the Dock/)).toBeNull();
+});
+
+test.each([
+  [
+    "Safari",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+    false,
+    true,
+  ],
+  [
+    "Safari from the Dock",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+    true,
+    false,
+  ],
+  [
+    "Chrome",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    false,
+    false,
+  ],
+  [
+    "Edge",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    false,
+    false,
+  ],
+])("%s: is a Safari tab or not", (_name, agent, standalone, expected) => {
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: standalone && query === "(display-mode: standalone)" }));
+  expect(isSafariTab()).toBe(expected);
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
