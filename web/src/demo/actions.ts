@@ -46,6 +46,8 @@ export function applyEdits(data: DashboardData, edits: DemoEdits): DashboardData
             url: `${project.url}/releases/tag/${release.tag}`,
             publishedAt: new Date(release.at).toISOString(),
           },
+          // The release takes the default branch as it is.
+          unreleased: 0,
         }
       : project;
   });

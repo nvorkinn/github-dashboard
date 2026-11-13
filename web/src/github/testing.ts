@@ -143,6 +143,7 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
               createdAt: release.created_at,
             }
           : null,
+        defaultBranchRef: one.default_branch ? { name: one.default_branch } : null,
       });
     }
     nodes.sort((a, b) => (b.pushedAt ?? "").localeCompare(a.pushedAt ?? ""));
@@ -226,8 +227,15 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     const open: Json[] = (await get(`repos/${repo}/pulls`)) ?? [];
     const pulls = await Promise.all(open.map((one) => pullOf(repo, one.number)));
     const files = await entries(repo, withText);
+    // What is unreleased, from the comparison a test gave as a route, as counts of the two ends' histories.
+    const compare = Object.keys(routes).find((key) => key.startsWith(`repos/${repo}/compare/`));
+    const ahead = compare === undefined ? undefined : (await get(compare))?.ahead_by;
+    const counted = (count: number) => ({ history: { totalCount: count } });
     return {
       workflows: files ? { entries: files } : null,
+      ...(typeof ahead === "number"
+        ? { defaultBranchRef: { target: counted(100 + ahead) }, latestRelease: { tagCommit: counted(100) } }
+        : {}),
       pullRequests: { pageInfo: { hasNextPage: false }, nodes: pulls.filter((one) => one !== undefined) },
     };
   }

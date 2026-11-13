@@ -5,6 +5,7 @@ import { ExternalLink } from "./ExternalLink.tsx";
 import { ProjectActions } from "./ProjectList.tsx";
 import { PullRow, sortPulls } from "./PullList.tsx";
 import { ReleaseCard, shownRuns, sortRuns } from "./ReleaseList.tsx";
+import { Unreleased } from "./Unreleased.tsx";
 import type { LaneColumns } from "./ViewSwitch.tsx";
 
 /**
@@ -110,7 +111,8 @@ function Lane({
               </a>{" "}
               <span class="quiet">
                 <Ago at={project.latestRelease.publishedAt} now={now} />
-              </span>
+              </span>{" "}
+              <Unreleased project={project} />
             </>
           ) : (
             <span class="quiet">no release yet</span>

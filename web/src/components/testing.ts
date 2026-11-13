@@ -76,6 +76,8 @@ export function project(fields: Partial<Project> = {}): Project {
     private: false,
     pushedAt: undefined,
     latestRelease: undefined,
+    defaultBranch: "main",
+    unreleased: undefined,
     mergeMethod: "merge",
     autoMergeAllowed: true,
     promoteWorkflow: undefined,

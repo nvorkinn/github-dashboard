@@ -3,6 +3,7 @@ import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { RunAction } from "./RunAction.tsx";
+import { Unreleased } from "./Unreleased.tsx";
 
 /**
  * One row per project, with its latest release, and buttons to release it and promote that release. With `onToggle`
@@ -53,6 +54,7 @@ export function ProjectList({
                     <span class="quiet">
                       <Ago at={project.latestRelease.publishedAt} now={now} />
                     </span>
+                    <Unreleased project={project} />
                   </>
                 ) : (
                   <span class="quiet">no release yet</span>
