@@ -172,12 +172,6 @@ body:has(.workspace) {
   border-radius: 0.55rem;
 }
 
-.command-top .view-switch button {
-  min-height: 1.75rem;
-  padding-inline: 0.55rem;
-  font-size: 0.68rem;
-}
-
 .command-top .freshness {
   flex-wrap: nowrap;
 }
@@ -185,13 +179,6 @@ body:has(.workspace) {
 .command-top .updated,
 .command-top .login {
   display: none;
-}
-
-.command-top > .top-controls > .button,
-.command-top .account > button {
-  min-height: 1.85rem;
-  padding: 0.25rem 0.55rem;
-  font-size: 0.68rem;
 }
 
 .command-top .account {
@@ -391,12 +378,6 @@ body:has(.workspace) {
   overflow-wrap: anywhere;
 }
 
-.workspace .workspace-manage button {
-  min-height: 1.55rem;
-  padding-inline: 0.45rem;
-  font-size: 0.64rem;
-}
-
 .workspace-main {
   min-width: 0;
   padding: 0 1.25rem 2rem;
@@ -515,16 +496,6 @@ body:has(.workspace) {
   align-items: center;
   justify-content: flex-end;
   gap: 0.45rem;
-}
-
-.workspace .workspace-intro-actions > a,
-.workspace .workspace-intro-actions button {
-  min-height: 2rem;
-  padding: 0.3rem 0.65rem;
-  font-size: 0.7rem;
-  background: #111c2c;
-  border: 1px solid #32425c;
-  border-radius: 0.45rem;
 }
 
 .workspace-metrics {
@@ -648,9 +619,7 @@ body:has(.workspace) {
 .workspace-view-all {
   justify-self: end;
   margin-top: -0.35rem;
-  padding: 0.35rem 0.65rem;
   color: var(--link);
-  font-size: 0.7rem;
   background: transparent;
   border-color: transparent;
 }
@@ -698,11 +667,6 @@ body:has(.workspace) {
   gap: 0.35rem;
 }
 
-.workspace .pull-save-view,
-.workspace .pull-remove-view {
-  min-height: 1.8rem;
-}
-
 .workspace .pull-filter,
 .workspace .order {
   display: flex;
@@ -713,14 +677,6 @@ body:has(.workspace) {
 .workspace .pull-filter,
 .workspace .order {
   font-size: 0.68rem;
-}
-
-.workspace .pull-filter select,
-.workspace .order select {
-  min-height: 1.8rem;
-  padding: 0.2rem 1.7rem 0.2rem 0.5rem;
-  font-size: 0.68rem;
-  background-color: #121d2d;
 }
 
 .workspace .empty {
@@ -749,11 +705,13 @@ body:has(.workspace) {
   border-bottom: 0;
 }
 
+/* One line where there is room: the title, then badges, checks and buttons at its end. What doesn't fit goes to a
+   second line rather than over its neighbour. */
 .workspace .pull.pull-folded {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(14rem, 1fr) auto auto auto;
-  grid-template-areas: "main badges checks actions";
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: flex-end;
   gap: 0.55rem;
   align-items: center;
   min-height: 4.4rem;
@@ -784,7 +742,7 @@ body:has(.workspace) {
 }
 
 .workspace .pull-folded > .pull-main {
-  grid-area: main;
+  flex: 1 1 14rem;
   min-width: 0;
 }
 
@@ -833,44 +791,24 @@ body:has(.workspace) {
   font-size: inherit;
 }
 
+/* Badges and buttons wrap rather than run over each other when a row is short of room. */
 .workspace .pull-folded > .pull-badges {
-  grid-area: badges;
-  flex-flow: row nowrap;
+  flex-flow: row wrap;
   align-items: center;
   padding: 0;
 }
 
 .workspace .pull-folded > .checks {
-  grid-area: checks;
   white-space: nowrap;
 }
 
 .workspace .pull-folded > .pull-actions {
-  grid-area: actions;
   align-items: flex-end;
-}
-
-.workspace .pull-folded .action-buttons {
-  flex-wrap: nowrap;
 }
 
 .workspace .chip,
 .workspace .badge {
   font-size: 0.64rem;
-}
-
-.workspace button.action {
-  min-height: 1.7rem;
-  padding: 0.1rem 0.55rem;
-  font-size: 0.65rem;
-  background: #172235;
-  border-color: #31415b;
-}
-
-.workspace button.action-confirm {
-  color: white;
-  background: linear-gradient(180deg, #8f63ed, #6f45d1);
-  border-color: #a481f3;
 }
 
 .workspace .release:not(.release-folded) {
@@ -1053,13 +991,6 @@ body:has(.workspace) {
 
   .workspace-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .workspace .pull.pull-folded {
-    grid-template-columns: minmax(12rem, 1fr) auto auto;
-    grid-template-areas:
-      "main badges checks"
-      "main actions actions";
   }
 }
 

@@ -8,6 +8,11 @@
   --review-purple: #a58ae8;
   --review-green: #85e49a;
   --review-red: #f3a0ac;
+  /* The page's one button takes its colours from these, so in here it is the same button in the review's palette. */
+  --surface: #242640;
+  --border: #55516f;
+  --quiet: #abaac4;
+  --done: #85e49a;
   width: 94vw;
   height: 96dvh;
   max-width: 2600px;
@@ -112,27 +117,17 @@
   justify-content: flex-end;
   max-width: 52%;
 }
+/* Buttons, and the link to GitHub beside them, are the page's one button (style.css); here they only line up an icon. */
 .pull-review button,
-.review-controls a {
+.pull-review .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
-  color: inherit;
-  background: linear-gradient(#292b43, #202135);
-  border: 1px solid #55516f;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-  text-decoration: none;
   white-space: nowrap;
 }
 .pull-review button:hover:not(:disabled),
-.review-controls a:hover {
-  background: #35304e;
+.pull-review .button:hover {
   border-color: #9380c4;
 }
 .pull-review button:disabled {
@@ -146,15 +141,6 @@
 .review-merge {
   display: inline-flex;
   gap: 6px;
-}
-.review-merge button:first-child {
-  background: #49c659;
-  border-color: #60d471;
-  color: #071c0e;
-  font-weight: 650;
-}
-.review-merge button:first-child:hover:not(:disabled) {
-  background: #69dc79;
 }
 .pull-review .review-close {
   position: absolute;
@@ -377,8 +363,6 @@
 .review-view-controls button {
   border: 0;
   background: transparent;
-  min-height: 28px;
-  padding: 3px 10px;
 }
 .review-view-controls button[aria-pressed="true"] {
   background: #59428c;
@@ -422,11 +406,6 @@
   color: var(--review-muted);
   font-size: 0.75rem;
   flex-wrap: wrap;
-}
-.review-file-navigation button {
-  min-height: 30px;
-  padding: 4px 8px;
-  font-size: 0.75rem;
 }
 .review-shortcut {
   display: none;
