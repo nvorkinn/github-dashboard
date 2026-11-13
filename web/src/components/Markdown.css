@@ -1,0 +1,105 @@
+/* Markdown from GitHub, in whatever colours surround it: lines and shading are mixed from the text's own colour. */
+.markdown {
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown :where(p, ul, ol, blockquote, pre, table, details, hr) {
+  margin: 0 0 0.75em;
+}
+.markdown :where(h1, h2, h3, h4, h5, h6) {
+  margin: 1.1em 0 0.5em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.markdown h1 {
+  font-size: 1.4em;
+}
+.markdown h2 {
+  font-size: 1.25em;
+}
+.markdown h3 {
+  font-size: 1.1em;
+}
+.markdown :where(h4, h5, h6) {
+  font-size: 1em;
+}
+.markdown :where(h1, h2) {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+.markdown :where(ul, ol) {
+  padding-left: 1.6em;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown :where(ul ul) {
+  list-style: circle;
+}
+.markdown :where(li + li, li > ul, li > ol) {
+  margin-top: 0.2em;
+}
+.markdown :where(li > ul, li > ol) {
+  margin-bottom: 0;
+}
+.markdown li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+.markdown li > input[type="checkbox"] {
+  margin: 0 0.4em 0 -1.4em;
+  vertical-align: middle;
+}
+.markdown blockquote {
+  padding: 0 1em;
+  border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+  opacity: 0.85;
+}
+.markdown code {
+  padding: 0.15em 0.35em;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 0.88em;
+}
+.markdown pre {
+  padding: 0.8em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.85em;
+  white-space: pre;
+}
+.markdown table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown :where(th, td) {
+  padding: 0.35em 0.75em;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+.markdown th {
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+.markdown hr {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+.markdown summary {
+  cursor: pointer;
+}
+.markdown a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}

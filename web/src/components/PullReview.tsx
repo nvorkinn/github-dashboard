@@ -8,6 +8,7 @@ import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from 
 import { ExternalLink } from "./ExternalLink.tsx";
 import { fileIcon, folderIcon } from "./file_icons.ts";
 import { Icon } from "./Icon.tsx";
+import { Markdown } from "./Markdown.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
 
 import "./PullReview.css";
@@ -462,7 +463,11 @@ export function PullReview({
         </summary>
         {info ? (
           <>
-            <p class="review-description">{info.description || "No description."}</p>
+            {info.description.trim() ? (
+              <Markdown class="review-description" text={info.description} base={pull.url} />
+            ) : (
+              <p class="review-description">No description.</p>
+            )}
             <ul>
               {pull.checks.map((check, i) => (
                 <li key={`${check.name}-${i}`}>
@@ -474,7 +479,7 @@ export function PullReview({
               {info.reviews.map((review, i) => (
                 <li key={i}>
                   {review.user?.login ?? "Deleted user"}: {review.state}
-                  <p>{review.body}</p>
+                  {review.body?.trim() && <Markdown text={review.body} base={pull.url} />}
                 </li>
               ))}
             </ul>

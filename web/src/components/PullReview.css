@@ -165,14 +165,14 @@
   overflow: auto;
   flex-shrink: 0;
 }
-.review-info summary {
+.review-info > summary {
   cursor: pointer;
   padding: 11px 16px;
 }
-.review-info :where(summary) strong {
+.review-info > :where(summary) strong {
   margin: 0 20px 0 10px;
 }
-.review-info :where(summary) span {
+.review-info > :where(summary) span {
   font-size: 0.85rem;
   color: #cecee3;
 }
@@ -180,7 +180,6 @@
   margin: 12px 20px;
 }
 .review-description {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .review-body {
@@ -661,7 +660,7 @@
     margin-left: 0;
     gap: 5px;
   }
-  .review-info :where(summary) span,
+  .review-info > :where(summary) span,
   .review-shortcut {
     display: none;
   }

@@ -61,7 +61,8 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     const pulls = demoPullActions(dashboard);
     const runs = demoRunActions(dashboard);
     const { demoFiles } = await import("./demo/files.ts");
-    return { ...(pulls ? { pulls } : {}), ...(runs ? { runs } : {}), files: demoFiles };
+    const { demoReview } = await import("./demo/review.ts");
+    return { ...(pulls ? { pulls } : {}), ...(runs ? { runs } : {}), files: demoFiles, review: demoReview };
   }
   return {
     review: createReviewService(auth, dashboard),
