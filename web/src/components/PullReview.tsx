@@ -354,7 +354,9 @@ export function PullReview({
           >
             Next PR <span aria-hidden="true">›</span>
           </button>
-          <ExternalLink href={pull.url}>Open on GitHub ↗</ExternalLink>
+          <ExternalLink href={pull.url} class="button">
+            Open on GitHub ↗
+          </ExternalLink>
           <button
             type="button"
             disabled={!fresh || !info?.canApprove || !!action.busy || !!done}

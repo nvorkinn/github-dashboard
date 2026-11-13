@@ -216,19 +216,6 @@
   justify-content: center;
   gap: 0.6rem;
   width: 100%;
-  min-height: 3rem;
-  color: #dce7fa;
-  font-size: 0.95rem;
-  font-weight: 650;
-  background: #222b42;
-  border-color: #485572;
-  border-radius: 0.65rem;
-}
-.repository-copy > .repository-preview-button:disabled {
-  color: #9ba5be;
-  opacity: 1;
-  background: #242a3f;
-  cursor: not-allowed;
 }
 .repository-settings-feedback:empty {
   display: none;
