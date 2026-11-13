@@ -227,17 +227,30 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     const open: Json[] = (await get(`repos/${repo}/pulls`)) ?? [];
     const pulls = await Promise.all(open.map((one) => pullOf(repo, one.number)));
     const files = await entries(repo, withText);
-    // What is unreleased, from the comparison a test gave as a route, as counts of the two ends' histories.
-    const compare = Object.keys(routes).find((key) => key.startsWith(`repos/${repo}/compare/`));
-    const ahead = compare === undefined ? undefined : (await get(compare))?.ahead_by;
-    const counted = (count: number) => ({ history: { totalCount: count } });
     return {
       workflows: files ? { entries: files } : null,
-      ...(typeof ahead === "number"
-        ? { defaultBranchRef: { target: counted(100 + ahead) }, latestRelease: { tagCommit: counted(100) } }
-        : {}),
       pullRequests: { pageInfo: { hasNextPage: false }, nodes: pulls.filter((one) => one !== undefined) },
     };
+  }
+
+  /**
+   * The comparison of a release's tag with a branch, from the REST route of the same comparison: its `ahead_by`
+   * commits, each with the pull request `merged` numbers for it, if any. No route is a tag that isn't there.
+   */
+  async function comparison(repo: string, tag: string, branch: string): Promise<Json> {
+    const found = await get(`repos/${repo}/compare/${tag}...${branch}`);
+    if (found === undefined) {
+      return { ref: null };
+    }
+    const nodes = Array.from({ length: Math.min(found.ahead_by, 100) }, (_, index) => {
+      const number = found.merged?.[index];
+      return {
+        associatedPullRequests: {
+          nodes: typeof number === "number" ? [{ number, merged: true, baseRefName: branch }] : [],
+        },
+      };
+    });
+    return { ref: { compare: { aheadBy: found.ahead_by, commits: { nodes } } } };
   }
 
   /** A run's node id, which says where the fake finds it again. */
@@ -377,6 +390,11 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     }
     for (const [, alias, oid] of query.matchAll(/^\s*(b\d+): repository\([^)]*\) \{ object\(oid: "([0-9a-f]*)"\)/gm)) {
       data[alias ?? ""] = { object: { text: Buffer.from(oid ?? "", "hex").toString("utf8") } };
+    }
+    for (const [, alias, owner, name, tag, branch] of query.matchAll(
+      /^\s*(c\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ ref\(qualifiedName: "refs\/tags\/([^"]+)"\) \{ compare\(headRef: "([^"]+)"\)/gm,
+    )) {
+      await field(alias ?? "", () => comparison(`${owner}/${name}`, tag ?? "", branch ?? ""));
     }
   } catch (error) {
     if (error instanceof Whole) {

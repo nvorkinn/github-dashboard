@@ -47,7 +47,7 @@ export function applyEdits(data: DashboardData, edits: DemoEdits): DashboardData
             publishedAt: new Date(release.at).toISOString(),
           },
           // The release takes the default branch as it is.
-          unreleased: 0,
+          unreleased: { commits: 0, pulls: 0 },
         }
       : project;
   });

@@ -6,7 +6,8 @@
  * A read asks for:
  *
  * - every repository the signed-in user reaches through the app: what a project's row shows, nothing more;
- * - of each project that isn't hidden: its open pull requests with their checks, and its workflow files;
+ * - of each project that isn't hidden: its open pull requests with their checks, its workflow files, and what its
+ *   default branch has that its latest release hasn't;
  * - of each release workflow: whether its latest runs finished, and the latest as its card shows it; of a run that
  *   is going, asked for after, its jobs, pending approvals and workflow file.
  *
@@ -16,8 +17,8 @@
  * seen before) asks again for what is missing, so only such a read takes more than one round of requests.
  */
 import type { Auth } from "../auth.ts";
-import type { Approval, DashboardData, Job, PullRequest, ReleaseRun } from "../model.ts";
-import { createApi, GitHubError, limiter, MAX_PARALLEL, retryAt } from "./api.ts";
+import type { Approval, DashboardData, Job, PullRequest, ReleaseRun, Unreleased } from "../model.ts";
+import { createApi, GitHubError, limiter, MAX_PARALLEL, type QueryAnswer, sendQuery } from "./api.ts";
 import {
   approval,
   isReleaseName,
@@ -45,6 +46,7 @@ import {
   settingsOf,
   shownRuns,
 } from "./read.ts";
+import { comparisonField, type GqlComparison, unreleasedFrom } from "./unreleased.ts";
 import {
   hasWorkflowBlobs,
   keepWorkflowBlob,
@@ -70,7 +72,6 @@ export const WORKFLOWS_PER_REQUEST = 7;
 const EXTRAS_PER_REQUEST = 50;
 // A read never needs this many rounds of requests; one that would has gone wrong, and stops.
 const MAX_ROUNDS = 10;
-const DEFAULT_BACKOFF_MS = 60_000;
 
 /**
  * Per project (`owner/name`), the paths of the workflow files whose workflows a read asks about: its release
@@ -140,13 +141,8 @@ type GqlPull = {
   author: GqlActor;
   statusCheckRollup: { contexts: { pageInfo: { hasNextPage: boolean }; nodes: (GqlContext | null)[] } } | null;
 };
-/** A commit with how many commits its history has, itself included. */
-type GqlCounted = { history?: { totalCount?: number } | null } | null;
-export type GqlDetails = {
+type GqlDetails = {
   workflows: { entries?: GqlEntry[] } | null;
-  /** The two ends of what is unreleased: the default branch's head and the latest release's commit. */
-  defaultBranchRef?: { target?: GqlCounted } | null;
-  latestRelease?: { tagCommit?: GqlCounted } | null;
   pullRequests: { pageInfo: { hasNextPage: boolean }; nodes: (GqlPull | null)[] };
 };
 type GqlJob = {
@@ -189,7 +185,6 @@ type GqlWorkflow = {
   /** The latest of them as its card shows it, without its jobs. */
   runs: { nodes: (GqlRun | null)[] };
 };
-type GqlError = { type?: string; path?: (string | number)[]; message?: string };
 
 const LISTED = `fragment Listed on Repository {
   nameWithOwner name url isPrivate pushedAt
@@ -243,6 +238,8 @@ const GOING = `fragment Going on WorkflowRun {
 
 type Flow = { repo: string; path: string };
 type BlobAsk = { repo: string; oid: string };
+/** What a project's default branch has that its latest release hasn't. */
+type CompareAsk = { repo: string; tag: string; branch: string };
 /** A run by its node id, with the path of its workflow's file. `going`: with its jobs, approvals and workflow file. */
 type RunAsk = { repo: string; path: string; id: string; going: boolean };
 
@@ -253,6 +250,7 @@ export type Asked = {
   flows: Flow[];
   runs: RunAsk[];
   blobs: BlobAsk[];
+  compares: CompareAsk[];
   texts: boolean;
 };
 
@@ -272,8 +270,8 @@ export function workflowUrl(repo: string, path: string): string {
 }
 
 /**
- * The query for `asked`. Each project is the field `r<n>`, each workflow `w<n>`, each run `n<n>` and each workflow
- * file `b<n>`, numbered as they are in `asked`.
+ * The query for `asked`. Each project is the field `r<n>`, each workflow `w<n>`, each run `n<n>`, each workflow
+ * file `b<n>` and each comparison `c<n>`, numbered as they are in `asked`.
  */
 export function queryFor(asked: Asked): string {
   const blob = asked.texts ? " object { ... on Blob { text } }" : "";
@@ -289,8 +287,6 @@ export function queryFor(asked: Asked): string {
   asked.repos.forEach((repo, index) => {
     fields.push(`r${index}: ${repository(repo)} {
     workflows: object(expression: ${quoted(`HEAD:${WORKFLOWS_FOLDER}`)}) { ... on Tree { entries { path type oid${blob} } } }
-    defaultBranchRef { target { ... on Commit { history(first: 1) { totalCount } } } }
-    latestRelease { tagCommit { history(first: 1) { totalCount } } }
     ...Pulls
   }`);
   });
@@ -314,6 +310,9 @@ export function queryFor(asked: Asked): string {
   asked.blobs.forEach(({ repo, oid }, index) => {
     fields.push(`b${index}: ${repository(repo)} { object(oid: ${quoted(oid)}) { ... on Blob { text } } }`);
   });
+  asked.compares.forEach(({ repo, tag, branch }, index) => {
+    fields.push(`c${index}: ${comparisonField(repo, tag, branch)}`);
+  });
   const fragments = [
     ...(asked.list ? [LISTED] : []),
     ...(asked.repos.length > 0 ? [PULLS] : []),
@@ -325,7 +324,15 @@ export function queryFor(asked: Asked): string {
 
 /** `asked` as the requests to send side by side: the list, then a few projects or workflows in each. */
 export function split(asked: Asked): Asked[] {
-  const nothing: Asked = { list: undefined, repos: [], flows: [], runs: [], blobs: [], texts: asked.texts };
+  const nothing: Asked = {
+    list: undefined,
+    repos: [],
+    flows: [],
+    runs: [],
+    blobs: [],
+    compares: [],
+    texts: asked.texts,
+  };
   const chunks = <T>(all: T[], size: number): T[][] =>
     Array.from({ length: Math.ceil(all.length / size) }, (_, index) => all.slice(index * size, (index + 1) * size));
   const extras = Math.max(asked.runs.length, asked.blobs.length);
@@ -333,46 +340,13 @@ export function split(asked: Asked): Asked[] {
     ...(asked.list ? [{ ...nothing, list: asked.list }] : []),
     ...chunks(asked.repos, REPOS_PER_REQUEST).map((repos) => ({ ...nothing, repos })),
     ...chunks(asked.flows, WORKFLOWS_PER_REQUEST).map((flows) => ({ ...nothing, flows })),
+    ...chunks(asked.compares, REPOS_PER_REQUEST).map((compares) => ({ ...nothing, compares })),
     ...Array.from({ length: Math.ceil(extras / EXTRAS_PER_REQUEST) }, (_, index) => ({
       ...nothing,
       runs: asked.runs.slice(index * EXTRAS_PER_REQUEST, (index + 1) * EXTRAS_PER_REQUEST),
       blobs: asked.blobs.slice(index * EXTRAS_PER_REQUEST, (index + 1) * EXTRAS_PER_REQUEST),
     })),
   ];
-}
-
-/**
- * Sends one query. Throws what fails every call (a rate limit, a sign-in GitHub no longer accepts, GitHub in
- * trouble, a failing network); what GitHub wouldn't say of one field comes back in `errors`, beside the rest.
- */
-async function send(
-  auth: Auth,
-  query: string,
-  signal: AbortSignal | undefined,
-): Promise<{ data: Record<string, unknown>; errors: GqlError[] }> {
-  signal?.throwIfAborted();
-  const response = await auth.github("graphql", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-    ...(signal ? { signal } : {}),
-  });
-  if (!response.ok) {
-    throw new GitHubError("graphql", response.status, await retryAt(response));
-  }
-  const body = (await response.json().catch(() => undefined)) as { data?: unknown; errors?: unknown } | undefined;
-  const errors = Array.isArray(body?.errors) ? (body.errors as GqlError[]) : [];
-  // GraphQL's own rate limit is an answer like any other, with the error inside.
-  if (errors.some((error) => error?.type === "RATE_LIMITED")) {
-    const reset = response.headers.get("x-ratelimit-reset") ?? "";
-    const at = /^\d+$/.test(reset) ? Number(reset) * 1000 : 0;
-    throw new GitHubError("graphql", 403, Math.max(at, Date.now() + (at ? 1000 : DEFAULT_BACKOFF_MS)));
-  }
-  const data = body?.data;
-  if (typeof data !== "object" || data === null) {
-    throw new GitHubError("graphql", 502, undefined);
-  }
-  return { data: data as Record<string, unknown>, errors };
 }
 
 /**
@@ -406,9 +380,17 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
   const flowQueue = queue<Flow>(flowKey);
   const runQueue = queue<RunAsk>((run) => run.id);
   const blobQueue = queue<BlobAsk>(blobKey);
+  // What is unreleased can only be asked for by the release's tag, which the list of projects says. To save a
+  // round of requests it is asked for by the tag of the last read, and again only if the list says another.
+  const compareQueue = queue<CompareAsk>(compareKey);
+  const comparisons = new Map<string, Unreleased | undefined>();
   for (const [repo, paths] of Object.entries(shape)) {
     if (!hidden.has(repo)) {
       repoQueue.add(repo);
+      const before = previous?.projects.find(of(repo));
+      if (before?.latestRelease && before.defaultBranch !== undefined) {
+        compareQueue.add({ repo, tag: before.latestRelease.tag, branch: before.defaultBranch });
+      }
       for (const path of paths) {
         flowQueue.add({ repo, path });
       }
@@ -441,10 +423,9 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
   }
 
   const limit = limiter(options.parallel ?? MAX_PARALLEL);
-  type Answer = Awaited<ReturnType<typeof send>>;
 
   /** Takes in the answer to one request. */
-  function absorb(asked: Asked, { data, errors }: Answer): void {
+  function absorb(asked: Asked, { data, errors }: QueryAnswer): void {
     // What GitHub wouldn't say, by the field it is under. A run's approvals are the user's to see or not, and a run
     // without them shows without its buttons.
     const refusedFields = new Set<string>();
@@ -506,6 +487,13 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
         unkept.set(blobKey(blob), readWorkflowBlob(""));
       }
     });
+    asked.compares.forEach((compare, index) => {
+      if (refusedFields.has(`c${index}`)) {
+        troubled.add(compare.repo);
+      } else {
+        comparisons.set(compareKey(compare), unreleasedFrom(data[`c${index}`] as GqlComparison, compare.branch));
+      }
+    });
   }
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -515,21 +503,25 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
       flows: flowQueue.take(),
       runs: runQueue.take(),
       blobs: blobQueue.take(),
+      compares: compareQueue.take(),
       texts,
     });
     if (requests.length === 0) {
       break;
     }
-    const answers = await Promise.all(requests.map((asked) => limit(() => send(auth, queryFor(asked), signal))));
+    const answers = await Promise.all(requests.map((asked) => limit(() => sendQuery(auth, queryFor(asked), signal))));
     requests.forEach((asked, index) => {
-      absorb(asked, answers[index] as Answer);
+      absorb(asked, answers[index] as QueryAnswer);
     });
 
     // What this answer shows to be missing still.
     if (!list) {
-      for (const repo of listed.keys()) {
+      for (const [repo, one] of listed) {
         if (!hidden.has(repo)) {
           repoQueue.add(repo);
+          if (one.latestRelease && one.defaultBranchRef) {
+            compareQueue.add({ repo, tag: one.latestRelease.tagName, branch: one.defaultBranchRef.name });
+          }
         }
       }
     }
@@ -609,18 +601,18 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
         releases: previous?.releases.filter(of(repo)) ?? [],
         promoteWorkflow: before?.promoteWorkflow,
       };
-      // Kept only while it is the same release.
-      const wasUnreleased = before?.latestRelease?.tag === latestRelease?.tag ? before?.unreleased : undefined;
+      // What couldn't be read is kept only while it is the same release.
+      const unreleased =
+        (latestRelease && raw.default_branch !== undefined
+          ? comparisons.get(compareKey({ repo, tag: latestRelease.tag, branch: raw.default_branch }))
+          : undefined) ?? (before?.latestRelease?.tag === latestRelease?.tag ? before?.unreleased : undefined);
       if (!answer) {
         // Not answered, or never asked because the read stopped short.
         failed.add(repo);
         if (shape[repo]) {
           nextShape[repo] = shape[repo];
         }
-        return {
-          project: project(raw, latestRelease, settingsOf(raw), was.promoteWorkflow, wasUnreleased),
-          ...was,
-        };
+        return { project: project(raw, latestRelease, settingsOf(raw), was.promoteWorkflow, unreleased), ...was };
       }
 
       const pulls = await part(() => pullsOf(api, repo, answer), was.pulls);
@@ -660,7 +652,6 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
           nextShape[repo] = shape[repo];
         }
       }
-      const unreleased = unreleasedOf(answer) ?? wasUnreleased;
       return { project: project(raw, latestRelease, settingsOf(raw), promoteWorkflow, unreleased), pulls, releases };
     }),
   );
@@ -680,6 +671,7 @@ type Page<T> = { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
 
 const flowKey = (flow: Flow) => `${flow.repo}\n${flow.path}`;
 const blobKey = (blob: BlobAsk) => `${blob.repo}\n${blob.oid}`;
+const compareKey = (compare: CompareAsk) => `${compare.repo}\n${compare.tag}\n${compare.branch}`;
 
 /** Things to ask for, each only once however often it is added. */
 function queue<T>(key: (one: T) => string): { add(one: T): void; take(): T[] } {
@@ -694,20 +686,6 @@ function queue<T>(key: (one: T) => string): { add(one: T): void; take(): T[] } {
     },
     take: () => waiting.splice(0),
   };
-}
-
-/**
- * How many commits the default branch has that the latest release hasn't: its history's count less the release
- * commit's. That holds while the release was made from the default branch, as this page's are; a release that isn't
- * on it (a count less than none) can't be told this way.
- */
-export function unreleasedOf(answer: GqlDetails): number | undefined {
-  const branch = answer.defaultBranchRef?.target?.history?.totalCount;
-  const release = answer.latestRelease?.tagCommit?.history?.totalCount;
-  if (typeof branch !== "number" || typeof release !== "number" || branch < release) {
-    return undefined;
-  }
-  return branch - release;
 }
 
 /** The workflow files of a project: the YAML files directly in its workflows folder. */

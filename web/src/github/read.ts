@@ -8,9 +8,11 @@ import type {
   Project,
   PullRequest,
   ReleaseRun,
+  Unreleased,
 } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
+import { comparisonField, type GqlComparison, unreleasedFrom } from "./unreleased.ts";
 import { jobGraph, markedReleaseFiles, WORKFLOWS_FOLDER, type WorkflowJob, workflowFile } from "./workflow_graph.ts";
 
 // How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
@@ -35,7 +37,6 @@ export type RawRepo = {
   allow_auto_merge?: boolean;
 };
 export type RawRelease = { tag_name: string; html_url: string; published_at: string | null; created_at: string };
-export type RawComparison = { ahead_by: number };
 export type RawPull = {
   number: number;
   state: string;
@@ -103,7 +104,7 @@ export type RepoPlan = {
   releases: boolean;
   /** Only the runs with these ids, each read by itself. Left out, none. */
   runs?: Set<number>;
-  /** The latest release, and how many commits on the default branch it hasn't. */
+  /** The latest release, and what the default branch has that it hasn't. */
   latestRelease: boolean;
 };
 
@@ -433,21 +434,23 @@ async function latest(api: Api, repo: string): Promise<Project["latestRelease"]>
 }
 
 /**
- * How many commits `branch` has that the release `tag` hasn't, from GitHub's comparison of the two; undefined
- * without a release or a branch to compare. Asks for one commit of the list only: the count is what is used.
+ * What `branch` has that the release `tag` hasn't, from GitHub's comparison of the two; undefined without a release
+ * or a branch to compare.
  */
 async function unreleasedOf(
   api: Api,
   repo: string,
   tag: string | undefined,
   branch: string | undefined,
-): Promise<number | undefined> {
+): Promise<Unreleased | undefined> {
   if (tag === undefined || branch === undefined) {
     return undefined;
   }
-  const path = `repos/${repo}/compare/${encodeURIComponent(tag)}...${encodeURIComponent(branch)}?per_page=1`;
-  const comparison = await unlessGone(api.get<RawComparison>(path));
-  return typeof comparison?.ahead_by === "number" ? comparison.ahead_by : undefined;
+  const { data, errors } = await api.query(`query {\n  c0: ${comparisonField(repo, tag, branch)}\n}`);
+  if (errors.length > 0) {
+    throw new GitHubError("graphql", 502, undefined);
+  }
+  return unreleasedFrom(data.c0 as GqlComparison, branch);
 }
 
 export function latestOf(release: RawRelease | undefined): Project["latestRelease"] {

@@ -119,6 +119,16 @@ export type Approval = {
   canApprove: boolean;
 };
 
+export type Unreleased = {
+  /** How many commits the default branch is ahead of the release. */
+  commits: number;
+  /**
+   * How many pull requests merged into the default branch those commits came in with. Undefined when there are too
+   * many commits to tell.
+   */
+  pulls: number | undefined;
+};
+
 export type Project = {
   /** `owner/name`. */
   repo: string;
@@ -132,10 +142,10 @@ export type Project = {
   /** The branch releases are made from, such as `main`, when known. */
   defaultBranch: string | undefined;
   /**
-   * How many commits the default branch has that the latest release hasn't: changes waiting to go out. Undefined
-   * without a release, or when it couldn't be told.
+   * What the default branch has that the latest release hasn't: changes waiting to go out. Undefined without a
+   * release, or when it couldn't be told.
    */
-  unreleased: number | undefined;
+  unreleased: Unreleased | undefined;
   /** How the page merges its pull requests: the first way the repository allows, a merge commit first. */
   mergeMethod: MergeMethod;
   /** Whether the repository allows auto-merge. True when its settings couldn't be read: GitHub then says. */
