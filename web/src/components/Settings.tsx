@@ -10,6 +10,7 @@ import {
   readSettings,
   writeSettings,
 } from "../notifications.ts";
+import { chooseTheme, rememberedTheme, THEMES, type Theme } from "../theme.ts";
 import type { LaneColumns } from "./ViewSwitch.tsx";
 
 const LANE_COLUMNS: { value: LaneColumns; label: string }[] = [
@@ -19,7 +20,8 @@ const LANE_COLUMNS: { value: LaneColumns; label: string }[] = [
 
 /**
  * The settings page: which things that need attention show as desktop notifications while the dashboard is open, the
- * browser's permission to show them at all, and how the Lanes view uses a wide screen.
+ * browser's permission to show them at all, light or dark or following the system, and how the Lanes view uses a wide
+ * screen.
  */
 export function Settings({
   notifier,
@@ -38,6 +40,7 @@ export function Settings({
 }) {
   const [settings, setSettings] = useState<NotificationSettings>(readSettings);
   const [allowed, setAllowed] = useState<Permission>(current);
+  const [theme, setTheme] = useState<Theme>(rememberedTheme);
 
   function toggle(type: keyof NotificationSettings) {
     const next = { ...settings, [type]: !settings[type] };
@@ -98,6 +101,31 @@ export function Settings({
             Kept in this browser. Hidden projects send none. Telegram's messages are set on the server and aren't
             changed here.
           </p>
+        </div>
+      </section>
+      <section class="panel settings" aria-labelledby="appearance-heading">
+        <div class="panel-heading">
+          <h2 id="appearance-heading">Appearance</h2>
+        </div>
+        <div class="settings-body">
+          <fieldset>
+            <legend>Theme</legend>
+            {THEMES.map(({ value, label }) => (
+              <label key={value}>
+                <input
+                  type="radio"
+                  name="theme"
+                  checked={theme === value}
+                  onChange={() => {
+                    chooseTheme(value);
+                    setTheme(value);
+                  }}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          <p class="quiet">Kept in this browser. The Workspace view and the review overlay are always dark.</p>
         </div>
       </section>
       {onLaneColumns && (

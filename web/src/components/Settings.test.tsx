@@ -7,6 +7,7 @@ import { Settings } from "./Settings.tsx";
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  delete document.documentElement.dataset.theme;
 });
 
 function notifier() {
@@ -68,5 +69,25 @@ test("asks how many columns the lanes take on a wide screen, where that can be c
 
 test("without a way to choose, the lanes' columns aren't asked", () => {
   render(<Settings notifier={notifier()} current={() => "granted"} />);
-  expect(screen.queryByRole("radio")).toBeNull();
+  expect(screen.queryByRole("group", { name: "Lanes on a wide screen" })).toBeNull();
+  expect(screen.queryByRole("radio", { name: "Two columns" })).toBeNull();
+});
+
+test("offers auto, light and dark, starting on auto, and applies the one chosen", () => {
+  render(<Settings notifier={notifier()} current={() => "granted"} />);
+  const auto = screen.getByRole("radio", { name: /Auto/ }) as HTMLInputElement;
+  const light = screen.getByRole("radio", { name: "Light" }) as HTMLInputElement;
+  const dark = screen.getByRole("radio", { name: "Dark" }) as HTMLInputElement;
+  expect(auto.checked).toBe(true);
+
+  fireEvent.click(dark);
+  expect(dark.checked).toBe(true);
+  expect(document.documentElement.dataset.theme).toBe("dark");
+
+  fireEvent.click(light);
+  expect(document.documentElement.dataset.theme).toBe("light");
+
+  fireEvent.click(auto);
+  expect(auto.checked).toBe(true);
+  expect(document.documentElement.dataset.theme).toBeUndefined();
 });
