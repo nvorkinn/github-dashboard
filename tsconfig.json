@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["web", "relay", "tests", "vite.config.ts"]
+  "include": ["web", "relay", "shared", "tests", "vite.config.ts"]
 }

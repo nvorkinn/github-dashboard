@@ -10,7 +10,7 @@ export default defineConfig({
   server: { proxy: { "/api": "http://localhost:8080", "/healthz": "http://localhost:8080" } },
   test: {
     root: ".",
-    include: ["web/**/*.test.{ts,tsx}", "relay/**/*.test.ts", "tests/**/*.test.ts"],
+    include: ["web/**/*.test.{ts,tsx}", "relay/**/*.test.ts", "shared/**/*.test.ts", "tests/**/*.test.ts"],
     environment: "node",
   },
 });

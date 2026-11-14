@@ -14,6 +14,8 @@ It replaces the dashboard inside countdown-server once it does everything that o
 - `web/public/`: files copied into the build as they are: the favicon (`favicon.svg`, with `favicon.ico` and
   `apple-touch-icon.png` rendered from it for browsers and home screens that don't take SVG).
 - `relay/`: the relay, TypeScript that Node runs as it is (no compile step). It serves the built page.
+- `shared/`: code the page and the relay both use, such as reading a workflow file. Erasable TypeScript, like the
+  relay's, since Node runs it as it is.
 - `tests/`: checks on the repository itself, such as the CI workflows.
 
 ## Working on it
