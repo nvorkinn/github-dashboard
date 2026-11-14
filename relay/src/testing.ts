@@ -37,3 +37,13 @@ export async function settle(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
+
+/** Waits until `done` says so, for what takes real time, such as signing a token. */
+export async function until(done: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 500 && !done(); turn++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  if (!done()) {
+    throw new Error("It never happened");
+  }
+}

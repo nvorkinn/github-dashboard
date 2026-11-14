@@ -87,17 +87,19 @@ test("refuses a public address that isn't a bare http(s) origin", () => {
 
 test("reading GitHub as the app is optional, and takes the key as PEM, with \\n for line breaks, or in base64", () => {
   expect(readAppConfig({})).toBeUndefined();
-  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
-    .privateKey.export({ type: "pkcs1", format: "pem" })
-    .toString();
+  // GitHub hands the key out as PKCS#1; it is kept as PKCS#8, which Octokit signs with.
+  const key = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+  const pem = key.export({ type: "pkcs1", format: "pem" }).toString();
+  const kept = key.export({ type: "pkcs8", format: "pem" }).toString();
   expect(readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: pem })).toEqual({
     appId: "123456",
-    privateKey: pem.trim(),
+    privateKey: kept,
   });
   const escaped = pem.trim().replaceAll("\n", "\\n");
-  expect(readAppConfig({ GITHUB_APP_ID: "Iv23liABC", GITHUB_APP_PRIVATE_KEY: escaped })?.privateKey).toBe(pem.trim());
+  expect(readAppConfig({ GITHUB_APP_ID: "Iv23liABC", GITHUB_APP_PRIVATE_KEY: escaped })?.privateKey).toBe(kept);
   const encoded = Buffer.from(pem).toString("base64");
-  expect(readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: encoded })?.privateKey).toBe(pem);
+  expect(readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: encoded })?.privateKey).toBe(kept);
+  expect(readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: kept })?.privateKey).toBe(kept);
 
   expect(() => readAppConfig({ GITHUB_APP_ID: "123456" })).toThrow("half configured: GITHUB_APP_PRIVATE_KEY not set");
   expect(() => readAppConfig({ GITHUB_APP_PRIVATE_KEY: pem })).toThrow("half configured: GITHUB_APP_ID not set");

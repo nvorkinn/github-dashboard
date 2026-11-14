@@ -254,8 +254,9 @@ ask, as the app is nobody's reviewer.
 
 Both or neither: with neither the relay knows of no release runs and says so to the pages, and with one, or a key
 that isn't one, it refuses to start. The key's line breaks may be written as `\n` where a setting can't span lines;
-`base64 -i the-key.pem` gives the other form. The key is a secret: keep it with the others. With it the relay asks
-GitHub for a token per installation, which lasts an hour, is held in memory and is never logged. The app needs no
+`base64 -i the-key.pem` gives the other form. The key is a secret: keep it with the others (the deploy takes them from
+Vaultwarden). With it Octokit (`@octokit/auth-app`) asks GitHub for a token per installation, which lasts an hour, is
+held in memory and is never logged. The app needs no
 permission beyond the ones it has for the page (Actions, Contents, Deployments and Metadata, read).
 
 ## Reading GitHub

@@ -1,4 +1,5 @@
-import { createSign } from "node:crypto";
+import { createAppAuth } from "@octokit/auth-app";
+import { request as octokitRequest } from "@octokit/request";
 import type { AppConfig } from "./config.ts";
 import { isRecord, text, wholeNumber } from "./payload.ts";
 
@@ -7,12 +8,6 @@ const TIMEOUT_MS = 10_000;
 const PER_PAGE = 100;
 // No list the relay reads is longer than this many pages; one that would be is cut off there.
 const MAX_PAGES = 10;
-// GitHub takes an app's token for at most ten minutes, and allows for clocks a minute apart.
-const JWT_SECONDS = 9 * 60;
-const CLOCK_DRIFT_SECONDS = 60;
-// An installation token lasts an hour; a new one is asked for when this little of it is left.
-const TOKEN_MARGIN_MS = 5 * 60_000;
-
 /** GitHub said no, or didn't answer. Carries the status (0 for no answer) and nothing of the request. */
 export class AppError extends Error {
   status: number;
@@ -33,8 +28,9 @@ export function reasonOf(error: unknown): string {
 export type InstalledRepo = { repo: string; installation: number; defaultBranch: string | undefined };
 
 /**
- * Reads api.github.com as the GitHub App: as one of its installations, with that installation's token. A token is
- * asked for with the app's private key, lasts an hour and is held in memory only, until shortly before it ends.
+ * Reads api.github.com as the GitHub App: as one of its installations, with that installation's token. Octokit
+ * (`@octokit/auth-app`) makes the tokens from the app's ID and private key: it signs the app's own short-lived token,
+ * trades it for an installation's, which lasts an hour, and keeps that in memory until shortly before it ends.
  * Everything here reads; the relay writes nothing to GitHub.
  */
 export type GitHubApp = {
@@ -46,32 +42,48 @@ export type GitHubApp = {
   list<T>(installation: number, path: string, key?: string): Promise<T[]>;
 };
 
-export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fetch; now?: () => number }): GitHubApp {
+export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fetch }): GitHubApp {
   const { config } = options;
   const fetcher = options.fetch ?? fetch;
-  const now = options.now ?? Date.now;
-  // Per installation: its token and when it ends, or the asking for one that is under way.
-  const tokens = new Map<number, Promise<{ token: string; expiresAt: number }>>();
+  const auth = createAppAuth({
+    appId: config.appId,
+    privateKey: config.privateKey,
+    // Octokit asks GitHub for the tokens through the same `fetch` as every other read, and gives up as soon.
+    request: octokitRequest.defaults({
+      headers: { "user-agent": "github-dashboard-relay" },
+      request: {
+        fetch: (url: string | URL | Request, init?: RequestInit) =>
+          fetcher(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) }),
+      },
+    }),
+  });
 
-  function appToken(): string {
-    const seconds = Math.floor(now() / 1000);
-    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-    const unsigned = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({
-      iat: seconds - CLOCK_DRIFT_SECONDS,
-      exp: seconds + JWT_SECONDS,
-      iss: config.appId,
-    })}`;
-    return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(config.privateKey, "base64url")}`;
+  /** A token from Octokit; a failure to get one is said by its status or kind and nothing else. */
+  async function token(asking: Promise<{ token: string }>): Promise<string> {
+    try {
+      return (await asking).token;
+    } catch (error) {
+      const status = (error as { status?: unknown } | null)?.status;
+      // Only the status or the kind of failure: a message could quote the request.
+      throw typeof status === "number" && status > 0
+        ? new AppError(status, `HTTP ${status}`)
+        : new AppError(0, error instanceof Error ? error.name : "request failed");
+    }
   }
 
-  async function request(method: string, path: string, token: string): Promise<unknown> {
+  const appToken = () => token(auth({ type: "app" }));
+  /** The installation's token: the one Octokit keeps, or with `fresh` a new one. */
+  const installationToken = (installation: number, fresh = false) =>
+    token(auth({ type: "installation", installationId: installation, refresh: fresh }));
+
+  async function request(method: string, path: string, bearer: string): Promise<unknown> {
     let response: Response;
     try {
       response = await fetcher(`${API}/${path}`, {
         method,
         headers: {
           Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${bearer}`,
           "X-GitHub-Api-Version": "2022-11-28",
           "User-Agent": "github-dashboard-relay",
         },
@@ -93,49 +105,15 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
     }
   }
 
-  async function installationToken(installation: number): Promise<string> {
-    const kept = tokens.get(installation);
-    if (kept) {
-      const one = await kept.catch(() => undefined);
-      if (one && one.expiresAt - now() > TOKEN_MARGIN_MS) {
-        return one.token;
-      }
-      // Asked for again meanwhile, by another read of the same installation: that one's answer will do.
-      if (tokens.get(installation) !== kept) {
-        return installationToken(installation);
-      }
-    }
-    const fresh = request("POST", `app/installations/${installation}/access_tokens`, appToken()).then((answer) => {
-      const token = isRecord(answer) && typeof answer.token === "string" ? answer.token : undefined;
-      const expiresAt = isRecord(answer) ? Date.parse(String(answer.expires_at)) : Number.NaN;
-      if (!token) {
-        throw new AppError(502, "no token in the answer");
-      }
-      return { token, expiresAt: Number.isFinite(expiresAt) ? expiresAt : now() + TOKEN_MARGIN_MS * 2 };
-    });
-    tokens.set(installation, fresh);
-    try {
-      return (await fresh).token;
-    } catch (error) {
-      // Not kept when it failed: it's asked again on the next read.
-      if (tokens.get(installation) === fresh) {
-        tokens.delete(installation);
-      }
-      throw error;
-    }
-  }
-
   async function get<T>(installation: number, path: string): Promise<T> {
-    const token = await installationToken(installation);
     try {
-      return (await request("GET", path, token)) as T;
+      return (await request("GET", path, await installationToken(installation))) as T;
     } catch (error) {
       if (!(error instanceof AppError) || error.status !== 401) {
         throw error;
       }
       // A token GitHub no longer takes, such as after the app was suspended and let back: once more with a new one.
-      tokens.delete(installation);
-      return (await request("GET", path, await installationToken(installation))) as T;
+      return (await request("GET", path, await installationToken(installation, true))) as T;
     }
   }
 
@@ -160,7 +138,10 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
     list: (installation, path, key) => pages((one) => get(installation, one), path, key),
 
     async repositories() {
-      const installations = await pages<unknown>((path) => request("GET", path, appToken()), "app/installations");
+      const installations = await pages<unknown>(
+        async (path) => request("GET", path, await appToken()),
+        "app/installations",
+      );
       const found: InstalledRepo[] = [];
       for (const one of installations) {
         const installation = isRecord(one) ? wholeNumber(one.id) : undefined;

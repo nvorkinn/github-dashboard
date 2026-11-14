@@ -97,7 +97,7 @@ export function readTelegramConfig(env: Record<string, string | undefined>): Tel
 export type AppConfig = {
   /** The app's ID, or its client ID: either names the app to GitHub. */
   appId: string;
-  /** The app's private key, as PEM. It is a secret: it never goes into a log. */
+  /** The app's private key, as PKCS#8 PEM. It is a secret: it never goes into a log. */
   privateKey: string;
 };
 
@@ -129,8 +129,9 @@ export function readAppConfig(env: Record<string, string | undefined>): AppConfi
     if (key.asymmetricKeyType !== "rsa") {
       throw new Error("not RSA");
     }
+    // GitHub hands the key out as PKCS#1; Octokit signs with PKCS#8, so it is kept as that.
+    return { appId, privateKey: key.export({ type: "pkcs8", format: "pem" }).toString() };
   } catch {
     throw new Error("GITHUB_APP_PRIVATE_KEY must be the app's private key: the .pem file, as it is or in base64");
   }
-  return { appId, privateKey: pem };
 }
