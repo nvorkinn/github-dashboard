@@ -2,12 +2,13 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { authRoutes } from "./auth.ts";
-import type { AuthConfig, TelegramConfig } from "./config.ts";
+import type { AppConfig, AuthConfig, TelegramConfig } from "./config.ts";
 import type { Hub } from "./events.ts";
 import { createHub, eventStream } from "./events.ts";
+import { createReleases, NOT_CONFIGURED } from "./releases.ts";
 import { createStatusCache } from "./status.ts";
 import { telegramNotifier } from "./telegram.ts";
-import { webhookRoutes } from "./webhook.ts";
+import { type OnWebhook, webhookRoutes } from "./webhook.ts";
 
 // Often enough that a reverse proxy's idle timeout (60 seconds is a common default) never closes a quiet stream.
 const PING_MS = 20_000;
@@ -15,11 +16,13 @@ const PING_MS = 20_000;
 /**
  * The relay: serves the built page, signs in to the GitHub App and refreshes its token (see auth.ts), and passes a
  * minimal notice of each GitHub webhook (see webhook.ts) on to the open pages over Server-Sent Events (see
- * events.ts). It keeps no database, stores no tokens and remembers no events; the one thing it holds on to is which
- * Telegram notices it sent lately, so as not to send them twice (see telegram.ts), and a minute of public GitHub
- * service status (see status.ts).
+ * events.ts). It keeps no database, stores no user's token and remembers no events. What it holds on to, in memory
+ * only: which Telegram notices it sent lately, so as not to send them twice (see telegram.ts); a minute of public
+ * GitHub service status (see status.ts); and, given `githubApp`, the release workflows and their runs of the
+ * repositories the GitHub App reaches, read as the app itself with a token that lasts an hour (see releases.ts).
  *
- * Without `auth` the sign-in endpoints answer 503, and without `webhookSecret` the webhook endpoint does. With
+ * Without `auth` the sign-in endpoints answer 503, and without `webhookSecret` the webhook endpoint does. Without
+ * `githubApp` the relay knows of no release runs, and tells the pages so. With
  * `telegram`, webhooks that need attention are also sent to a Telegram chat while no page is open (see telegram.ts),
  * with a link to the page when `auth` gives its address. `fetch` is how the relay reaches GitHub and Telegram; tests
  * pass their own. `hub` carries the changes from the webhook endpoint to the event streams, `pingMs` is how often a
@@ -35,6 +38,7 @@ export function createApp(options: {
   fetch?: typeof fetch;
   webhookSecret?: string | undefined;
   telegram?: TelegramConfig | undefined;
+  githubApp?: AppConfig | undefined;
   hub?: Hub;
   pingMs?: number;
   closing?: AbortSignal;
@@ -63,9 +67,28 @@ export function createApp(options: {
   app.get("/healthz", (c) => c.text("ok"));
 
   const fetcher = options.fetch ?? fetch;
-  const onWebhook = options.telegram
-    ? telegramNotifier({ config: options.telegram, hub, dashboard: options.auth?.publicOrigin, fetch: fetcher })
+  const releases = options.githubApp
+    ? createReleases({
+        config: options.githubApp,
+        fetch: fetcher,
+        onRun: (run) => hub.release({ name: "run", data: run }),
+        onSnapshot: (snapshot) => hub.release({ name: "releases", data: snapshot }),
+        closing: options.closing,
+      })
     : undefined;
+  const telegram = options.telegram
+    ? telegramNotifier({
+        config: options.telegram,
+        hub,
+        dashboard: options.auth?.publicOrigin,
+        isRelease: releases?.isRelease,
+        fetch: fetcher,
+      })
+    : undefined;
+  const onWebhook: OnWebhook = (kind, payload, delivery) => {
+    releases?.onWebhook(kind, payload);
+    return telegram?.(kind, payload, delivery);
+  };
 
   const readStatus = createStatusCache({ fetch: fetcher });
   app.get("/api/github/status", async (c) => {
@@ -75,8 +98,19 @@ export function createApp(options: {
   });
 
   app.route("/api/auth", authRoutes({ config: options.auth, fetch: fetcher }));
-  app.route("/api/github", webhookRoutes({ secret: options.webhookSecret, hub, onWebhook }));
-  app.get("/api/events", eventStream({ hub, pingMs: options.pingMs ?? PING_MS, closing: options.closing }));
+  app.route(
+    "/api/github",
+    webhookRoutes({ secret: options.webhookSecret, hub, onWebhook, isRelease: releases?.isRelease }),
+  );
+  app.get(
+    "/api/events",
+    eventStream({
+      hub,
+      pingMs: options.pingMs ?? PING_MS,
+      closing: options.closing,
+      releases: releases ? releases.snapshot : () => NOT_CONFIGURED,
+    }),
+  );
 
   app.use("/*", serveStatic({ root: options.staticRoot }));
 

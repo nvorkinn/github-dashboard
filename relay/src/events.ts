@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { ReleaseRun, ReleasesSnapshot } from "../../shared/runs.ts";
 import type { PageNotice } from "./notices.ts";
 
 /**
@@ -23,6 +24,12 @@ export type Change = {
   path?: string;
 };
 
+/**
+ * What an open page is told of release runs, which the relay keeps itself (see releases.ts): one run as it is now,
+ * or everything at once.
+ */
+export type ReleaseEvent = { name: "run"; data: ReleaseRun } | { name: "releases"; data: ReleasesSnapshot };
+
 /** Passes changes from the webhook endpoint to the event streams that are open at that moment. */
 export type Hub = {
   /** Hands a change to everyone listening now. With nobody listening it is dropped: nothing is kept for later. */
@@ -32,11 +39,17 @@ export type Hub = {
    * change, with nobody listening; the Telegram notices cover that case.
    */
   announce(notice: PageNotice): void;
+  /** Hands a release run, or all of them, to everyone listening now. Dropped, like a change, with nobody listening. */
+  release(event: ReleaseEvent): void;
   /**
-   * Starts listening, to changes and, given `onNotice`, to notices. The function returned stops it; calling that
-   * twice does no harm.
+   * Starts listening, to changes and, given `onNotice` and `onRelease`, to notices and release runs. The function
+   * returned stops it; calling that twice does no harm.
    */
-  subscribe(listener: (change: Change) => void, onNotice?: (notice: PageNotice) => void): () => void;
+  subscribe(
+    listener: (change: Change) => void,
+    onNotice?: (notice: PageNotice) => void,
+    onRelease?: (event: ReleaseEvent) => void,
+  ): () => void;
   /** How many are listening now. */
   listeners(): number;
   /**
@@ -51,6 +64,7 @@ export function createHub(): Hub {
   const listeners = new Set<{
     listener: (change: Change) => void;
     onNotice?: ((notice: PageNotice) => void) | undefined;
+    onRelease?: ((event: ReleaseEvent) => void) | undefined;
   }>();
   // A restart counts as everyone having just left: open pages connect again within seconds.
   let idleSince: number | undefined = Date.now();
@@ -73,8 +87,17 @@ export function createHub(): Hub {
         }
       }
     },
-    subscribe(listener, onNotice) {
-      const entry = { listener, onNotice };
+    release(event) {
+      for (const entry of [...listeners]) {
+        try {
+          entry.onRelease?.(event);
+        } catch {
+          // As for a change.
+        }
+      }
+    },
+    subscribe(listener, onNotice, onRelease) {
+      const entry = { listener, onNotice, onRelease };
       listeners.add(entry);
       idleSince = undefined;
       return () => {
@@ -95,11 +118,21 @@ const MAX_UNREAD = 256;
 /**
  * `GET /api/events`: the stream of changes for one open page, as Server-Sent Events. It sends `hello` on connecting,
  * `change` for each change published while it is open, `notice` for each notice announced, and a comment line every
- * `pingMs` so proxies keep the connection. A page that connects later learns nothing of what it missed; it reads the state from api.github.com.
+ * `pingMs` so proxies keep the connection. A page that connects later learns nothing of the changes it missed; it
+ * reads the state from api.github.com.
+ *
+ * Release runs are the exception, as the relay keeps them: given `releases`, the stream sends `releases` with all of
+ * them right after `hello`, then `run` for each run that changes and `releases` again when more than one did.
  *
  * The stream ends when the client goes away or `closing` fires, and then leaves no listener or timer behind.
  */
-export function eventStream(options: { hub: Hub; pingMs: number; closing?: AbortSignal | undefined }) {
+export function eventStream(options: {
+  hub: Hub;
+  pingMs: number;
+  closing?: AbortSignal | undefined;
+  /** Everything known of release runs at this moment. */
+  releases?: (() => ReleasesSnapshot) | undefined;
+}) {
   const encoder = new TextEncoder();
 
   return (c: Context) => {
@@ -124,6 +157,7 @@ export function eventStream(options: { hub: Hub; pingMs: number; closing?: Abort
         const unsubscribe = options.hub.subscribe(
           (change) => send(`event: change\ndata: ${JSON.stringify(change)}\n\n`),
           (notice) => send(`event: notice\ndata: ${JSON.stringify(notice)}\n\n`),
+          (event) => send(`event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`),
         );
         const ping = setInterval(() => send(": ping\n\n"), options.pingMs);
 
@@ -147,6 +181,9 @@ export function eventStream(options: { hub: Hub; pingMs: number; closing?: Abort
         options.closing?.addEventListener("abort", stop);
 
         send("event: hello\ndata: {}\n\n");
+        if (options.releases) {
+          send(`event: releases\ndata: ${JSON.stringify(options.releases())}\n\n`);
+        }
         if (gone.aborted || options.closing?.aborted) {
           stop();
         }

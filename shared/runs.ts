@@ -112,6 +112,8 @@ export type RawRun = {
   run_started_at?: string | null;
   updated_at: string;
   head_sha?: string;
+  /** Which try of the run this is: 1, and one more for each re-run. */
+  run_attempt?: number;
   /** Its workflow file, such as `.github/workflows/release.yml`. */
   path?: string;
 };

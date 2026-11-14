@@ -51,12 +51,13 @@ only in memory. The relay does the two steps a browser can't, because they need 
 Both cookies are encrypted (AES-256-GCM), HttpOnly, SameSite=Strict and sent only to `/api/auth`. The refresh
 token's lasts as long as the token, 6 months from the last use; the access token's as long as its token, 8 hours.
 The page's scripts can read neither, and the page keeps the access token only in memory.
-`POST /api/auth/logout` removes both. The relay stores nothing and has
+`POST /api/auth/logout` removes both. The relay stores nothing of the sign-in and has
 no list of users: the site sits behind Tinyauth at the reverse proxy, which decides who gets as far as signing in.
 
 The relay reads four variables for the sign-in. With none set it runs without sign-in (the endpoints answer 503);
 with some missing or wrong it refuses to start. The fifth is for the webhooks (see "Push") and optional on its own,
-as are the two for Telegram (see "Telegram").
+as are the two for Telegram (see "Telegram") and the two for reading GitHub as the app (see "Release runs in the
+relay").
 
 | Variable                   | Value                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -124,7 +125,8 @@ from api.github.com themselves:
 
 The relay keeps nothing of this: a notice goes to the pages that are connected at that moment and is then gone. A
 page that connects later, or again after a break, is not told what it missed and reads the current state from
-GitHub.
+GitHub. Release runs are the exception: the relay keeps those itself and tells a page all of them when it connects
+(see "Release runs in the relay").
 
 On the GitHub App's page, under Webhook:
 
@@ -183,6 +185,13 @@ data: {"kind":"pull_request","repo":"nvorkinn/github-dashboard","action":"synchr
   `{"type":"merged","key":"merged:owner/name#7","repo":"owner/name","headline":"Merged owner/name#7: its title","url":"https://github.com/owner/name/pull/7"}`.
   `type` is `merged`, `changes`, `checks`, `release` or `waiting`, and `key` tells a repeat (GitHub delivering again,
   another failed check on the same commit), which the page then doesn't show twice.
+- `releases` comes right after `hello`, and again whenever more than one run changed or what the relay knows of a
+  repository did: everything the relay knows of release runs (see "Release runs in the relay"),
+  `{"configured":true,"projects":{"owner/name":{"promoteWorkflow":123}},"runs":[...]}`. `configured` is false, and the
+  rest empty, for a relay that can't read GitHub. The lists are complete: a run that isn't in `runs` is gone.
+- `run` comes when one release run changed, or started: that run, whole, as it is in `runs`. It has the run's state,
+  its jobs and, as `graph`, the jobs of its workflow file with which waits for which and the run's jobs placed on
+  them.
 - `: ping` is a comment line, sent every 20 seconds to keep the connection open. `EventSource` ignores it.
 
 GitHub's own `ping` webhook, sent when the webhook is set up, is answered and not passed on.
@@ -211,6 +220,43 @@ The page reads the mark from the files in `.github/workflows` on the default bra
 its workflows goes by their names instead: the ones that say release, promote or deploy. Once one file is marked,
 names no longer count there. A workflow GitHub runs by itself, such as "pages build and deployment", has no file and
 is never shown.
+
+### Release runs in the relay
+
+The relay reads the release workflows itself, and keeps their runs, so that it can tell the pages how a run stands
+without each page asking GitHub. It reads GitHub as the GitHub App, not as a user:
+
+- When it starts, it lists the repositories the app is installed on and reads each one's `.github/workflows` folder
+  on the default branch: which files are release workflows (the mark, or else the names, as above), their jobs and
+  which job waits for which (`needs:`). It then reads each release workflow's latest five runs, and the jobs of the
+  ones still going.
+- A push to a repository's default branch (the `push` webhook) reads that folder again, and only the files whose
+  content changed. A `repository`, `installation` or `installation_repositories` webhook reads the list of
+  repositories again; GitHub sends the last two to every app, without subscribing to them.
+- A `workflow_run` webhook of a release workflow starts or updates its run, and a `workflow_job` webhook one job of
+  it, from what the webhook itself says. GitHub can deliver them out of order, so a job or a run never moves
+  backwards. A run keeps the workflow definition it started with. A run with a job waiting has its pending
+  deployments read, to tell an approval from a wait for a runner; so does one a `deployment_review` webhook names.
+- After each of these the run goes to the open pages whole: its state, its jobs and the workflow's jobs with the
+  run's jobs placed on them (see "The event stream"). Per workflow the runs still going are kept, and the last one
+  that finished, without its jobs.
+- In case a webhook never came, the runs still going are read again every three minutes and the workflow folders
+  every hour.
+
+All of it is in memory only: a restart reads it again. The relay only reads; approving, re-running and the like
+stay with the page, as the signed-in user. Whether the signed-in user may approve a waiting deployment is theirs to
+ask, as the app is nobody's reviewer.
+
+| Variable                 | Value                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------- |
+| `GITHUB_APP_ID`          | The app's ID (a number, on the app's page under "About"), or its client ID.                   |
+| `GITHUB_APP_PRIVATE_KEY` | A private key generated on the app's page: the `.pem` file's text, or that text in base64.    |
+
+Both or neither: with neither the relay knows of no release runs and says so to the pages, and with one, or a key
+that isn't one, it refuses to start. The key's line breaks may be written as `\n` where a setting can't span lines;
+`base64 -i the-key.pem` gives the other form. The key is a secret: keep it with the others. With it the relay asks
+GitHub for a token per installation, which lasts an hour, is held in memory and is never logged. The app needs no
+permission beyond the ones it has for the page (Actions, Contents, Deployments and Metadata, read).
 
 ## Reading GitHub
 
@@ -253,14 +299,15 @@ need attention, with a link to the thing on github.com and, when `PUBLIC_URL` is
 | A pull request merged                                                                | `Merged owner/name#7: its title`                             |
 | A review requested changes                                                           | `Changes requested on owner/name#7: its title`               |
 | A check run or suite on a pull request's commit failed, timed out or wants an action | `Checks failed in owner/name`, with each pull request's link |
-| A release run finished (a workflow whose name says release, promote or deploy)       | `Release in owner/name: success` (or how else it ended)      |
+| A release run finished                                                               | `Release in owner/name: success` (or how else it ended)      |
 | A release run asks for a deployment to be approved (a `deployment_review` request)   | `A release in owner/name is waiting for your approval`       |
 
 The last comes with a "Review in GitHub" button that opens the run, where Review deployments approves it. Everything
 else, such as checks passing or a pull request opening, sends nothing.
 
-The relay holds no token, so it can't read the mark in a workflow's file and goes by the workflow's name here, even
-in a repository that marks its release workflows.
+A release run is one of a release workflow as the relay read them from the repository (see "Release runs in the
+relay"), so the messages and the page agree. A relay that isn't set up to read GitHub, or hasn't read that repository,
+goes by the workflow's name: one that says release, promote or deploy.
 
 It stays quiet while a page is open: a message goes only when no page has had `/api/events` open for the last 30
 seconds, so a reload, a brief reconnect or a restart of the relay sends nothing. An open page shows it already.

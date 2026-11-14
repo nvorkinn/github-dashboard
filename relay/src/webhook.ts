@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { validWebhookSignature } from "./crypto.ts";
 import type { Change, Hub } from "./events.ts";
-import { noticeFrom, pageNotice } from "./notices.ts";
+import { type IsRelease, noticeFrom, pageNotice } from "./notices.ts";
 import { commit, isRecord, pullNumbers, record, text, wholeNumber } from "./payload.ts";
 
 /** What may look at a signed webhook's whole payload besides `changeFrom` (see `webhookRoutes`). */
@@ -30,8 +30,8 @@ const DELIVERY = /^[0-9A-Za-z-]{1,64}$/;
  * before anything reads them as JSON. Without `secret` the endpoint answers 503.
  *
  * `onWebhook`, when given, sees each signed webhook whole: its event name, its payload and its delivery id
- * (`X-GitHub-Delivery`). It is for the Telegram notices (see telegram.ts), which need more of the payload than a
- * `Change` carries; the payload goes nowhere else. It runs after the answer is settled, so whatever it does or fails
+ * (`X-GitHub-Delivery`). It is for the Telegram notices (see telegram.ts) and the release runs the relay keeps (see
+ * releases.ts), which need more of the payload than a `Change` carries; the payload goes nowhere else. It runs after the answer is settled, so whatever it does or fails
  * at, GitHub still gets its 204.
  */
 export function webhookRoutes(options: {
@@ -39,6 +39,8 @@ export function webhookRoutes(options: {
   hub: Hub;
   maxBodyBytes?: number;
   onWebhook?: OnWebhook | undefined;
+  /** Which workflows are releases, for the notices, where the relay reads them. */
+  isRelease?: IsRelease | undefined;
 }) {
   const routes = new Hono();
   const { secret, hub } = options;
@@ -88,7 +90,7 @@ export function webhookRoutes(options: {
     const delivery = DELIVERY.test(id) ? id : undefined;
     // What needs attention also goes to the open pages as a notice, for their desktop notifications. The pages tell
     // repeats apart themselves, so the relay remembers nothing for this.
-    const notice = noticeFrom(kind, payload, delivery);
+    const notice = noticeFrom(kind, payload, delivery, undefined, options.isRelease);
     if (notice) {
       hub.announce(pageNotice(notice));
     }
