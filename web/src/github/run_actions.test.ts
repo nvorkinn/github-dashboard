@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest";
+import { PROMOTE_WORKFLOW } from "../../../shared/runs.ts";
 import type { Auth } from "../auth.ts";
 import { project, run } from "../components/testing.ts";
 import type { Approval, Job } from "../model.ts";
-import { PROMOTE_WORKFLOW } from "./read.ts";
 import { APPROVED_COMMENT, createRunActions, nextTag, REJECTED_COMMENT } from "./run_actions.ts";
 import { describeAction } from "./writes.ts";
 
@@ -44,7 +44,6 @@ function setUp(routes: Record<string, unknown>) {
 const REPO = "octocat/weather-station";
 const RUN = `repos/${REPO}/actions/runs/1`;
 const FILE = ".github/workflows/release.yml";
-const WORKFLOWS = `repos/${REPO}/contents/.github/workflows`;
 const production: Approval = { environmentId: 70, environment: "production", canApprove: true };
 const waitingRun = run({ state: "waiting", finishedAt: undefined, approvals: [production] });
 const pending = (canApprove = true) => [
@@ -60,7 +59,6 @@ test("approving re-checks the run and its pending deployments, then approves tha
   await actions.review(waitingRun, production, "approved");
   expect(asked.map((one) => `${one.method} ${one.path}`)).toEqual([
     `GET ${RUN}`,
-    `GET ${WORKFLOWS}`,
     `GET ${RUN}/pending_deployments?per_page=100`,
     `POST ${RUN}/pending_deployments`,
   ]);
@@ -86,18 +84,6 @@ test.each([
     "This run has finished, so it no longer waits for an approval. Refresh the dashboard.",
   ],
   [
-    "the run is no release",
-    { status: "waiting", name: "CI" },
-    pending(),
-    "Only unfinished runs of release workflows can be approved from this dashboard.",
-  ],
-  [
-    "the run is of a workflow GitHub runs by itself",
-    { status: "waiting", name: "pages build and deployment", path: "dynamic/pages/pages-build-deployment" },
-    pending(),
-    "Only unfinished runs of release workflows can be approved from this dashboard.",
-  ],
-  [
     "the environment no longer waits",
     { status: "waiting", name: "Release" },
     [],
@@ -119,31 +105,6 @@ test.each([
   expect(dashboard.changed).not.toHaveBeenCalled();
 });
 
-test("in a repository that marks its release workflows, only a run of a marked one can be approved", async () => {
-  const blob = (text: string) => ({ encoding: "base64", content: btoa(text) });
-  const routes = {
-    [`GET ${WORKFLOWS}`]: [
-      { type: "file", path: FILE, sha: "marked" },
-      { type: "file", path: ".github/workflows/deploy-docs.yml", sha: "plain" },
-    ],
-    [`GET repos/${REPO}/git/blobs/marked`]: blob("name: Ship\n# dashboard: release\non: push\n"),
-    [`GET repos/${REPO}/git/blobs/plain`]: blob("name: Deploy docs\non: push\n"),
-    [`GET ${RUN}/pending_deployments`]: pending(),
-    [`POST ${RUN}/pending_deployments`]: [],
-  };
-  const docs = setUp({
-    ...routes,
-    [`GET ${RUN}`]: { id: 1, name: "Deploy docs", path: ".github/workflows/deploy-docs.yml", status: "waiting" },
-  });
-  await expect(docs.actions.review(waitingRun, production, "approved")).rejects.toThrow(
-    "Only unfinished runs of release workflows can be approved from this dashboard.",
-  );
-  expect(docs.sent()).toEqual([]);
-  const ship = setUp({ ...routes, [`GET ${RUN}`]: { id: 1, name: "Ship", path: FILE, status: "waiting" } });
-  await ship.actions.review(waitingRun, production, "approved");
-  expect(ship.sent()).toHaveLength(1);
-});
-
 const failedRun = run({ state: "failed" });
 
 test("re-running the failed jobs checks that the run finished and failed, then asks GitHub", async () => {
@@ -153,7 +114,8 @@ test("re-running the failed jobs checks that the run finished and failed, then a
   });
   await actions.rerunFailed(failedRun);
   expect(sent()).toEqual([{ method: "POST", path: `${RUN}/rerun-failed-jobs`, body: {} }]);
-  expect(dashboard.changed).toHaveBeenCalledWith({ kind: "workflow_run", repo: REPO, run: 1 });
+  // How the run stands now the relay tells, as for every run.
+  expect(dashboard.changed).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -194,7 +156,7 @@ test("re-running a job checks the job and its whole run, then asks GitHub", asyn
     `POST ${JOBS}/jobs/11/rerun`,
   ]);
   expect(sent()[0]?.body).toEqual({});
-  expect(dashboard.changed).toHaveBeenCalledWith({ kind: "workflow_job", repo: REPO, run: 1 });
+  expect(dashboard.changed).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -275,7 +237,7 @@ test("releasing checks again and publishes in one call, leaving the branch and t
     },
   ]);
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "release", repo: REPO });
-  expect(dashboard.changed).toHaveBeenCalledWith({ kind: "workflow_run", repo: REPO });
+  expect(dashboard.changed).toHaveBeenCalledTimes(1);
 });
 
 test("the first release is published the same way", async () => {
@@ -324,7 +286,7 @@ test("promoting checks the workflow and the release, then starts the workflow wi
       body: { ref: "trunk", inputs: { tag: "v1.2.3" } },
     },
   ]);
-  expect(dashboard.changed).toHaveBeenCalledWith({ kind: "workflow_run", repo: REPO });
+  expect(dashboard.changed).not.toHaveBeenCalled();
 });
 
 test.each([

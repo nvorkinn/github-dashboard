@@ -1,7 +1,8 @@
 /**
  * The relay's notices of what changed on GitHub, pushed to the page over Server-Sent Events. A notice only says
- * that something changed and where; what it is now is read from api.github.com as always. The stream is the relay's
- * own address, so the browser sends the cookies of the login in front of it and no token goes anywhere near it.
+ * that something changed and where; what it is now is read from api.github.com as always. Release runs are the
+ * exception: the relay keeps those and sends them whole (see releases.ts). The stream is the relay's own address, so
+ * the browser sends the cookies of the login in front of it and no token goes anywhere near it.
  */
 
 /** One webhook GitHub sent the relay, cut down to what says where to look. */
@@ -21,7 +22,9 @@ export type Change = {
   path?: string;
 };
 
+import type { ReleaseRun, ReleasesSnapshot } from "../../../shared/runs.ts";
 import { NOTICE_TYPES, type Notice, type NoticeType } from "../model.ts";
+import { releaseRun, releasesSnapshot } from "./releases.ts";
 
 /** As much of an `EventSource` as is used. */
 export type EventStream = {
@@ -40,6 +43,10 @@ export type EventsOptions = {
   onChange(change: Change): void;
   /** Something that needs attention, for a desktop notification. */
   onNotice?(notice: Notice): void;
+  /** Every release run the relay knows of: on connecting, and whenever more than one of them changed. */
+  onReleases?(snapshot: ReleasesSnapshot): void;
+  /** One release run as it is now. */
+  onRun?(run: ReleaseRun): void;
 };
 
 export type Events = {
@@ -107,6 +114,18 @@ export function createEvents(options: EventsOptions): Events {
       const notice = stream === mine ? parseNotice(event) : undefined;
       if (notice) {
         options.onNotice?.(notice);
+      }
+    });
+    mine.addEventListener("releases", (event) => {
+      const snapshot = stream === mine ? releasesSnapshot(dataOf(event)) : undefined;
+      if (snapshot) {
+        options.onReleases?.(snapshot);
+      }
+    });
+    mine.addEventListener("run", (event) => {
+      const run = stream === mine ? releaseRun(dataOf(event)) : undefined;
+      if (run) {
+        options.onRun?.(run);
       }
     });
     mine.addEventListener("error", () => {

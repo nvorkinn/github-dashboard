@@ -1,18 +1,4 @@
-import {
-  approval,
-  checkState,
-  isWaiting,
-  job,
-  PROMOTE_WORKFLOW,
-  type RawJob,
-  type RawPendingDeployment,
-  type RawRun,
-  type RawWorkflow,
-  RECENT_RELEASES,
-  runOf,
-  shownRuns,
-} from "../../../shared/runs.ts";
-import { isReleaseName } from "../../../shared/workflows.ts";
+import { approval, checkState, type RawPendingDeployment } from "../../../shared/runs.ts";
 import type {
   Approval,
   Check,
@@ -21,32 +7,11 @@ import type {
   MergeMethod,
   Project,
   PullRequest,
-  ReleaseRun,
   Unreleased,
 } from "../model.ts";
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 import { comparisonField, type GqlComparison, unreleasedFrom } from "./unreleased.ts";
-import { markedReleaseFiles, WORKFLOWS_FOLDER, workflowFile } from "./workflow_graph.ts";
-
-export {
-  approval,
-  checkState,
-  isWaiting,
-  job,
-  PROMOTE_WORKFLOW,
-  type RawJob,
-  type RawPendingDeployment,
-  type RawRun,
-  type RawWorkflow,
-  RECENT_RELEASES,
-  releaseTag,
-  runOf,
-  runState,
-  settledJobs,
-  shownRuns,
-} from "../../../shared/runs.ts";
-export { isReleaseName } from "../../../shared/workflows.ts";
 
 // The parts of GitHub's answers that are used. Everything else in them is ignored.
 export type RawRepo = {
@@ -93,21 +58,9 @@ export type ReadResult = {
 export type RepoPlan = {
   /** `all`: the list of open pull requests and each one on it. Otherwise only the ones with these numbers. */
   pulls: "all" | Set<number>;
-  /** The runs of its release workflows: all of them, found from the list of its workflows. */
-  releases: boolean;
-  /** Only the runs with these ids, each read by itself. Left out, none. */
-  runs?: Set<number>;
   /** The latest release, and what the default branch has that it hasn't. */
   latestRelease: boolean;
 };
-
-/** Per project (`owner/name`), the paths of its release workflows' files, as the last read of everything found them. */
-export type ReleasePaths = Record<string, string[]>;
-
-/** A run's workflow file, from its `path`, which can end in `@<ref>`. */
-function fileOf(path: string): string {
-  return path.split("@")[0] ?? path;
-}
 
 /** What to read again: everything, or these parts of these repositories (`owner/name`). */
 export type Plan = "everything" | Map<string, RepoPlan>;
@@ -125,7 +78,6 @@ const SHOWN = new Set([
   "status",
   "workflow_run",
   "workflow_job",
-  "deployment_review",
   "push",
   "release",
 ]);
@@ -136,10 +88,8 @@ const SHOWN = new Set([
  *
  * - `pull_request`, `pull_request_review`, `pull_request_review_thread`, `check_run`, `check_suite`, `status`: the
  *   pull request it is about, with its checks.
- * - `workflow_run`, `workflow_job`, `deployment_review`: the run it names, if it is of a release workflow, and the
- *   pull request it is about. Whether it is one is known from the workflow file's path, which a `workflow_run`
- *   carries, and the project's `releasePaths`; a change without a path is found out by reading the run. A change
- *   that names no run, or a project whose release workflows aren't known, reads all the repository's release runs.
+ * - `workflow_run`, `workflow_job`: the pull request it is about, with its checks. How a release run stands isn't
+ *   read: the relay says (see dashboard.ts).
  * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged; and the
  *   latest release, as the default branch may have moved past it.
  * - `release`: the repository's latest release.
@@ -153,12 +103,7 @@ const SHOWN = new Set([
  * read everything, and so does one of the kinds above that names no repository or one that isn't known. Any other
  * kind reads nothing.
  */
-export function planFor(
-  changes: Change[],
-  known: DashboardData,
-  hidden: ReadonlySet<string> = new Set(),
-  releasePaths: ReleasePaths = {},
-): Plan {
+export function planFor(changes: Change[], known: DashboardData, hidden: ReadonlySet<string> = new Set()): Plan {
   const plan = new Map<string, RepoPlan>();
   for (const change of changes) {
     if (WHICH_PROJECTS.has(change.kind)) {
@@ -177,7 +122,7 @@ export function planFor(
     if (name === undefined || !known.projects.some(of(name))) {
       return "everything";
     }
-    const repo = plan.get(name) ?? { pulls: new Set<number>(), releases: false, latestRelease: false };
+    const repo = plan.get(name) ?? { pulls: new Set<number>(), latestRelease: false };
     plan.set(name, repo);
     switch (change.kind) {
       case "pull_request":
@@ -186,26 +131,10 @@ export function planFor(
       case "check_run":
       case "check_suite":
       case "status":
-        repo.pulls = both(repo.pulls, pullsOf(change, known));
-        break;
       case "workflow_run":
       case "workflow_job":
-      case "deployment_review": {
-        const paths = releasePaths[name];
-        const run = change.run;
-        if (run === undefined || paths === undefined) {
-          repo.releases = true;
-        } else if (
-          change.path === undefined ||
-          paths.includes(fileOf(change.path)) ||
-          known.releases.some((one) => one.repo === name && one.id === run)
-        ) {
-          repo.runs = new Set([...(repo.runs ?? []), run]);
-        }
-        // Else it is a run of a workflow that is no release, such as CI: nothing of it shows but on its pull request.
         repo.pulls = both(repo.pulls, pullsOf(change, known));
         break;
-      }
       case "push":
         repo.pulls = "all";
         repo.latestRelease = true;
@@ -217,7 +146,7 @@ export function planFor(
   }
   // Such as a check on a commit that no pull request has as its head: nothing on the page shows it.
   for (const [name, repo] of plan) {
-    if (repo.pulls !== "all" && repo.pulls.size === 0 && !repo.releases && !repo.runs?.size && !repo.latestRelease) {
+    if (repo.pulls !== "all" && repo.pulls.size === 0 && !repo.latestRelease) {
       plan.delete(name);
     }
   }
@@ -242,41 +171,26 @@ function both(a: RepoPlan["pulls"], b: RepoPlan["pulls"]): RepoPlan["pulls"] {
 }
 
 /**
- * Reads only what `plan` names and puts it into a copy of `previous`; the rest stays as it was. The projects stay
- * the same ones, so a plan is only for changes that can't add or remove one. Fails the way `readDashboard` does: a
+ * Reads only what `plan` names and puts it into a copy of `previous`; the rest stays as it was, the release runs
+ * among it, which are the relay's to say. The projects stay the same ones, so a plan is only for changes that can't add or remove one. Fails the way `readDashboard` does: a
  * part GitHub refuses stays as it was and is a `problem`, and what would fail every call is thrown.
  */
-export async function readChanged(
-  api: Api,
-  plan: Map<string, RepoPlan>,
-  previous: DashboardData,
-  releasePaths: ReleasePaths = {},
-): Promise<ReadResult> {
+export async function readChanged(api: Api, plan: Map<string, RepoPlan>, previous: DashboardData): Promise<ReadResult> {
   const failed = new Set<string>();
   const read = new Map(
     await Promise.all(
-      [...plan].map(
-        async ([name, wanted]) =>
-          [name, await readRepo(api, name, wanted, previous, failed, releasePaths[name] ?? [])] as const,
-      ),
+      [...plan].map(async ([name, wanted]) => [name, await readRepo(api, name, wanted, previous, failed)] as const),
     ),
   );
   const projects = previous.projects.map((one) => {
     const parts = read.get(one.repo);
-    return parts
-      ? {
-          ...one,
-          latestRelease: parts.latestRelease,
-          unreleased: parts.unreleased,
-          promoteWorkflow: parts.promoteWorkflow,
-        }
-      : one;
+    return parts ? { ...one, latestRelease: parts.latestRelease, unreleased: parts.unreleased } : one;
   });
   return {
     data: {
       projects,
       pulls: projects.flatMap((one) => read.get(one.repo)?.pulls ?? previous.pulls.filter(of(one.repo))),
-      releases: projects.flatMap((one) => read.get(one.repo)?.releases ?? previous.releases.filter(of(one.repo))),
+      releases: previous.releases,
     },
     problem: problemOf(failed),
   };
@@ -297,8 +211,6 @@ type RepoParts = {
   latestRelease: Project["latestRelease"];
   unreleased: Project["unreleased"];
   pulls: PullRequest[];
-  releases: ReleaseRun[];
-  promoteWorkflow: Project["promoteWorkflow"];
 };
 
 /**
@@ -311,14 +223,11 @@ async function readRepo(
   wanted: RepoPlan,
   previous: DashboardData | undefined,
   failed: Set<string>,
-  releasePaths: string[],
 ): Promise<RepoParts> {
   const was: RepoParts = {
     latestRelease: previous?.projects.find(of(repo))?.latestRelease,
     unreleased: previous?.projects.find(of(repo))?.unreleased,
     pulls: previous?.pulls.filter(of(repo)) ?? [],
-    releases: previous?.releases.filter(of(repo)) ?? [],
-    promoteWorkflow: previous?.projects.find(of(repo))?.promoteWorkflow,
   };
 
   async function part<T>(isWanted: boolean, read: () => Promise<T>, fallback: T): Promise<T> {
@@ -338,7 +247,7 @@ async function readRepo(
 
   const numbers = wanted.pulls;
   const branch = previous?.projects.find(of(repo))?.defaultBranch;
-  const [{ latestRelease, unreleased }, pulls, releases] = await Promise.all([
+  const [{ latestRelease, unreleased }, pulls] = await Promise.all([
     part(
       wanted.latestRelease,
       async () => {
@@ -352,20 +261,8 @@ async function readRepo(
       () => (numbers === "all" ? pullRequests(api, repo) : somePullRequests(api, repo, numbers, was.pulls)),
       was.pulls,
     ),
-    // The Promote workflow is found in the same list of workflows as the release workflows.
-    part(
-      wanted.releases || (wanted.runs?.size ?? 0) > 0,
-      async () =>
-        wanted.releases
-          ? releaseRuns(api, repo)
-          : {
-              runs: await someRuns(api, repo, wanted.runs ?? new Set(), was.releases, releasePaths),
-              promoteWorkflow: was.promoteWorkflow,
-            },
-      { runs: was.releases, promoteWorkflow: was.promoteWorkflow },
-    ),
   ]);
-  return { latestRelease, unreleased, pulls, releases: releases.runs, promoteWorkflow: releases.promoteWorkflow };
+  return { latestRelease, unreleased, pulls };
 }
 
 export type MergeSettings = Pick<Project, "mergeMethod" | "autoMergeAllowed">;
@@ -591,123 +488,10 @@ function statusState(state: string): CheckState {
 }
 
 /**
- * Of a repository's workflows, the ones whose runs the dashboard shows as releases. Only a workflow with a file in
- * the repository counts, so not the ones GitHub runs by itself, such as "pages build and deployment". Of those:
- * the ones whose file carries the mark, a comment line `# dashboard: release`; and in a repository that marks none,
- * the ones whose name says release, promote or deploy.
+ * The environments a waiting run needs approved, and whether the signed-in user may approve each. A token without
+ * the permission to read them (GitHub answers 403 or 404) gets nothing, which leaves the run without buttons.
  */
-export async function releaseWorkflows<T extends { name: string; path?: string | undefined }>(
-  api: Api,
-  repo: string,
-  workflows: T[],
-): Promise<T[]> {
-  const withFile = workflows.filter((workflow) => workflow.path?.startsWith(`${WORKFLOWS_FOLDER}/`));
-  if (withFile.length === 0) {
-    return [];
-  }
-  const marked = await markedReleaseFiles(api, repo);
-  return marked.size > 0
-    ? withFile.filter((workflow) => marked.has(workflow.path ?? ""))
-    : withFile.filter((workflow) => isReleaseName(workflow.name));
-}
-
-/**
- * Per release workflow, the runs still going among its latest ones and the last one that finished, the last started
- * first. Read per workflow, so CI runs can't push a release off the page. With them, from the same list of
- * workflows, the id of the repository's active Promote workflow, if it has one.
- */
-async function releaseRuns(
-  api: Api,
-  repo: string,
-): Promise<{ runs: ReleaseRun[]; promoteWorkflow: number | undefined }> {
-  // A disabled workflow starts no more releases.
-  const active = (await api.list<RawWorkflow>(`repos/${repo}/actions/workflows`, "workflows")).filter(
-    (workflow) => workflow.state === "active",
-  );
-  const workflows = await releaseWorkflows(api, repo, active);
-  const promoteWorkflow = active.find((workflow) => workflow.path === PROMOTE_WORKFLOW)?.id;
-  const runs = await Promise.all(
-    workflows.map(async (workflow) => {
-      const latestRuns = (
-        await api.get<{ workflow_runs: RawRun[] }>(
-          `repos/${repo}/actions/workflows/${workflow.id}/runs?per_page=${RECENT_RELEASES}`,
-        )
-      ).workflow_runs;
-      return Promise.all(shownRuns(latestRuns).map((run) => releaseRun(api, repo, workflow, run)));
-    }),
-  );
-  return { runs: runs.flat().sort((a, b) => b.startedAt.localeCompare(a.startedAt)), promoteWorkflow };
-}
-
-/**
- * `known` with the runs of these ids read again, each by itself: as it is now, or gone. A run of a workflow that
- * is no release (its file isn't among `releasePaths`) is left out. Per workflow the runs still going stay, and the
- * last one that finished.
- */
-async function someRuns(
-  api: Api,
-  repo: string,
-  ids: Set<number>,
-  known: ReleaseRun[],
-  releasePaths: string[],
-): Promise<ReleaseRun[]> {
-  const read = await Promise.all(
-    [...ids].map(async (id) => {
-      const raw = await unlessGone(api.get<RawRun>(`repos/${repo}/actions/runs/${id}`));
-      const path = fileOf(raw?.path ?? "");
-      return raw && releasePaths.includes(path)
-        ? releaseRun(api, repo, { name: raw.name ?? path, path }, raw)
-        : undefined;
-    }),
-  );
-  const runs = [...known.filter((run) => !ids.has(run.id)), ...read.filter((run) => run !== undefined)];
-  // A workflow's newest finished run replaces the one before it.
-  const lastFinished = new Map<string, number>();
-  for (const run of runs) {
-    if (run.finishedAt !== undefined) {
-      lastFinished.set(run.workflow, Math.max(lastFinished.get(run.workflow) ?? 0, run.id));
-    }
-  }
-  return runs
-    .filter((run) => run.finishedAt === undefined || lastFinished.get(run.workflow) === run.id)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-}
-
-/**
- * One run in the model's words. Its jobs, what they wait for and its approvals are read only while it is going:
- * the page shows a finished run for a few minutes with a link to it on GitHub, and that is all it needs.
- */
-async function releaseRun(
-  api: Api,
-  repo: string,
-  workflow: Pick<RawWorkflow, "name" | "path">,
-  run: RawRun,
-): Promise<ReleaseRun> {
-  if (run.status === "completed") {
-    return runOf(repo, workflow, run, [], undefined, []);
-  }
-  const path = run.path ?? workflow.path;
-  const [rawJobs, definitions] = await Promise.all([
-    runJobs(api, repo, run.id),
-    // Which job waits for which, from the workflow file as it was at the run's commit.
-    path && run.head_sha ? workflowFile(api, repo, path, run.head_sha) : undefined,
-  ]);
-  const jobs = rawJobs.map(job);
-  // Only a run with a job GitHub calls waiting can have something to approve, so only such a run costs the request.
-  const approvals = jobs.some(isWaiting) ? await pendingApprovals(api, repo, run.id) : [];
-  return runOf(repo, workflow, run, jobs, definitions, approvals);
-}
-
-/** The jobs of a run's latest attempt, which is what GitHub gives without `filter`. */
-export function runJobs(api: Api, repo: string, run: number): Promise<RawJob[]> {
-  return api.list<RawJob>(`repos/${repo}/actions/runs/${run}/jobs`, "jobs");
-}
-
-/**
- * The environments a waiting run needs approved. A token without the permission to read them (GitHub answers 403 or
- * 404) gets nothing, which leaves the run without buttons rather than without its card.
- */
-async function pendingApprovals(api: Api, repo: string, run: number): Promise<Approval[] | undefined> {
+export async function pendingApprovals(api: Api, repo: string, run: number): Promise<Approval[] | undefined> {
   let pending: RawPendingDeployment[];
   try {
     pending = await api.list<RawPendingDeployment>(`repos/${repo}/actions/runs/${run}/pending_deployments`);
