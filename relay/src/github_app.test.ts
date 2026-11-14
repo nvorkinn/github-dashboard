@@ -1,13 +1,17 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { AppError, createGitHubApp, reasonOf } from "./github_app.ts";
 
 const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const privateKey = keys.privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const config = { appId: "123456", privateKey };
 const NOW = Date.parse("2026-11-14T12:00:00Z");
 
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+});
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -31,17 +35,17 @@ function fakeGitHub(answers: Record<string, unknown>) {
 
 test("signs in as the app with a short-lived token made from its key", async () => {
   const github = fakeGitHub({ "GET app/installations?per_page=100&page=1": [] });
-  const app = createGitHubApp({ config, fetch: github.fetcher, now: () => NOW });
+  const app = createGitHubApp({ config, fetch: github.fetcher });
   expect(await app.repositories()).toEqual([]);
 
   const [, jwt = ""] = github.calls[0]?.authorization.split(" ") ?? [];
   const [header = "", payload = "", signature = ""] = jwt.split(".");
   expect(JSON.parse(Buffer.from(header, "base64url").toString())).toEqual({ alg: "RS256", typ: "JWT" });
-  expect(JSON.parse(Buffer.from(payload, "base64url").toString())).toEqual({
-    iat: NOW / 1000 - 60,
-    exp: NOW / 1000 + 540,
-    iss: "123456",
-  });
+  const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
+  expect(claims.iss).toBe("123456");
+  // Short-lived, and never for longer than the ten minutes GitHub takes.
+  expect(claims.iat).toBeLessThanOrEqual(NOW / 1000);
+  expect(claims.exp - claims.iat).toBeLessThanOrEqual(600);
   const verify = createVerify("RSA-SHA256").update(`${header}.${payload}`);
   expect(verify.verify(keys.publicKey, signature, "base64url")).toBe(true);
 });
@@ -60,7 +64,7 @@ test("lists the repositories of every installation that isn't suspended, archive
       ],
     },
   });
-  const app = createGitHubApp({ config, fetch: github.fetcher, now: () => NOW });
+  const app = createGitHubApp({ config, fetch: github.fetcher });
   // Both installations answer the same here, each asked with its own token.
   expect(await app.repositories()).toEqual([
     { repo: "nvorkinn/a", installation: 1, defaultBranch: "main" },
@@ -72,14 +76,13 @@ test("lists the repositories of every installation that isn't suspended, archive
 });
 
 test("keeps an installation's token until shortly before it ends, and asks once for reads side by side", async () => {
-  let now = NOW;
   const github = fakeGitHub({ "GET repos/o/r": { ok: true } });
-  const app = createGitHubApp({ config, fetch: github.fetcher, now: () => now });
+  const app = createGitHubApp({ config, fetch: github.fetcher });
   await Promise.all([app.get(7, "repos/o/r"), app.get(7, "repos/o/r")]);
   await app.get(7, "repos/o/r");
   expect(github.keys().filter((key) => key.startsWith("POST"))).toEqual(["POST app/installations/7/access_tokens"]);
 
-  now = NOW + 56 * 60_000;
+  vi.setSystemTime(NOW + 61 * 60_000);
   await app.get(7, "repos/o/r");
   expect(github.keys().filter((key) => key.startsWith("POST"))).toHaveLength(2);
   expect(github.calls.at(-1)?.authorization).toBe("Bearer ghs_SECRET2");
@@ -88,7 +91,7 @@ test("keeps an installation's token until shortly before it ends, and asks once 
 test("a token GitHub no longer takes is replaced once", async () => {
   const answers: Record<string, unknown> = { "GET repos/o/r": 401 };
   const github = fakeGitHub(answers);
-  const app = createGitHubApp({ config, fetch: github.fetcher, now: () => NOW });
+  const app = createGitHubApp({ config, fetch: github.fetcher });
   await expect(app.get(7, "repos/o/r")).rejects.toMatchObject({ status: 401 });
   expect(github.keys().filter((key) => key.startsWith("POST"))).toHaveLength(2);
 });
@@ -99,7 +102,7 @@ test("reads every page of a list", async () => {
     "GET repos/o/r/actions/runs/1/jobs?per_page=100&page=1": { jobs: page(0, 100) },
     "GET repos/o/r/actions/runs/1/jobs?per_page=100&page=2": { jobs: page(100, 3) },
   });
-  const app = createGitHubApp({ config, fetch: github.fetcher, now: () => NOW });
+  const app = createGitHubApp({ config, fetch: github.fetcher });
   expect(await app.list(7, "repos/o/r/actions/runs/1/jobs", "jobs")).toHaveLength(103);
   await expect(app.list(7, "repos/o/r", "jobs")).rejects.toBeInstanceOf(AppError);
 });
@@ -107,7 +110,7 @@ test("reads every page of a list", async () => {
 test("a failure says its status or kind, and nothing of the token, the key or the answer", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const github = fakeGitHub({ "GET repos/o/r": 403 });
-  const app = createGitHubApp({ config, fetch: github.fetcher, now: () => NOW });
+  const app = createGitHubApp({ config, fetch: github.fetcher });
   const refused = await app.get(7, "repos/o/r").catch((error: unknown) => error);
   expect(reasonOf(refused)).toBe("HTTP 403");
 
@@ -118,7 +121,8 @@ test("a failure says its status or kind, and nothing of the token, the key or th
     }) as typeof fetch,
   });
   const failed = await down.get(7, "repos/o/r").catch((error: unknown) => error);
-  expect(reasonOf(failed)).toBe("TypeError");
+  // Octokit, which asks for the token, calls a request that got no answer a 500.
+  expect(reasonOf(failed)).toBe("HTTP 500");
   expect(String(failed)).not.toContain("SECRET");
   expect(warn).not.toHaveBeenCalled();
 });

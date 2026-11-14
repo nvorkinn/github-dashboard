@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { webhookSignature } from "./crypto.ts";
-import { blob, settle } from "./testing.ts";
+import { blob, settle, until } from "./testing.ts";
 
 const SECRET = "webhook-secret";
 const REPO = "nvorkinn/countdown";
@@ -39,12 +39,19 @@ function fakeGitHub() {
     [`/repos/${REPO}/actions/workflows/1/runs`]: { workflow_runs: [run(5, "in_progress")] },
     [`/repos/${REPO}/actions/runs/5/jobs`]: { jobs: [job(1, "in_progress")] },
   };
+  const paths: string[] = [];
   const fetcher = (async (url: string | URL | Request) => {
     const { hostname, pathname } = new URL(String(url));
+    paths.push(pathname);
     const found = hostname === "api.github.com" ? answers[pathname] : undefined;
     return found === undefined ? new Response("", { status: 404 }) : Response.json(found);
   }) as typeof fetch;
-  return { fetcher, answers };
+  /** Resolves once the relay has read everything it reads at its start. */
+  const started = async () => {
+    await until(() => paths.includes(`/repos/${REPO}/actions/runs/5/jobs`));
+    await settle();
+  };
+  return { fetcher, answers, started };
 }
 
 function run(id: number, status: string) {
