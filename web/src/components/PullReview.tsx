@@ -4,6 +4,7 @@ import { DIFF_FONT_SIZES, type DiffFontSize, rememberDiffFontSize, rememberedDif
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
+import { clampTreeWidth, MIN_TREE_WIDTH, rememberedTreeWidth, rememberTreeWidth } from "../tree_width.ts";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { fileIcon, folderIcon } from "./file_icons.ts";
@@ -234,6 +235,68 @@ function FileTree({
   );
 }
 
+/** The gap between the file tree and the diff. Drag it, or focus it and use the arrow keys, to resize the tree. */
+function TreeDivider({
+  width,
+  setWidth,
+}: {
+  width: number | undefined;
+  setWidth: (width: number | undefined) => void;
+}) {
+  const drag = useRef<{ x: number; from: number; to: number } | undefined>(undefined);
+  const drawn = (divider: HTMLElement) => divider.previousElementSibling?.getBoundingClientRect().width ?? 0;
+  const choose = (divider: HTMLElement, wanted: number) => {
+    const chosen = clampTreeWidth(wanted, divider.parentElement?.clientWidth ?? 0);
+    setWidth(chosen);
+    return chosen;
+  };
+  const finish = () => {
+    if (drag.current && drag.current.to !== drag.current.from) rememberTreeWidth(drag.current.to);
+    drag.current = undefined;
+  };
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: an <hr> can't be focused or dragged; this is the ARIA window splitter.
+    <div
+      class="review-divider"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize changed files"
+      aria-valuenow={width}
+      aria-valuemin={MIN_TREE_WIDTH}
+      aria-valuetext={width === undefined ? "Default width" : `${width} pixels`}
+      tabIndex={0}
+      title="Drag to resize, double-click to reset"
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        const from = drawn(event.currentTarget);
+        drag.current = { x: event.clientX, from, to: from };
+      }}
+      onPointerMove={(event) => {
+        const moved = drag.current && event.clientX - drag.current.x;
+        // A click that never moves leaves the tree at the width the stylesheet gives it.
+        if (drag.current && moved) drag.current.to = choose(event.currentTarget, drag.current.from + moved);
+      }}
+      onPointerUp={finish}
+      onPointerCancel={finish}
+      onDblClick={() => {
+        setWidth(undefined);
+        rememberTreeWidth(undefined);
+      }}
+      onKeyDown={(event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const from = drawn(event.currentTarget);
+        const wanted = { ArrowLeft: from - 16, ArrowRight: from + 16, Home: 0, End: Number.MAX_SAFE_INTEGER }[
+          event.key
+        ];
+        if (wanted === undefined) return;
+        event.preventDefault();
+        rememberTreeWidth(choose(event.currentTarget, wanted));
+      }}
+    />
+  );
+}
+
 export function PullReview({
   initial,
   pulls,
@@ -256,6 +319,7 @@ export function PullReview({
   const [wrapping, setWrapping] = useState<Record<string, boolean>>({});
   const [tree, setTree] = useState(true);
   const [fontSize, setFontSize] = useState<DiffFontSize>(rememberedDiffFontSize);
+  const [treeWidth, setTreeWidth] = useState(rememberedTreeWidth);
   const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
   // Auto-merge as last turned on or off here, until the review is read again.
@@ -495,7 +559,10 @@ export function PullReview({
         )}
       </details>
       {files?.truncated && <p role="status">Only the first 300 files are shown. Review remaining files on GitHub.</p>}
-      <div class={`review-body ${tree ? "" : "review-no-tree"}`}>
+      <div
+        class={`review-body ${tree ? "" : "review-no-tree"}`}
+        style={treeWidth === undefined ? undefined : `--tree-width: ${treeWidth}px`}
+      >
         {tree && (
           <nav aria-label="Changed files" class="review-tree">
             <div class="review-tree-heading">
@@ -525,6 +592,7 @@ export function PullReview({
             </div>
           </nav>
         )}
+        {tree && <TreeDivider width={treeWidth} setWidth={setTreeWidth} />}
         <section class="review-code" aria-label="File diff">
           <div class="review-toolbar">
             <div class="review-file-title">

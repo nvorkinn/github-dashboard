@@ -13,10 +13,12 @@
   --border: #55516f;
   --quiet: #abaac4;
   --done: #85e49a;
-  width: 94vw;
-  height: 96dvh;
-  max-width: 2600px;
-  max-height: 96dvh;
+  /* The same margin on every side, however large the window. The browser's own limits on a dialog would shrink it. */
+  --review-margin: 24px;
+  width: calc(100vw - 2 * var(--review-margin));
+  height: calc(100dvh - 2 * var(--review-margin));
+  max-width: none;
+  max-height: none;
   padding: 24px;
   border: 1px solid #8c79bc;
   border-radius: 20px;
@@ -184,10 +186,33 @@
 }
 .review-body {
   display: grid;
-  grid-template-columns: clamp(250px, 22vw, 380px) minmax(0, 1fr);
-  gap: 16px;
+  /* The tree takes the width chosen by dragging the divider, or else a share of the window. The divider is the gap. */
+  --tree-default: clamp(250px, 22vw, 380px);
+  --divider: 16px;
+  grid-template-columns: clamp(180px, var(--tree-width, var(--tree-default)), 60%) var(--divider) minmax(0, 1fr);
   min-height: 0;
   flex: 1;
+}
+.review-divider {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.review-divider::after {
+  content: "";
+  position: absolute;
+  inset: 12px calc(50% - 2px);
+  border-radius: 2px;
+  background: var(--review-purple);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.review-divider:hover::after,
+.review-divider:active::after,
+.review-divider:focus-visible::after {
+  opacity: 0.8;
 }
 .review-no-tree {
   grid-template-columns: minmax(0, 1fr);
@@ -641,8 +666,7 @@
 }
 @media (max-width: 800px) {
   .pull-review {
-    width: 98vw;
-    height: 96dvh;
+    --review-margin: 8px;
     padding: 12px;
     border-radius: 12px;
   }
@@ -650,8 +674,8 @@
     gap: 10px;
   }
   .review-body {
-    grid-template-columns: 210px minmax(0, 1fr);
-    gap: 10px;
+    --tree-default: 210px;
+    --divider: 10px;
   }
   .review-no-tree {
     grid-template-columns: minmax(0, 1fr);
@@ -683,11 +707,12 @@
 }
 @media (max-width: 520px) {
   .review-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .review-body {
     display: flex;
     flex-direction: column;
+    gap: 10px;
+  }
+  .review-divider {
+    display: none;
   }
   .review-tree {
     flex: 0 0 150px;
