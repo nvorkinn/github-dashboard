@@ -1,6 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { expect, test } from "vitest";
-import { readAuthConfig, readTelegramConfig, readWebhookSecret } from "./config.ts";
+import { readAppConfig, readAuthConfig, readTelegramConfig, readWebhookSecret } from "./config.ts";
 
 test("Telegram is optional, and needs both its settings", () => {
   expect(readTelegramConfig({})).toBeUndefined();
@@ -82,5 +82,40 @@ test("refuses a cookie key that isn't 32 bytes of base64", () => {
 test("refuses a public address that isn't a bare http(s) origin", () => {
   for (const address of ["github.vorkinn.org", "ftp://github.vorkinn.org", "https://github.vorkinn.org/dashboard"]) {
     expect(() => readAuthConfig({ ...env, PUBLIC_URL: address }), address).toThrow("PUBLIC_URL");
+  }
+});
+
+test("reading GitHub as the app is optional, and takes the key as PEM, with \\n for line breaks, or in base64", () => {
+  expect(readAppConfig({})).toBeUndefined();
+  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs1", format: "pem" })
+    .toString();
+  expect(readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: pem })).toEqual({
+    appId: "123456",
+    privateKey: pem.trim(),
+  });
+  const escaped = pem.trim().replaceAll("\n", "\\n");
+  expect(readAppConfig({ GITHUB_APP_ID: "Iv23liABC", GITHUB_APP_PRIVATE_KEY: escaped })?.privateKey).toBe(pem.trim());
+  const encoded = Buffer.from(pem).toString("base64");
+  expect(readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: encoded })?.privateKey).toBe(pem);
+
+  expect(() => readAppConfig({ GITHUB_APP_ID: "123456" })).toThrow("half configured: GITHUB_APP_PRIVATE_KEY not set");
+  expect(() => readAppConfig({ GITHUB_APP_PRIVATE_KEY: pem })).toThrow("half configured: GITHUB_APP_ID not set");
+  expect(() => readAppConfig({ GITHUB_APP_ID: "not an id", GITHUB_APP_PRIVATE_KEY: pem })).toThrow(
+    "GITHUB_APP_ID must",
+  );
+});
+
+test("refuses a private key that isn't one, without quoting it", () => {
+  for (const key of ["not-a-key", "-----BEGIN RSA PRIVATE KEY-----\nc2VjcmV0\n-----END RSA PRIVATE KEY-----"]) {
+    let message = "";
+    try {
+      readAppConfig({ GITHUB_APP_ID: "123456", GITHUB_APP_PRIVATE_KEY: key });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain("GITHUB_APP_PRIVATE_KEY must be");
+    expect(message).not.toContain("c2VjcmV0");
+    expect(message).not.toContain("not-a-key");
   }
 });

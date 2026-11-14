@@ -1,3 +1,5 @@
+import { createPrivateKey } from "node:crypto";
+
 /** What the sign-in needs to know. All of it comes from the environment (see README.md, "Sign-in"). */
 export type AuthConfig = {
   clientId: string;
@@ -89,4 +91,46 @@ export function readTelegramConfig(env: Record<string, string | undefined>): Tel
     throw new Error("TELEGRAM_CHAT_ID must be a chat's number, such as 123456789, or a channel's @name");
   }
   return { botToken, chatId };
+}
+
+/** What the relay needs to read GitHub as the GitHub App itself (see README.md, "Release workflows"). */
+export type AppConfig = {
+  /** The app's ID, or its client ID: either names the app to GitHub. */
+  appId: string;
+  /** The app's private key, as PEM. It is a secret: it never goes into a log. */
+  privateKey: string;
+};
+
+const APP_NAMES = ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"] as const;
+const APP_ID = /^[A-Za-z0-9.]{1,64}$/;
+
+/**
+ * Reads the settings for reading GitHub as the app. They are optional: with neither set the relay knows of no
+ * release runs. One without the other, or a key that isn't one, is a mistake and throws, so the relay refuses to
+ * start. The key may be the PEM as it is, the PEM with its line breaks written as `\n`, or the PEM in base64, since
+ * not every place that holds settings takes several lines. The error never quotes the key.
+ */
+export function readAppConfig(env: Record<string, string | undefined>): AppConfig | undefined {
+  const missing = APP_NAMES.filter((name) => !env[name]);
+  if (missing.length === APP_NAMES.length) {
+    return undefined;
+  }
+  if (missing.length > 0) {
+    throw new Error(`Reading GitHub as the app is half configured: ${missing.join(", ")} not set`);
+  }
+  const appId = env.GITHUB_APP_ID ?? "";
+  if (!APP_ID.test(appId)) {
+    throw new Error("GITHUB_APP_ID must be the app's ID, such as 123456, or its client ID");
+  }
+  const given = (env.GITHUB_APP_PRIVATE_KEY ?? "").trim();
+  const pem = given.startsWith("-----") ? given.replaceAll("\\n", "\n") : Buffer.from(given, "base64").toString("utf8");
+  try {
+    const key = createPrivateKey(pem);
+    if (key.asymmetricKeyType !== "rsa") {
+      throw new Error("not RSA");
+    }
+  } catch {
+    throw new Error("GITHUB_APP_PRIVATE_KEY must be the app's private key: the .pem file, as it is or in base64");
+  }
+  return { appId, privateKey: pem };
 }

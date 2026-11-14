@@ -188,3 +188,29 @@ test("a release run is one whose name says release, promote or deploy", () => {
   expect(["Release", "Deploy to prod", "PROMOTE"].every((name) => isReleaseName(name))).toBe(true);
   expect(["CI", "Tests", "", undefined].some((name) => isReleaseName(name))).toBe(false);
 });
+
+test("where the relay reads the workflow files, a release run is one they say is one", () => {
+  const marked = (_repo: string, path: string) =>
+    path === ".github/workflows/ship.yml" ? true : path === ".github/workflows/release.yml" ? false : undefined;
+  const finished = (run: Record<string, unknown>) =>
+    noticeFrom("workflow_run", { action: "completed", repository, workflow_run: run }, undefined, undefined, marked);
+
+  // Marked, whatever its name; and its path can end in the ref it ran on.
+  const ship = { id: 1, name: "Ship", conclusion: "success", path: ".github/workflows/ship.yml@refs/heads/main" };
+  expect(finished(ship)?.headline).toBe("Ship in nvorkinn/countdown: success");
+  // Not marked in a repository that marks another: its name no longer counts.
+  expect(finished({ id: 2, name: "Release", path: ".github/workflows/release.yml" })).toBeUndefined();
+  // A file the relay hasn't read, or a run that names none: by the name, as before.
+  expect(finished({ id: 3, name: "Deploy", path: ".github/workflows/new.yml" })?.type).toBe("release");
+  expect(finished({ id: 4, name: "Deploy" })?.type).toBe("release");
+  expect(finished({ id: 5, name: "CI", path: ".github/workflows/new.yml" })).toBeUndefined();
+
+  const review = { action: "requested", repository, workflow_run: { ...ship, run_attempt: 1 } };
+  expect(noticeFrom("deployment_review", review, undefined, undefined, marked)?.type).toBe("waiting");
+  const other = {
+    action: "requested",
+    repository,
+    workflow_run: { id: 2, name: "Release", path: ".github/workflows/release.yml" },
+  };
+  expect(noticeFrom("deployment_review", other, undefined, undefined, marked)).toBeUndefined();
+});
