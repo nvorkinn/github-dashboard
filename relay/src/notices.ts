@@ -49,9 +49,9 @@ export function pageNotice({ type, key, repo, headline, url }: Notice): PageNoti
 /**
  * What to tell about a webhook, or nothing when it isn't worth a notice. Only what needs attention
  * gets one, as the dashboard in countdown-server did: a pull request merging or getting changes requested, a pull
- * request's checks failing, and a release run finishing or waiting for approval. A release run here is one of a workflow
- * whose name says release, promote or deploy: the page goes by a mark in the workflow's file instead, which the relay,
- * holding no token, can't read.
+ * request's checks failing, and a release run finishing or waiting for approval. A release run is one of a workflow
+ * `isRelease` says is one, as the page shows them; without it, or where it doesn't know, one of a workflow whose name
+ * says release, promote or deploy.
  *
  * The payload is read as `changeFrom` reads it: a value of an unexpected type counts as missing, and a webhook missing
  * something a notice needs gets none. `delivery` (`X-GitHub-Delivery`) only tells apart reviews that have no id.
@@ -62,6 +62,7 @@ export function noticeFrom(
   payload: unknown,
   delivery?: string | undefined,
   dashboard?: string | undefined,
+  isRelease?: IsRelease | undefined,
 ): Notice | undefined {
   const root = record(payload);
   const repo = text(record(root.repository).full_name);
@@ -69,14 +70,25 @@ export function noticeFrom(
     return undefined;
   }
   // hasOwn, so an event named like an object's own property (constructor, toString) finds no rule.
-  const found = Object.hasOwn(RULES, kind) ? RULES[kind]?.(repo, root, delivery) : undefined;
+  const found = Object.hasOwn(RULES, kind) ? RULES[kind]?.(repo, root, delivery, isRelease) : undefined;
   if (!found) {
     return undefined;
   }
   return dashboard ? { ...found, text: `${found.text}\nDashboard: ${dashboard}` } : found;
 }
 
-type Rule = (repo: string, root: Record<string, unknown>, delivery: string | undefined) => Notice | undefined;
+/**
+ * Whether the workflow file `path` of `repo` is a release workflow, for a relay that reads them (see releases.ts);
+ * undefined where it doesn't know, and the workflow's name then decides.
+ */
+export type IsRelease = (repo: string, path: string) => boolean | undefined;
+
+type Rule = (
+  repo: string,
+  root: Record<string, unknown>,
+  delivery: string | undefined,
+  isRelease: IsRelease | undefined,
+) => Notice | undefined;
 
 const RULES: Record<string, Rule> = {
   pull_request: merged,
@@ -84,10 +96,10 @@ const RULES: Record<string, Rule> = {
   check_suite: (repo, root) => checksFailed(repo, root, record(root.check_suite)),
   check_run: (repo, root) => checksFailed(repo, root, record(root.check_run)),
   workflow_run: releaseFinished,
-  deployment_review(repo, root) {
+  deployment_review(repo, root, _delivery, isRelease) {
     const run = record(root.workflow_run);
-    return root.action === "requested"
-      ? releaseWaiting(repo, text(run.name), wholeNumber(run.id), wholeNumber(run.run_attempt))
+    return root.action === "requested" && isReleaseRun(repo, run, isRelease)
+      ? releaseWaiting(repo, wholeNumber(run.id), wholeNumber(run.run_attempt))
       : undefined;
   },
 };
@@ -139,17 +151,30 @@ function checksFailed(repo: string, root: Record<string, unknown>, check: Record
   );
 }
 
-function releaseFinished(repo: string, root: Record<string, unknown>): Notice | undefined {
-  const run = record(root.workflow_run);
-  const name = text(run.name);
-  const id = wholeNumber(run.id);
-  if (root.action !== "completed" || !isReleaseName(name) || id === undefined) {
-    return undefined;
-  }
+/**
+ * Whether a run is of a release workflow: as the relay read it from the repository's workflow files, or, where it
+ * hasn't, by the workflow's name.
+ */
+function isReleaseRun(repo: string, run: Record<string, unknown>, isRelease: IsRelease | undefined): boolean {
   // A workflow GitHub runs by itself, such as "pages build and deployment", has no file in the repository and is
   // no release, whatever its name.
-  const path = text(run.path);
+  const path = text(run.path)?.split("@")[0];
   if (path !== undefined && !path.startsWith(".github/workflows/")) {
+    return false;
+  }
+  return (path === undefined ? undefined : isRelease?.(repo, path)) ?? isReleaseName(text(run.name));
+}
+
+function releaseFinished(
+  repo: string,
+  root: Record<string, unknown>,
+  _delivery: string | undefined,
+  isRelease: IsRelease | undefined,
+): Notice | undefined {
+  const run = record(root.workflow_run);
+  const name = text(run.name) ?? "Release";
+  const id = wholeNumber(run.id);
+  if (root.action !== "completed" || !isReleaseRun(repo, run, isRelease) || id === undefined) {
     return undefined;
   }
   return notice(
@@ -166,13 +191,8 @@ function releaseFinished(repo: string, root: Record<string, unknown>): Notice | 
  * sends only when an environment's reviewers are asked. A `workflow_job` with action `waiting` is no sign of it, as a
  * job is also waiting while it has no runner yet. The key is the run's attempt: one notice per attempt.
  */
-function releaseWaiting(
-  repo: string,
-  name: string | undefined,
-  id: number | undefined,
-  attempt: number | undefined,
-): Notice | undefined {
-  if (!isReleaseName(name) || id === undefined) {
+function releaseWaiting(repo: string, id: number | undefined, attempt: number | undefined): Notice | undefined {
+  if (id === undefined) {
     return undefined;
   }
   const run = runUrl(repo, id);

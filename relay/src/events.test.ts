@@ -108,14 +108,18 @@ test("a webhook reaches a connected reader as a change event", async () => {
   expect(posted.status).toBe(204);
 
   const data = `{"kind":"workflow_run","repo":"nvorkinn/github-dashboard","action":"completed","pull":5,"sha":"${"a".repeat(40)}","run":99}`;
-  const expected = `event: hello\ndata: {}\n\nevent: change\ndata: ${data}\n\n`;
+  // Without the GitHub App's key the relay knows of no release runs, and says so on connecting.
+  const none = 'event: releases\ndata: {"configured":false,"projects":{},"runs":[]}\n\n';
+  const expected = `event: hello\ndata: {}\n\n${none}event: change\ndata: ${data}\n\n`;
   expect(await first.until("event: change")).toBe(expected);
   expect(await second.until("event: change")).toBe(expected);
 
   // A reader that connects afterwards hears nothing of it.
   const late = reading(await app.request("/api/events"));
   hub.publish({ kind: "push" });
-  expect(await late.until("event: change")).toBe('event: hello\ndata: {}\n\nevent: change\ndata: {"kind":"push"}\n\n');
+  expect(await late.until("event: change")).toBe(
+    `event: hello\ndata: {}\n\n${none}event: change\ndata: {"kind":"push"}\n\n`,
+  );
 
   await Promise.all([first.leave(), second.leave(), late.leave()]);
   expect(hub.listeners()).toBe(0);

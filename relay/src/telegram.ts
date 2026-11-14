@@ -1,6 +1,6 @@
 import type { TelegramConfig } from "./config.ts";
 import type { Hub } from "./events.ts";
-import type { Notice } from "./notices.ts";
+import type { IsRelease, Notice } from "./notices.ts";
 import { noticeFrom } from "./notices.ts";
 import type { OnWebhook } from "./webhook.ts";
 
@@ -32,6 +32,8 @@ export function telegramNotifier(options: {
   hub: Hub;
   /** The page's address, such as https://github.vorkinn.org, added to each notice when set. */
   dashboard?: string | undefined;
+  /** Which workflows are releases, where the relay reads them. */
+  isRelease?: IsRelease | undefined;
   fetch?: typeof fetch;
 }): OnWebhook {
   const { config, hub, dashboard } = options;
@@ -39,7 +41,7 @@ export function telegramNotifier(options: {
   const sent = sentKeys(MAX_SENT, SENT_MS);
 
   return async (kind, payload, delivery) => {
-    const notice = noticeFrom(kind, payload, delivery, dashboard);
+    const notice = noticeFrom(kind, payload, delivery, dashboard, options.isRelease);
     if (!notice || !nobodyWatching(hub) || sent.has(notice.key)) {
       return;
     }
