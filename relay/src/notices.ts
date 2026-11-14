@@ -1,3 +1,4 @@
+import { isReleaseName as releaseName } from "../../shared/workflows.ts";
 import { commit, pullNumbers, record, text, wholeNumber } from "./payload.ts";
 
 /**
@@ -192,8 +193,7 @@ function releaseWaiting(
  * for a repository that marks none of its workflow files.
  */
 export function isReleaseName(name: string | undefined): name is string {
-  const lower = (name ?? "").toLowerCase();
-  return lower.includes("release") || lower.includes("promote") || lower.includes("deploy");
+  return releaseName(name);
 }
 
 function notice(type: NoticeType, repo: string, key: string, headline: string, links: string[]): Notice {

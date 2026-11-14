@@ -1,9 +1,23 @@
+import {
+  approval,
+  checkState,
+  isWaiting,
+  job,
+  PROMOTE_WORKFLOW,
+  type RawJob,
+  type RawPendingDeployment,
+  type RawRun,
+  type RawWorkflow,
+  RECENT_RELEASES,
+  runOf,
+  shownRuns,
+} from "../../../shared/runs.ts";
+import { isReleaseName } from "../../../shared/workflows.ts";
 import type {
   Approval,
   Check,
   CheckState,
   DashboardData,
-  Job,
   MergeMethod,
   Project,
   PullRequest,
@@ -13,13 +27,26 @@ import type {
 import { type Api, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 import { comparisonField, type GqlComparison, unreleasedFrom } from "./unreleased.ts";
-import { jobGraph, markedReleaseFiles, WORKFLOWS_FOLDER, type WorkflowJob, workflowFile } from "./workflow_graph.ts";
+import { markedReleaseFiles, WORKFLOWS_FOLDER, workflowFile } from "./workflow_graph.ts";
 
-// How many of a release workflow's latest runs are looked at. An older run still unfinished past these is left out,
-// as a newer release replaces it.
-export const RECENT_RELEASES = 5;
-// The workflow a project's Promote button starts: it deploys a release that dev already has to production.
-export const PROMOTE_WORKFLOW = ".github/workflows/promote.yml";
+export {
+  approval,
+  checkState,
+  isWaiting,
+  job,
+  PROMOTE_WORKFLOW,
+  type RawJob,
+  type RawPendingDeployment,
+  type RawRun,
+  type RawWorkflow,
+  RECENT_RELEASES,
+  releaseTag,
+  runOf,
+  runState,
+  settledJobs,
+  shownRuns,
+} from "../../../shared/runs.ts";
+export { isReleaseName } from "../../../shared/workflows.ts";
 
 // The parts of GitHub's answers that are used. Everything else in them is ignored.
 export type RawRepo = {
@@ -55,40 +82,6 @@ export type RawPull = {
 };
 export type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
 export type RawStatus = { context: string; state: string; target_url: string | null };
-export type RawWorkflow = { id: number; name: string; state: string; path?: string };
-export type RawRun = {
-  id: number;
-  name: string | null;
-  display_title?: string;
-  /** The branch or tag it ran on: the tag, for a run started by pushing one or by publishing a release. */
-  head_branch?: string | null;
-  /** What started it, such as `push`, `release` or `workflow_dispatch`. */
-  event?: string;
-  html_url: string;
-  status: string | null;
-  conclusion: string | null;
-  actor?: { login: string } | null;
-  triggering_actor?: { login: string } | null;
-  created_at: string;
-  run_started_at?: string | null;
-  updated_at: string;
-  head_sha?: string;
-  /** Its workflow file, such as `.github/workflows/release.yml`. */
-  path?: string;
-};
-export type RawJob = {
-  id: number;
-  name: string;
-  status: string;
-  conclusion: string | null;
-  html_url: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-};
-export type RawPendingDeployment = {
-  environment: { id: number; name?: string };
-  current_user_can_approve: boolean;
-};
 
 export type ReadResult = {
   data: DashboardData;
@@ -584,35 +577,6 @@ export function checks(checkRuns: RawCheckRun[], statuses: RawStatus[]): Check[]
   return found;
 }
 
-/** The state of a check run, a workflow run or a job, which all use the same words for status and conclusion. */
-export function checkState(status: string | null, conclusion: string | null): CheckState {
-  if (status !== "completed") {
-    switch (status) {
-      case "in_progress":
-        return "running";
-      // Waiting for an approval, such as a protected environment's.
-      case "waiting":
-        return "waiting";
-      // queued, requested, pending
-      default:
-        return "queued";
-    }
-  }
-  switch (conclusion) {
-    case "success":
-      return "passed";
-    case "cancelled":
-      return "cancelled";
-    case "skipped":
-      return "skipped";
-    case "neutral":
-      return "neutral";
-    // failure, timed_out, startup_failure, and action_required and stale, which stop a merge like a failure does.
-    default:
-      return "failed";
-  }
-}
-
 /** The state of a commit status. It has no word for queued, so `pending` counts as running. */
 function statusState(state: string): CheckState {
   switch (state) {
@@ -624,15 +588,6 @@ function statusState(state: string): CheckState {
     default:
       return "failed";
   }
-}
-
-/**
- * Whether a workflow's name makes it a release: a release, a promotion or a deploy. Only a guess, used for a
- * repository that marks none of its workflow files (see `releaseWorkflows`).
- */
-export function isReleaseName(name: string | null | undefined): boolean {
-  const lower = (name ?? "").toLowerCase();
-  return lower.includes("release") || lower.includes("promote") || lower.includes("deploy");
 }
 
 /**
@@ -682,16 +637,6 @@ async function releaseRuns(
     }),
   );
   return { runs: runs.flat().sort((a, b) => b.startedAt.localeCompare(a.startedAt)), promoteWorkflow };
-}
-
-/** Of a workflow's latest runs: the unfinished ones, and the latest finished one so its outcome stays up. */
-export function shownRuns<T extends { id: number; status: string | null }>(runs: T[]): T[] {
-  const shown = runs.filter((run) => run.status !== "completed");
-  const finished = runs.filter((run) => run.status === "completed");
-  if (finished.length > 0) {
-    shown.push(finished.reduce((a, b) => (b.id > a.id ? b : a)));
-  }
-  return shown;
 }
 
 /**
@@ -753,98 +698,9 @@ async function releaseRun(
   return runOf(repo, workflow, run, jobs, definitions, approvals);
 }
 
-export function isWaiting(job: Job): boolean {
-  return job.state === "waiting";
-}
-
-/**
- * A run's jobs, given the `approvals` it waits for. GitHub calls a job waiting whatever it waits for, a runner as
- * much as an approval, so with nothing to approve its waiting jobs are queued ones. With `approvals` unset, for a run
- * whose approvals couldn't be read, GitHub's word stands.
- */
-export function settledJobs(jobs: Job[], approvals: Approval[] | undefined): Job[] {
-  if (approvals === undefined || approvals.length > 0) {
-    return jobs;
-  }
-  return jobs.map((one) => (isWaiting(one) ? { ...one, state: "queued" } : one));
-}
-
 /** The jobs of a run's latest attempt, which is what GitHub gives without `filter`. */
 export function runJobs(api: Api, repo: string, run: number): Promise<RawJob[]> {
   return api.list<RawJob>(`repos/${repo}/actions/runs/${run}/jobs`, "jobs");
-}
-
-/**
- * How a run stands, given its jobs as `settledJobs` left them. A run with one job waiting for approval and another
- * running is "in progress" to GitHub, but what it needs is the approval. A run GitHub calls waiting with no job
- * waiting for an approval is waiting for something else, such as a runner, and stands as its jobs do.
- */
-export function runState(run: Pick<RawRun, "status" | "conclusion">, jobs: Job[]): CheckState {
-  const state = checkState(run.status, run.conclusion);
-  if (run.status === "completed") {
-    return state;
-  }
-  if (jobs.some(isWaiting)) {
-    return "waiting";
-  }
-  if (state !== "waiting") {
-    return state;
-  }
-  return jobs.some((one) => one.state === "running") ? "running" : "queued";
-}
-
-/**
- * A run of a release workflow as GitHub gives it, in the model's words: with its `jobs`, its workflow file's
- * `definitions` at its commit if they could be had, and the `approvals` it waits for (unset if they couldn't be read).
- * Only a run with something to approve, or whose approvals couldn't be read, is waiting: see `settledJobs`.
- */
-export function runOf(
-  repo: string,
-  workflow: Pick<RawWorkflow, "name">,
-  run: RawRun,
-  listed: Job[],
-  definitions: WorkflowJob[] | undefined,
-  approvals: Approval[] | undefined,
-): ReleaseRun {
-  const jobs = settledJobs(listed, approvals);
-  return {
-    repo,
-    id: run.id,
-    workflow: workflow.name,
-    title: run.display_title ?? run.name ?? workflow.name,
-    tag: releaseTag(run),
-    url: run.html_url,
-    state: runState(run, jobs),
-    actor: (run.triggering_actor ?? run.actor)?.login,
-    startedAt: run.run_started_at ?? run.created_at,
-    finishedAt: run.status === "completed" ? run.updated_at : undefined,
-    jobs,
-    graph: definitions && jobGraph(definitions, jobs),
-    approvals: approvals ?? [],
-  };
-}
-
-// A tag that is a version, such as v1.2.3, 2.0 or v3.0.0-rc.1.
-const VERSION_TAG = /^v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.+-]+)?$/;
-// A version named in a run's title, such as the one in "Promote v1.2.3": three parts, so a date or a decimal isn't one.
-const VERSION_IN_TITLE = /(?:^|[\s(@/])(v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]*[0-9A-Za-z])?)(?=$|[\s),:;])/;
-
-/**
- * The release tag or version a run is releasing, from what its run says:
- *
- * - A run started by pushing a tag or publishing a release runs on that tag, which is its `head_branch`.
- * - A run started by hand, or by another workflow, runs on a branch; its title is its `run-name`, such as
- *   "Promote v1.2.3", so a version in it is the one it releases. A pushed commit's title is its subject, which can
- *   name any version (a dependency bump, say), so it isn't read for one.
- */
-export function releaseTag(run: Pick<RawRun, "head_branch" | "event" | "display_title">): string | undefined {
-  if (run.head_branch && VERSION_TAG.test(run.head_branch)) {
-    return run.head_branch;
-  }
-  if (run.event === "push" || run.event === "pull_request" || !run.display_title) {
-    return undefined;
-  }
-  return VERSION_IN_TITLE.exec(run.display_title)?.[1];
 }
 
 /**
@@ -862,26 +718,4 @@ async function pendingApprovals(api: Api, repo: string, run: number): Promise<Ap
     throw error;
   }
   return pending.map(approval);
-}
-
-/** A pending deployment as GitHub lists it, in the model's words. */
-export function approval(raw: RawPendingDeployment): Approval {
-  return {
-    environmentId: raw.environment.id,
-    environment: raw.environment.name ?? `environment ${raw.environment.id}`,
-    canApprove: raw.current_user_can_approve,
-  };
-}
-
-export function job(raw: RawJob): Job {
-  const state = checkState(raw.status, raw.conclusion);
-  return {
-    id: raw.id,
-    name: raw.name,
-    state,
-    url: raw.html_url ?? undefined,
-    // GitHub gives a job that hasn't started the time it was queued.
-    startedAt: state === "queued" || state === "waiting" ? undefined : (raw.started_at ?? undefined),
-    finishedAt: raw.completed_at ?? undefined,
-  };
 }

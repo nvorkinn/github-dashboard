@@ -4,9 +4,9 @@
  *
  * Times are ISO strings as GitHub gives them. Addresses ending in `Url` open the thing on github.com.
  */
+import type { Approval, CheckState, Job, ReleaseRun } from "../../shared/runs.ts";
 
-/** How one check, job or run stands. `waiting` is waiting for an approval, such as a protected environment. */
-export type CheckState = "queued" | "running" | "waiting" | "passed" | "failed" | "cancelled" | "skipped" | "neutral";
+export type { Approval, CheckState, Job, JobGraph, JobNode, ReleaseRun } from "../../shared/runs.ts";
 
 /** One check on a pull request's head commit: a check run, or an older commit status. */
 export type Check = {
@@ -40,83 +40,6 @@ export type PullRequest = {
   checks: Check[];
   /** GitHub's global id for it, which its GraphQL API (auto-merge) asks for. */
   nodeId: string;
-};
-
-/** One job of a workflow run. */
-export type Job = {
-  id: number;
-  name: string;
-  state: CheckState;
-  url: string | undefined;
-  startedAt: string | undefined;
-  finishedAt: string | undefined;
-};
-
-/**
- * One run of a release workflow: one whose file carries the comment `# dashboard: release` or, in a repository that
- * marks none, one whose name says release, deploy or promote.
- */
-export type ReleaseRun = {
-  repo: string;
-  id: number;
-  /** The workflow's name, such as "Release". */
-  workflow: string;
-  /** What the run is of: its display title on GitHub, such as the tag or the commit's subject. */
-  title: string;
-  /**
-   * The release tag or version it is releasing, such as `v1.2.3`: the tag that started it, or the version its title
-   * names when it was started by hand. Unset when the run doesn't say, such as one that makes its tag as it goes.
-   */
-  tag?: string | undefined;
-  url: string;
-  state: CheckState;
-  /** Who started it. */
-  actor: string | undefined;
-  startedAt: string;
-  /** Unset while it runs. */
-  finishedAt: string | undefined;
-  jobs: Job[];
-  /**
-   * The same jobs as its workflow file arranges them, at the run's commit: which waits for which. Unset when the
-   * file couldn't be read or understood; the jobs are then shown as they are listed.
-   */
-  graph?: JobGraph | undefined;
-  /**
-   * While it waits for an approval: the environments waiting for one, such as production. Read only for runs that
-   * wait, so empty for every other run.
-   */
-  approvals: Approval[];
-};
-
-/** A run's jobs on its workflow's graph. Every job of the run is in exactly one node, or in `unplaced`. */
-export type JobGraph = {
-  /** The workflow file's jobs, in the file's order. */
-  nodes: JobNode[];
-  /** The run's jobs that match no job of the file, such as one the file has since lost. */
-  unplaced: Job[];
-};
-
-/** One job of the workflow file, with the run's jobs that are it. */
-export type JobNode = {
-  /** Its id in the file, such as `build`. */
-  key: string;
-  /** What to call it: its name in the file, or its id when that name is worked out as it runs. */
-  name: string;
-  /** The keys of the jobs it waits for. */
-  needs: string[];
-  /** A matrix, or a call of a reusable workflow: one job in the file that runs as several. */
-  several: boolean;
-  /** The run's jobs of it: none yet for one not started, several for a matrix. */
-  jobs: Job[];
-};
-
-/** One protected environment a waiting run needs approved before its job goes on. */
-export type Approval = {
-  environmentId: number;
-  /** The environment's name, such as "production". */
-  environment: string;
-  /** Whether the signed-in user is one of its required reviewers, and so may approve or reject it. */
-  canApprove: boolean;
 };
 
 export type Unreleased = {

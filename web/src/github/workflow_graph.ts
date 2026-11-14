@@ -3,116 +3,28 @@
  * that (`needs:`) comes from the workflow file at the run's commit, read through the contents API. The file at a
  * commit never changes, so what was made of it is kept in memory for as long as the user is signed in.
  */
-import type { Job, JobGraph } from "../model.ts";
+import {
+  RELEASE_MARK,
+  readWorkflowBlob,
+  WORKFLOWS_FOLDER,
+  type WorkflowBlob,
+  type WorkflowJob,
+  workflowJobs,
+} from "../../../shared/workflows.ts";
 import { type Api, GitHubError } from "./api.ts";
-import { parseYaml, type Yaml } from "./workflow_yaml.ts";
+
+export {
+  jobGraph,
+  RELEASE_MARK,
+  readWorkflowBlob,
+  WORKFLOWS_FOLDER,
+  type WorkflowBlob,
+  type WorkflowJob,
+  workflowJobs,
+} from "../../../shared/workflows.ts";
 
 /** How many workflow files are kept. Each is a few names, and a release's commit changes only once per release. */
 export const KEPT_FILES = 200;
-
-const EXPRESSION = /\$\{\{.*?\}\}/g;
-
-/** A job as the workflow file has it. */
-export type WorkflowJob = {
-  key: string;
-  /** What the graph calls it: its name, unless that's worked out at run time (then its id, as GitHub's graph does). */
-  label: string;
-  needs: string[];
-  /** A matrix, or a reusable workflow's jobs: several of the run's jobs. */
-  several: boolean;
-  /** The one name its run's job gets, when the file says it outright. */
-  exact: string | undefined;
-  /** The names its run's jobs can get, otherwise. */
-  pattern: RegExp;
-};
-
-/** The jobs of a workflow file, in the file's order. Throws if the text isn't a workflow this can read. */
-export function workflowJobs(text: string): WorkflowJob[] {
-  const workflow = parseYaml(text);
-  const jobs = isMap(workflow) ? workflow.jobs : undefined;
-  if (!isMap(jobs) || Object.keys(jobs).length === 0) {
-    throw new Error("no jobs in the workflow file");
-  }
-  return Object.entries(jobs).map(([key, job]) => workflowJob(key, isMap(job) ? job : {}));
-}
-
-function workflowJob(key: string, job: { [key: string]: Yaml }): WorkflowJob {
-  const needs = typeof job.needs === "string" ? [job.needs] : Array.isArray(job.needs) ? job.needs : [];
-  if (!needs.every((one) => typeof one === "string")) {
-    throw new Error(`job ${key} needs something that isn't a job`);
-  }
-  const template = typeof job.name === "string" ? job.name : key;
-  const strategy = job.strategy;
-  const matrix = isMap(strategy) && strategy.matrix !== undefined && strategy.matrix !== null;
-  const uses = typeof job.uses === "string";
-  const computed = template.match(EXPRESSION) !== null;
-  // GitHub adds a matrix job's values to its name, in brackets, unless the name already uses them; a reusable
-  // workflow's jobs are called `<caller> / <their own name>`.
-  const pattern = new RegExp(
-    `^${template
-      .split(EXPRESSION)
-      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join(".+?")}${matrix ? "( \\(.*\\))?" : ""}${uses ? " / .+" : ""}$`,
-  );
-  return {
-    key,
-    label: computed ? key : template,
-    needs: needs as string[],
-    several: matrix || uses,
-    exact: matrix || uses || computed ? undefined : template,
-    pattern,
-  };
-}
-
-function isMap(value: Yaml | undefined): value is { [key: string]: Yaml } {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * The run's jobs placed on the file's jobs, by name: a job named outright first, else the most specific pattern
- * that matches. Needs that name no job of the file are left out.
- */
-export function jobGraph(definitions: WorkflowJob[], jobs: Job[]): JobGraph {
-  const keys = new Set(definitions.map((one) => one.key));
-  const matched = new Map<string, Job[]>(definitions.map((one) => [one.key, []]));
-  const unplaced: Job[] = [];
-  for (const job of jobs) {
-    const owner = ownerOf(definitions, job.name);
-    if (owner) {
-      matched.get(owner.key)?.push(job);
-    } else {
-      unplaced.push(job);
-    }
-  }
-  return {
-    nodes: definitions.map((one) => ({
-      key: one.key,
-      name: one.label,
-      needs: one.needs.filter((key) => keys.has(key) && key !== one.key),
-      several: one.several,
-      jobs: matched.get(one.key) ?? [],
-    })),
-    unplaced,
-  };
-}
-
-function ownerOf(definitions: WorkflowJob[], name: string): WorkflowJob | undefined {
-  const exact = definitions.find((one) => one.exact === name);
-  if (exact) {
-    return exact;
-  }
-  let best: WorkflowJob | undefined;
-  for (const one of definitions) {
-    if (
-      one.exact === undefined &&
-      one.pattern.test(name) &&
-      (!best || one.pattern.source.length > best.pattern.source.length)
-    ) {
-      best = one;
-    }
-  }
-  return best;
-}
 
 // Per repository, path and commit: the file's jobs, or undefined for a file that isn't there or can't be read as a
 // workflow. Both stay so forever. A read under way is kept too, so runs of the same commit share it.
@@ -185,15 +97,6 @@ async function readWorkflowFile(api: Api, repo: string, path: string, sha: strin
   }
 }
 
-/** Where a repository keeps its workflow files. */
-export const WORKFLOWS_FOLDER = ".github/workflows";
-
-/**
- * What marks a workflow file as a release for the dashboard: a comment line of its own saying `dashboard: release`,
- * anywhere in the file.
- */
-export const RELEASE_MARK = /^[ \t]*#[ \t]*dashboard:[ \t]*release[ \t]*$/im;
-
 // Per repository and blob: whether the file with that content carries the mark. A blob never changes, so it stays.
 const marks = new Map<string, Promise<boolean>>();
 
@@ -249,40 +152,12 @@ function decodeBase64(text: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** What the dashboard reads out of one workflow file. */
-export type WorkflowBlob = {
-  /** Whether it carries the release mark. */
-  marked: boolean;
-  /** The workflow's `name`, if the file gives one; GitHub calls a workflow without one by its path. */
-  name: string | undefined;
-  /** Its jobs; undefined when the text isn't a workflow this can read. */
-  jobs: WorkflowJob[] | undefined;
-};
-
 /** How many workflow files' readings are kept. */
 export const KEPT_BLOBS = 500;
 
 // Per repository and blob. A blob never changes, so what was read out of it stays true; it is kept in memory for as
 // long as the user is signed in, the oldest going first.
 const blobs = new Map<string, WorkflowBlob>();
-
-/** Reads a workflow file's text. A text that isn't a workflow has no mark, name or jobs. */
-export function readWorkflowBlob(text: string): WorkflowBlob {
-  let name: string | undefined;
-  let jobs: WorkflowJob[] | undefined;
-  try {
-    const workflow = parseYaml(text);
-    name = isMap(workflow) && typeof workflow.name === "string" ? workflow.name : undefined;
-  } catch {
-    // No name, then.
-  }
-  try {
-    jobs = workflowJobs(text);
-  } catch {
-    // No graph, then.
-  }
-  return { marked: RELEASE_MARK.test(text), name, jobs };
-}
 
 /** What was read out of the blob `oid` of `repo`, if it was kept. */
 export function keptWorkflowBlob(repo: string, oid: string): WorkflowBlob | undefined {
