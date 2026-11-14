@@ -120,7 +120,7 @@ test("a page that connects is told every release run the relay read at its start
     fetch: github.fetcher,
     closing: closing.signal,
   });
-  await settle();
+  await github.started();
 
   const stream = await app.request("/api/events");
   const repository = { full_name: REPO, default_branch: "main" };
@@ -165,7 +165,7 @@ test("a workflow marked as a release gets its notice whatever its name, and the 
     fetch: github.fetcher,
     closing: closing.signal,
   });
-  await settle();
+  await github.started();
 
   const stream = await app.request("/api/events");
   const repository = { full_name: REPO };
