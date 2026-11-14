@@ -230,3 +230,26 @@ test("draws code at the remembered text size and remembers a new choice", async 
   expect(localStorage.getItem("github-dashboard:diff-font-size")).toBe("large");
   localStorage.clear();
 });
+
+test("resizes the file tree from the divider, remembers the width and resets on a double click", async () => {
+  localStorage.setItem("github-dashboard:review-tree-width", "300");
+  const initial = pull();
+  render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [file], truncated: false }) }}>
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  const body = document.querySelector<HTMLElement>(".review-body");
+  const divider = screen.getByRole("separator", { name: "Resize changed files" });
+  expect(body?.style.getPropertyValue("--tree-width")).toBe("300px");
+  expect(divider.getAttribute("aria-valuenow")).toBe("300");
+  // Nothing has a size here, so any width comes out as the narrowest the tree may be.
+  fireEvent.keyDown(divider, { key: "ArrowRight" });
+  expect(body?.style.getPropertyValue("--tree-width")).toBe("180px");
+  expect(localStorage.getItem("github-dashboard:review-tree-width")).toBe("180");
+  fireEvent.dblClick(divider);
+  expect(body?.style.getPropertyValue("--tree-width")).toBe("");
+  expect(localStorage.getItem("github-dashboard:review-tree-width")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
+  expect(screen.queryByRole("separator")).toBeNull();
+});
