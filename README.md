@@ -247,10 +247,10 @@ All of it is in memory only: a restart reads it again. The relay only reads; app
 stay with the page, as the signed-in user. Whether the signed-in user may approve a waiting deployment is theirs to
 ask, as the app is nobody's reviewer.
 
-| Variable                 | Value                                                                                         |
-| ------------------------ | --------------------------------------------------------------------------------------------- |
-| `GITHUB_APP_ID`          | The app's ID (a number, on the app's page under "About"), or its client ID.                   |
-| `GITHUB_APP_PRIVATE_KEY` | A private key generated on the app's page: the `.pem` file's text, or that text in base64.    |
+| Variable                 | Value                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `GITHUB_APP_ID`          | The app's ID (a number, on the app's page under "About"), or its client ID.                |
+| `GITHUB_APP_PRIVATE_KEY` | A private key generated on the app's page: the `.pem` file's text, or that text in base64. |
 
 Both or neither: with neither the relay knows of no release runs and says so to the pages, and with one, or a key
 that isn't one, it refuses to start. The key's line breaks may be written as `\n` where a setting can't span lines;
