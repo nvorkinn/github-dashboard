@@ -1,10 +1,11 @@
+import type { ReleasesSnapshot } from "../../../shared/runs.ts";
 import type { Auth } from "../auth.ts";
-import type { Dashboard, DashboardData, DashboardState, Notice, PullRequest } from "../model.ts";
+import type { Approval, Dashboard, DashboardData, DashboardState, Notice, PullRequest, ReleaseRun } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import { type Change, type Connect, createEvents } from "./events.ts";
 import { readEverything, type Shape } from "./graphql.ts";
-import { type Plan, planFor, type ReadResult, type ReleasePaths, readChanged } from "./read.ts";
-import { forgetWorkflowFiles } from "./workflow_graph.ts";
+import { type Plan, pendingApprovals, planFor, type ReadResult, readChanged } from "./read.ts";
+import { withRun } from "./releases.ts";
 
 // How often everything is read again while the relay's events don't arrive: as often as before there were any.
 export const REFRESH_MS = 60_000;
@@ -32,16 +33,21 @@ export type DashboardOptions = {
   /** The projects (`owner/name`) the user has hidden, as they are now: only their rows are read. */
   hidden?: () => ReadonlySet<string>;
   /**
-   * Keeps which workflows a read asks about between visits, so that the first read of the next visit is one request
-   * too. Only names of projects and workflow files; without it, a visit's first read takes a few requests.
+   * Keeps which projects a read asks about between visits, so that the first read of the next visit is one round of
+   * requests too. Only names of projects; without it, a visit's first read takes two.
    */
   shape?: { load(): Shape | undefined; save(shape: Shape): void };
 };
 
 /**
- * The dashboard's data, read from api.github.com as the signed-in user. Everything is read at the start and then
- * every so often, in one GraphQL request (graphql.ts); in between, the relay's events say what changed, and only
- * that is read again, through the REST API (read.ts).
+ * The dashboard's data. The projects and their pull requests are read from api.github.com as the signed-in user:
+ * everything at the start and then every so often, through GraphQL (graphql.ts); in between, the relay's events say
+ * what changed, and only that is read again, through the REST API (read.ts).
+ *
+ * The release runs aren't read at all: the relay keeps them and tells the page, all of them on connecting and each
+ * one whole as it changes (releases.ts). The page shows what the relay last said, of the projects it shows. The one
+ * thing it asks GitHub about a run is whether the signed-in user may approve what the run waits for, which only that
+ * user's token can say.
  */
 export function createDashboard(auth: Auth, options: DashboardOptions = {}): Dashboard {
   const refreshMs = options.refreshMs ?? REFRESH_MS;
@@ -62,15 +68,17 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   // How often each pull request whose merge state is unknown was asked about again.
   const unsettled = new Map<string, number>();
-  // Which workflows a read of everything asks about: what the last one found, or what the last visit kept.
+  // Which projects a read of everything asks about: what the last one found, or what the last visit kept.
   let shape: Shape | undefined;
-  // Each project's release workflows, as the last read of everything found them: a change is told by them.
-  let releasePaths: ReleasePaths = {};
+  // The release runs and each project's Promote workflow, as the relay last told them.
+  let relayed: Pick<ReleasesSnapshot, "projects" | "runs"> = { projects: {}, runs: [] };
+  // Per run that waits: what its approvals were asked for, and the signed-in user's own answer once it is in.
+  const approvals = new Map<string, { asked: string; found: Approval[] | undefined }>();
   const hiddenProjects = (): ReadonlySet<string> => options.hidden?.() ?? new Set();
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const noticeListeners = new Set<(notice: Notice) => void>();
-  const events = createEvents({ connect: options.connect, onLive, onChange, onNotice });
+  const events = createEvents({ connect: options.connect, onLive, onChange, onNotice, onReleases, onRun });
 
   function setState(next: DashboardState): void {
     state = next;
@@ -129,9 +137,88 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     }
   }
 
+  /** `data` with the release runs and Promote workflows the relay last told, of the projects that are shown. */
+  function withReleases(data: DashboardData): DashboardData {
+    const hiddenNow = hiddenProjects();
+    const shown = new Set(data.projects.map((one) => one.repo).filter((repo) => !hiddenNow.has(repo)));
+    return {
+      projects: data.projects.map((one) => {
+        const promoteWorkflow = shown.has(one.repo) ? relayed.projects[one.repo]?.promoteWorkflow : undefined;
+        return one.promoteWorkflow === promoteWorkflow ? one : { ...one, promoteWorkflow };
+      }),
+      pulls: data.pulls,
+      releases: relayed.runs
+        .filter((run) => shown.has(run.repo))
+        .map((run) => {
+          const mine = run.state === "waiting" ? approvals.get(runKey(run))?.found : undefined;
+          return mine ? { ...run, approvals: mine } : run;
+        }),
+    };
+  }
+
+  /** Shows what the relay last told, and asks about the approvals of the runs that wait. */
+  function showReleases(): void {
+    if (state.status === "ready") {
+      setState({ ...state, data: withReleases(state.data) });
+      askApprovals(state.data.releases);
+    }
+  }
+
+  function onReleases(snapshot: ReleasesSnapshot): void {
+    if (started) {
+      relayed = snapshot;
+      showReleases();
+    }
+  }
+
+  function onRun(run: ReleaseRun): void {
+    if (started) {
+      relayed = { projects: relayed.projects, runs: withRun(relayed.runs, run) };
+      showReleases();
+    }
+  }
+
+  /**
+   * Asks GitHub, as the signed-in user, which of the environments each waiting run waits for that user may approve:
+   * once per run and set of waiting jobs, and again when a review of it is told.
+   */
+  function askApprovals(runs: ReleaseRun[]): void {
+    const waiting = new Map(runs.filter((run) => run.state === "waiting").map((run) => [runKey(run), run]));
+    for (const key of approvals.keys()) {
+      if (!waiting.has(key)) {
+        approvals.delete(key);
+      }
+    }
+    for (const [key, run] of waiting) {
+      const jobs = run.jobs.filter((one) => one.state === "waiting").map((one) => one.id);
+      const asked = `${jobs.join(",")}|${run.approvals.map((one) => one.environmentId).join(",")}`;
+      const before = approvals.get(key);
+      if (before?.asked === asked) {
+        continue;
+      }
+      approvals.set(key, { asked, found: before?.found });
+      void pendingApprovals(createApi(auth), run.repo, run.id)
+        .catch(() => undefined)
+        .then((found) => {
+          // Asked again meanwhile, or no longer wanted: that answer counts, not this one.
+          if (started && approvals.get(key)?.asked === asked) {
+            approvals.set(key, { asked, found });
+            if (state.status === "ready") {
+              setState({ ...state, data: withReleases(state.data) });
+            }
+          }
+        });
+    }
+  }
+
   function onChange(change: Change): void {
     if (!started) {
       return;
+    }
+    if (change.kind === "deployment_review" && change.repo !== undefined && change.run !== undefined) {
+      // Someone approved or rejected: whether the rest is the user's to approve is asked again.
+      approvals.delete(runKey({ repo: change.repo, id: change.run }));
+      showReleases();
     }
     if (changes.length === 0) {
       changesSince = Date.now();
@@ -154,9 +241,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       return;
     }
     const plan =
-      missed || hidden() || state.status !== "ready"
-        ? "everything"
-        : planFor(changes, state.data, hiddenProjects(), releasePaths);
+      missed || hidden() || state.status !== "ready" ? "everything" : planFor(changes, state.data, hiddenProjects());
     changes = [];
     if (plan === "everything") {
       missed = true;
@@ -233,7 +318,6 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
               }),
               plan,
               previous,
-              releasePaths,
             );
       // Stopped while reading: this is no longer wanted, and may be another user's by now.
       if (controller.signal.aborted) {
@@ -245,7 +329,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       }
       setState({
         status: "ready",
-        data: result.data,
+        data: withReleases(result.data),
         readAt: Date.now(),
         refreshing: false,
         // What a read of everything couldn't read is still unread after a read of something else.
@@ -253,6 +337,9 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         live: events.live(),
       });
       settle(result.data);
+      if (state.status === "ready") {
+        askApprovals(state.data.releases);
+      }
     } catch (error) {
       if (controller.signal.aborted) {
         return;
@@ -274,7 +361,6 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     });
     if (!signal.aborted) {
       shape = result.shape;
-      releasePaths = result.releasePaths;
       try {
         options.shape?.save(result.shape);
       } catch {
@@ -359,7 +445,6 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         document.removeEventListener("visibilitychange", onVisibility);
       }
       abort?.abort();
-      forgetWorkflowFiles();
       reading = undefined;
       notBefore = 0;
       missed = true;
@@ -367,7 +452,8 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       changes = [];
       unsettled.clear();
       shape = undefined;
-      releasePaths = {};
+      relayed = { projects: {}, runs: [] };
+      approvals.clear();
       if (state.status !== "loading") {
         setState({ status: "loading" });
       }
@@ -377,6 +463,10 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
 
 function hidden(): boolean {
   return typeof document !== "undefined" && document.hidden;
+}
+
+function runKey(run: { repo: string; id: number }): string {
+  return `${run.repo}#${run.id}`;
 }
 
 function keyOf(pull: PullRequest): string {

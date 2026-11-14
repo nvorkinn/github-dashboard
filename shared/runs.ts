@@ -44,8 +44,8 @@ export type ReleaseRun = {
   finishedAt: string | undefined;
   jobs: Job[];
   /**
-   * The same jobs as its workflow file arranges them, at the run's commit: which waits for which. Unset when the
-   * file couldn't be read or understood; the jobs are then shown as they are listed.
+   * The same jobs as its workflow file arranged them when the run started, on the default branch: which waits for
+   * which. Unset when the file couldn't be read or understood; the jobs are then shown as they are listed.
    */
   graph?: JobGraph | undefined;
   /**

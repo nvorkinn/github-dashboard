@@ -72,14 +72,13 @@ class Whole {
 /** Fails one field of a query, as GitHub does for what it won't say of one repository. */
 class Refused {}
 
-const hex = (text: string) => Buffer.from(text, "utf8").toString("hex");
 const upper = (word: unknown) => (typeof word === "string" ? word.toUpperCase() : null);
 
 /**
  * Answers the dashboard's GraphQL query (graphql.ts) from the same `routes` as the REST API's, so that a test's
  * account is the same whichever way it is read. A route that fails with a rate limit or a 401 fails the whole
  * query with that answer, and so does anything wrong with the list of installations; any other failure fails the
- * field of its repository or workflow. A workflow file's id is its text in hex.
+ * field of its repository.
  */
 async function answerQuery(routes: Routes, query: string): Promise<Response> {
   // biome-ignore lint/suspicious/noExplicitAny: answers shaped like GitHub's, as loosely typed as its JSON.
@@ -103,13 +102,6 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     }
     throw new Refused();
   }
-  const text = (blob: Json): string =>
-    blob?.encoding === "base64" ? Buffer.from(String(blob.content), "base64").toString("utf8") : "";
-  const blobOf = (content: string, withText: boolean) => ({
-    oid: hex(content),
-    ...(withText ? { object: { text: content } } : {}),
-  });
-
   async function listed(): Promise<Json> {
     const installations = (await get("user/installations", true))?.installations ?? [];
     const repos = new Map<string, Json>();
@@ -204,33 +196,10 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     };
   }
 
-  /** The repository's workflow files: the folder as listed if a test listed it, else a file per workflow. */
-  async function entries(repo: string, withText: boolean): Promise<Json[] | undefined> {
-    const folder = await get(`repos/${repo}/contents/.github/workflows`).catch(() => undefined);
-    if (Array.isArray(folder)) {
-      return Promise.all(
-        folder.map(async (entry: Json) => ({
-          path: entry.path,
-          type: entry.type === "file" ? "blob" : "tree",
-          ...blobOf(text(await get(`repos/${repo}/git/blobs/${entry.sha}`)), withText),
-        })),
-      );
-    }
-    const workflows: Json[] = (await get(`repos/${repo}/actions/workflows`))?.workflows ?? [];
-    const files = workflows.filter((one) => String(one.path).startsWith(".github/workflows/"));
-    return files.length === 0
-      ? undefined
-      : files.map((one) => ({ path: one.path, type: "blob", ...blobOf(`name: ${one.name}\n`, withText) }));
-  }
-
-  async function details(repo: string, withText: boolean): Promise<Json> {
+  async function details(repo: string): Promise<Json> {
     const open: Json[] = (await get(`repos/${repo}/pulls`)) ?? [];
     const pulls = await Promise.all(open.map((one) => pullOf(repo, one.number)));
-    const files = await entries(repo, withText);
-    return {
-      workflows: files ? { entries: files } : null,
-      pullRequests: { pageInfo: { hasNextPage: false }, nodes: pulls.filter((one) => one !== undefined) },
-    };
+    return { pullRequests: { pageInfo: { hasNextPage: false }, nodes: pulls.filter((one) => one !== undefined) } };
   }
 
   /**
@@ -253,107 +222,6 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     return { ref: { compare: { aheadBy: found.ahead_by, commits: { nodes } } } };
   }
 
-  /** A run's node id, which says where the fake finds it again. */
-  const runId = (repo: string, workflowId: number, run: Json) => `RUN:${repo}:${workflowId}:${run.id}`;
-
-  async function runsOf(repo: string, workflowId: number): Promise<Json[]> {
-    return (await get(`repos/${repo}/actions/workflows/${workflowId}/runs`))?.workflow_runs ?? [];
-  }
-
-  async function workflow(repo: string, path: string): Promise<Json> {
-    const workflows: Json[] = (await get(`repos/${repo}/actions/workflows`))?.workflows ?? [];
-    const found = workflows.find((one) => one.path === path);
-    if (!found) {
-      return null;
-    }
-    const runs = (await runsOf(repo, found.id)).slice(0, 5);
-    return {
-      databaseId: found.id,
-      name: found.name,
-      state: upper(found.state),
-      recent: {
-        nodes: runs.map((run) => ({
-          id: runId(repo, found.id, run),
-          databaseId: run.id,
-          checkSuite: { status: upper(run.status) },
-        })),
-      },
-      // As its card shows it: no jobs.
-      runs: { nodes: await Promise.all(runs.slice(0, 1).map((run) => runNode(repo, found.id, path, run, false))) },
-    };
-  }
-
-  /** One run in full, asked for by its node id. */
-  async function runById(id: string, path: string, going: boolean): Promise<Json> {
-    const [, repo = "", workflowId = "", number = ""] = id.split(":");
-    const run = (await runsOf(repo, Number(workflowId))).find((one) => String(one.id) === number);
-    return run ? runNode(repo, Number(workflowId), path, run, going) : null;
-  }
-
-  /** A run as its card shows it; with `going`, also its jobs, approvals and workflow file. */
-  async function runNode(repo: string, workflowId: number, path: string, run: Json, going: boolean): Promise<Json> {
-    const actor = run.triggering_actor ?? run.actor;
-    const card = {
-      id: runId(repo, workflowId, run),
-      databaseId: run.id,
-      displayTitle: run.display_title ?? null,
-      event: run.event,
-      url: run.html_url,
-      createdAt: run.created_at,
-      updatedAt: run.updated_at,
-      checkSuite: {
-        status: upper(run.status),
-        conclusion: upper(run.conclusion),
-        branch: run.head_branch ? { name: run.head_branch } : null,
-        creator: actor ? { __typename: "User", login: actor.login } : null,
-      },
-    };
-    if (!going) {
-      return card;
-    }
-    {
-      const jobs: Json[] = (await get(`repos/${repo}/actions/runs/${run.id}/jobs`))?.jobs ?? [];
-      // Null when the route refuses, as GitHub answers a field it won't show.
-      const pending: Json[] | null = await get(`repos/${repo}/actions/runs/${run.id}/pending_deployments`).then(
-        (found) => found ?? [],
-        (error) => {
-          if (error instanceof Whole) {
-            throw error;
-          }
-          return null;
-        },
-      );
-      const file = run.head_sha
-        ? await get(`repos/${repo}/contents/${path}?ref=${run.head_sha}`).catch(() => undefined)
-        : undefined;
-      return {
-        ...card,
-        pendingDeploymentRequests: pending && {
-          nodes: pending.map((one) => ({
-            currentUserCanApprove: one.current_user_can_approve,
-            environment: { databaseId: one.environment.id, name: one.environment.name },
-          })),
-        },
-        checkSuite: {
-          ...card.checkSuite,
-          commit: { oid: run.head_sha ?? `head${run.id}`, file: file ? blobOf(text(file), false) : null },
-          checkRuns: {
-            pageInfo: { hasNextPage: false },
-            nodes: jobs.map((one) => ({
-              databaseId: one.id,
-              name: one.name,
-              status: upper(one.status),
-              conclusion: upper(one.conclusion),
-              permalink: one.html_url,
-              startedAt: one.started_at,
-              completedAt: one.completed_at,
-            })),
-          },
-        },
-      };
-    }
-  }
-
   const data: Record<string, unknown> = {};
   const errors: unknown[] = [];
   async function field(name: string, answer: () => Promise<unknown>): Promise<void> {
@@ -371,25 +239,10 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
     if (/^\s*viewer \{/m.test(query)) {
       data.viewer = await listed();
     }
-    const treeText = query.includes("entries { path type oid object");
     for (const [, alias, owner, name] of query.matchAll(
-      /^\s*(r\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{\s*workflows:/gm,
+      /^\s*(r\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ \.\.\.Pulls/gm,
     )) {
-      await field(alias ?? "", () => details(`${owner}/${name}`, treeText));
-    }
-    for (const [, alias, repo, file] of query.matchAll(
-      /^\s*(w\d+): resource\(url: "https:\/\/github\.com\/([^/"]+\/[^/"]+)\/actions\/workflows\/([^"]+)"\)([\s\S]*?)\n {2}\} \}/gm,
-    )) {
-      const path = `.github/workflows/${decodeURIComponent(file ?? "")}`;
-      await field(alias ?? "", () => workflow(repo ?? "", path));
-    }
-    for (const [, alias, id, path] of query.matchAll(
-      /^\s*(n\d+): node\(id: "([^"]+)"\) \{ \.\.\. on WorkflowRun \{ \.\.\.Run(?: \.\.\.Going[^\n]*file\(path: "([^"]+)"\))?/gm,
-    )) {
-      await field(alias ?? "", () => runById(id ?? "", path ?? "", path !== undefined));
-    }
-    for (const [, alias, oid] of query.matchAll(/^\s*(b\d+): repository\([^)]*\) \{ object\(oid: "([0-9a-f]*)"\)/gm)) {
-      data[alias ?? ""] = { object: { text: Buffer.from(oid ?? "", "hex").toString("utf8") } };
+      await field(alias ?? "", () => details(`${owner}/${name}`));
     }
     for (const [, alias, owner, name, tag, branch] of query.matchAll(
       /^\s*(c\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ ref\(qualifiedName: "refs\/tags\/([^"]+)"\) \{ compare\(headRef: "([^"]+)"\)/gm,
@@ -443,38 +296,6 @@ export function pull(fullName: string, number: number, more: Record<string, unkn
   };
 }
 
-export function run(fullName: string, id: number, more: Record<string, unknown> = {}) {
-  return {
-    id,
-    name: "Release",
-    display_title: `v1.0.${id}`,
-    html_url: `https://github.com/${fullName}/actions/runs/${id}`,
-    status: "completed",
-    conclusion: "success",
-    event: "push",
-    actor: { login: "octocat" },
-    triggering_actor: { login: "octocat" },
-    created_at: `2026-11-0${id}T12:00:00Z`,
-    run_started_at: `2026-11-0${id}T12:00:05Z`,
-    updated_at: `2026-11-0${id}T12:10:00Z`,
-    ...more,
-  };
-}
-
-export function job(id: number, more: Record<string, unknown> = {}) {
-  return {
-    id,
-    name: `job ${id}`,
-    status: "completed",
-    conclusion: "success",
-    html_url: `https://github.com/octo/app/actions/runs/1/job/${id}`,
-    started_at: "2026-11-01T12:00:10Z",
-    completed_at: "2026-11-01T12:05:00Z",
-    steps: [],
-    ...more,
-  };
-}
-
 /** The routes of an account with these repositories and nothing in them. */
 export function account(...fullNames: string[]): Routes {
   const routes: Routes = {
@@ -493,7 +314,6 @@ export function account(...fullNames: string[]): Routes {
       allow_auto_merge: true,
     });
     routes[`repos/${name}/pulls`] = [];
-    routes[`repos/${name}/actions/workflows`] = { total_count: 0, workflows: [] };
   }
   return routes;
 }
@@ -513,27 +333,6 @@ export function withPull(
     check_runs: more.checkRuns ?? [],
   };
   routes[`repos/${fullName}/commits/${one.head.sha}/statuses`] = more.statuses ?? [];
-}
-
-/** Adds a workflow with these latest runs (newest first), each with these jobs, to `routes`. */
-export function withWorkflow(
-  routes: Routes,
-  fullName: string,
-  workflow: { id: number; name: string; state?: string; path?: string },
-  runs: { id: number; jobs?: unknown[]; [key: string]: unknown }[],
-): void {
-  const list = routes[`repos/${fullName}/actions/workflows`] as { workflows: unknown[] };
-  list.workflows.push({ state: "active", path: `.github/workflows/${workflow.id}.yml`, ...workflow });
-  routes[`repos/${fullName}/actions/workflows/${workflow.id}/runs`] = {
-    total_count: runs.length,
-    workflow_runs: runs.map(({ jobs: _, ...more }) => run(fullName, more.id, { name: workflow.name, ...more })),
-  };
-  for (const one of runs) {
-    routes[`repos/${fullName}/actions/runs/${one.id}/jobs`] = {
-      total_count: one.jobs?.length ?? 0,
-      jobs: one.jobs ?? [],
-    };
-  }
 }
 
 /** One fake connection to the relay's stream of events. */

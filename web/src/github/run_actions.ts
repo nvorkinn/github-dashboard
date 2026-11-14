@@ -1,8 +1,8 @@
+import { approval, PROMOTE_WORKFLOW, type RawPendingDeployment } from "../../../shared/runs.ts";
 import type { Auth } from "../auth.ts";
 import type { Dashboard, Project, RunActions } from "../model.ts";
 import { RELEASE_TAG } from "../model.ts";
 import { type Api, createApi, GitHubError } from "./api.ts";
-import { approval, PROMOTE_WORKFLOW, type RawPendingDeployment, releaseWorkflows } from "./read.ts";
 import { ActionError, send as sendWrite, worded } from "./writes.ts";
 
 // What a finished job or run ends in when GitHub's re-run of its failed jobs runs it again (cancelled ones too).
@@ -12,22 +12,17 @@ const RERUNNABLE = new Set(["failure", "timed_out", "cancelled"]);
 export const APPROVED_COMMENT = "Approved from the GitHub dashboard.";
 export const REJECTED_COMMENT = "Rejected from the GitHub dashboard.";
 
-type RawRun = {
-  id: number;
-  name: string | null;
-  path?: string;
-  status: string | null;
-  conclusion: string | null;
-};
+type RawRun = { id: number; status: string | null; conclusion: string | null };
 type RawJob = { id: number; run_id: number; status: string; conclusion: string | null };
 type RawRelease = { tag_name: string; draft: boolean };
 type RawWorkflow = { id: number; path: string; state: string };
 
 /**
  * The actions on release runs and projects, as the signed-in user straight on api.github.com. Each one checks on
- * GitHub first that it still applies, as the page may be a moment behind, then sends its one write, and on success
- * tells `dashboard` what changed so that it reads it again. Nothing is retried: a write may have gone through even
- * when its answer didn't arrive.
+ * GitHub first that it still applies, as the page may be a moment behind, then sends its one write. How a run stands
+ * afterwards the relay tells the page, as for every run; what the page reads itself (a new release, whether an
+ * approval is still the user's to give) `dashboard` is told to read again. Nothing is retried: a write may have gone
+ * through even when its answer didn't arrive.
  */
 export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed">): RunActions {
   const api = createApi(auth);
@@ -47,11 +42,6 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         const now = await api.get<RawRun>(path);
         if (now.status === "completed") {
           throw new ActionError("This run has finished, so it no longer waits for an approval. Refresh the dashboard.");
-        }
-        // A run's path can end in `@<ref>`.
-        const workflow = { name: now.name ?? "", path: now.path?.split("@")[0] };
-        if ((await releaseWorkflows(api, run.repo, [workflow])).length === 0) {
-          throw new ActionError("Only unfinished runs of release workflows can be approved from this dashboard.");
         }
         const pending = (await api.list<RawPendingDeployment>(`${path}/pending_deployments`)).map(approval);
         const found = pending.find((one) => one.environmentId === wanted.environmentId);
@@ -87,7 +77,6 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
           throw new ActionError("This workflow run has no failed jobs to re-run. Refresh the dashboard.");
         }
         await send(`${path}/rerun-failed-jobs`, {}, "Actions");
-        dashboard.changed({ kind: "workflow_run", repo: run.repo, run: run.id });
       });
     },
 
@@ -102,7 +91,6 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
           throw new ActionError("GitHub re-runs a job only once its whole workflow run has finished. Try again then.");
         }
         await send(`${path}/jobs/${job.id}/rerun`, {}, "Actions");
-        dashboard.changed({ kind: "workflow_job", repo: run.repo, run: now.run_id });
       });
     },
 
@@ -127,9 +115,8 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
           { tag_name: tag, generate_release_notes: true, draft: false, prerelease: false },
           "Contents",
         );
+        // The tag starts the project's release workflow, whose run shows once the relay hears of it.
         dashboard.changed({ kind: "release", repo: project.repo });
-        // The tag starts the project's release workflow, whose run shows once it is read.
-        dashboard.changed({ kind: "workflow_run", repo: project.repo });
       });
     },
 
@@ -153,7 +140,6 @@ export function createRunActions(auth: Auth, dashboard: Pick<Dashboard, "changed
         const { default_branch: ref } = await api.get<{ default_branch: string }>(path);
         // The workflow checks the rest itself, such as that dev has the release, before it asks for an approval.
         await send(`${path}/actions/workflows/${workflow.id}/dispatches`, { ref, inputs: { tag } }, "Actions");
-        dashboard.changed({ kind: "workflow_run", repo: project.repo });
       });
     },
   };

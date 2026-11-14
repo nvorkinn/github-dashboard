@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { run } from "../components/testing.ts";
 import type { DashboardState } from "../model.ts";
 import {
   CHANGE_MAX_WAIT_MS,
@@ -776,4 +777,132 @@ test("passes the relay's notices on while started, and reads nothing for them", 
   stream.emit("notice", JSON.stringify({ ...notice, key: "another" }));
   expect(notices).toEqual(["checks:octo/app:1"]);
   dashboard.stop();
+});
+
+// Release runs: the relay tells them, and the page reads none.
+
+const RELEASE = run({ repo: "octo/app", id: 4, state: "running", finishedAt: undefined });
+const snapshot = (more: Record<string, unknown> = {}) =>
+  JSON.stringify({ configured: true, projects: { "octo/app": { promoteWorkflow: 31 } }, runs: [RELEASE], ...more });
+
+function releases(dashboard: { state(): DashboardState }) {
+  const state = dashboard.state();
+  return state.status === "ready" ? state.data.releases : undefined;
+}
+
+test("the release runs are the ones the relay tells, of the projects the page shows, and none are read", async () => {
+  const { dashboard, stream, calls } = await setUpLive(account("octo/app", "octo/lib"));
+  expect(releases(dashboard)).toEqual([]);
+
+  const elsewhere = run({ repo: "someone/else", id: 9 });
+  stream.emit("releases", snapshot({ runs: [RELEASE, elsewhere] }));
+  expect(releases(dashboard)).toEqual([RELEASE]);
+  const state = dashboard.state();
+  expect(state.status === "ready" && state.data.projects.map((one) => one.promoteWorkflow)).toEqual([31, undefined]);
+
+  // One run as it is now takes the place of what it was; a new one joins.
+  stream.emit("run", JSON.stringify({ ...RELEASE, state: "passed", finishedAt: "2026-11-11T14:00:00Z" }));
+  stream.emit("run", JSON.stringify(run({ repo: "octo/lib", id: 5, startedAt: "2026-11-11T15:00:00Z" })));
+  expect(releases(dashboard)?.map((one) => [one.id, one.state])).toEqual([
+    [5, "passed"],
+    [4, "passed"],
+  ]);
+  // Everything again: what isn't in it is gone.
+  stream.emit("releases", snapshot({ runs: [] }));
+  expect(releases(dashboard)).toEqual([]);
+  // What isn't a run, or a list of them, changes nothing.
+  stream.emit("releases", snapshot());
+  stream.emit("run", JSON.stringify({ ...RELEASE, url: "https://evil.example/" }));
+  stream.emit("releases", "not json");
+  expect(releases(dashboard)).toEqual([RELEASE]);
+
+  await settle();
+  expect(calls).toEqual([]);
+});
+
+test("what the relay told stays through a read of GitHub, and a hidden project shows none of it", async () => {
+  const relay = fakeStreams();
+  const github = fakeGitHub(account("octo/app", "octo/lib"));
+  let hidden = new Set<string>();
+  const dashboard = createDashboard(github.auth, { connect: relay.connect, hidden: () => hidden });
+  dashboard.start();
+  // Told before the first read is in: shown once it is.
+  relay.last().emit("hello");
+  relay.last().emit("releases", snapshot());
+  expect(releases(dashboard)).toBeUndefined();
+  await settle();
+  expect(releases(dashboard)).toEqual([RELEASE]);
+
+  await dashboard.refresh();
+  expect(releases(dashboard)).toEqual([RELEASE]);
+  expect(github.queries.join("\n")).not.toMatch(/workflow/i);
+  expect(github.calls.every((path) => path === "graphql")).toBe(true);
+
+  hidden = new Set(["octo/app"]);
+  await dashboard.refresh();
+  expect(releases(dashboard)).toEqual([]);
+  const state = dashboard.state();
+  expect(state.status === "ready" && state.data.projects.map((one) => one.promoteWorkflow)).toEqual([
+    undefined,
+    undefined,
+  ]);
+
+  // Signed out: nothing of it is kept for whoever signs in next.
+  dashboard.stop();
+  dashboard.start();
+  await settle();
+  hidden = new Set();
+  await dashboard.refresh();
+  expect(releases(dashboard)).toEqual([]);
+});
+
+test("whether the user may approve a waiting run is asked of GitHub as that user, once, and again after a review", async () => {
+  const routes = account("octo/app");
+  const pending = "repos/octo/app/actions/runs/4/pending_deployments";
+  routes[pending] = [{ environment: { id: 7, name: "production" }, current_user_can_approve: true }];
+  const { dashboard, stream, calls } = await setUpLive(routes);
+  // As the relay reads it, as the app: nobody's to approve.
+  const waiting = {
+    ...RELEASE,
+    state: "waiting",
+    jobs: [{ id: 41, name: "deploy", state: "waiting" }],
+    approvals: [{ environmentId: 7, environment: "production", canApprove: false }],
+  };
+  stream.emit("releases", snapshot({ runs: [waiting] }));
+  expect(releases(dashboard)?.[0]?.approvals).toEqual([
+    { environmentId: 7, environment: "production", canApprove: false },
+  ]);
+  await settle();
+  expect(releases(dashboard)?.[0]?.approvals).toEqual([
+    { environmentId: 7, environment: "production", canApprove: true },
+  ]);
+
+  // The same run told again, waiting for the same: not asked again.
+  stream.emit("run", JSON.stringify(waiting));
+  await settle();
+  expect(calls).toEqual([`${pending}?per_page=100`]);
+  expect(releases(dashboard)?.[0]?.approvals[0]?.canApprove).toBe(true);
+
+  // Someone reviewed it: asked again.
+  routes[pending] = [{ environment: { id: 7, name: "production" }, current_user_can_approve: false }];
+  stream.change({ kind: "deployment_review", repo: "octo/app", run: 4 });
+  await settle();
+  expect(calls).toEqual([`${pending}?per_page=100`, `${pending}?per_page=100`]);
+  expect(releases(dashboard)?.[0]?.approvals[0]?.canApprove).toBe(false);
+
+  // Once it no longer waits, the relay's word stands and nothing is asked.
+  stream.emit("run", JSON.stringify({ ...waiting, state: "running", jobs: [], approvals: [] }));
+  await settle();
+  expect(calls).toHaveLength(2);
+  expect(releases(dashboard)?.[0]?.approvals).toEqual([]);
+});
+
+test("a waiting run whose approvals GitHub won't show the user keeps what the relay said of them", async () => {
+  const routes = account("octo/app");
+  routes["repos/octo/app/actions/runs/4/pending_deployments"] = failing(403);
+  const { dashboard, stream } = await setUpLive(routes);
+  const approvals = [{ environmentId: 7, environment: "production", canApprove: false }];
+  stream.emit("releases", snapshot({ runs: [{ ...RELEASE, state: "waiting", approvals }] }));
+  await settle();
+  expect(releases(dashboard)?.[0]?.approvals).toEqual(approvals);
 });

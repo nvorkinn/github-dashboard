@@ -216,7 +216,9 @@ name: Release
 # dashboard: release
 ```
 
-The page reads the mark from the files in `.github/workflows` on the default branch (only the files directly in it). A repository that marks none of
+The relay reads the mark from the files in `.github/workflows` on the default branch (only the files directly in it), and
+tells the pages of those workflows' runs (see "Release runs in the relay"). The page reads no workflow file and no run
+itself: without the relay set up to read GitHub, it shows no release runs. A repository that marks none of
 its workflows goes by their names instead: the ones that say release, promote or deploy. Once one file is marked,
 names no longer count there. A workflow GitHub runs by itself, such as "pages build and deployment", has no file and
 is never shown.
@@ -261,34 +263,34 @@ permission beyond the ones it has for the page (Actions, Contents, Deployments a
 
 ## Reading GitHub
 
-Everything on the page is read through GitHub's GraphQL API (`web/src/github/graphql.ts`), in a handful of requests
-sent side by side: at the start, on **Refresh**, every minute while the relay's events don't arrive, and every five
-minutes while they do. In between,
-an event from the relay reads only what it names, through the REST API (`web/src/github/read.ts`): the pull request,
-or the workflow run, and of a run only if its workflow file is one of the project's release workflows. Both end in the
-same code, so a pull request reads the same either way.
+The projects and their pull requests are read through GitHub's GraphQL API (`web/src/github/graphql.ts`), in a
+handful of requests sent side by side: at the start, on **Refresh**, every minute while the relay's events don't
+arrive, and every five minutes while they do. In between, an event from the relay reads only the pull request it
+names, through the REST API (`web/src/github/read.ts`). Both end in the same code, so a pull request reads the same
+either way.
 
-A read asks for every repository the signed-in user reaches (what its row shows), and for the pull requests, checks,
-workflow files and release runs of the projects that aren't hidden. GitHub answers the parts of one query one after
-another, so the read is one request for the list and one for every seven projects and every seven release
-workflows, all at once: about five requests and a second and a half for a dozen projects, where a single request
-took six seconds. A release run is on the page while it is going and for five minutes after, so that is all that is read
-of it: of each release workflow whether its latest runs finished and the latest as its card shows it, and of a run
-that is going, asked for by itself after, its jobs, pending approvals and workflow file. A finished run shows
-without its jobs, with a link to it on GitHub. Of a hidden project nothing
-but its row is read; showing it again reads it. A new repository is in the list of the next read, and so shows on
-the page by itself, within those one to five minutes or at once when GitHub's `repository` event arrives.
+A read asks for every repository the signed-in user reaches (what its row shows), and for the pull requests and
+checks of the projects that aren't hidden, with what each default branch has that its latest release hasn't. GitHub
+answers the parts of one query one after another, so the read is one request for the list and one for every seven
+projects, all at once. Of a hidden project nothing but its row is read; showing it again reads it. A new repository
+is in the list of the next read, and so shows on the page by itself, within those one to five minutes or at once
+when GitHub's `repository` event arrives.
 
-GraphQL has no list of a repository's workflows: a workflow is asked for by its file, so the page has to know the
-release workflows' files before it asks. It learns them from each read and keeps them in the browser's local storage
-(names of projects and of workflow files, nothing else), which is what lets a reload ask for everything at once as well. A first
-visit asks in three rounds, and a read that finds a new project, a new release workflow or a changed workflow file asks once
-or twice more for just that. More than 50 open pull requests in a project, 100 checks on a pull request or 100 jobs
-in a run don't fit into the answer and are read through the REST API.
+The projects are asked about by name, so the page has to know them before it asks. It learns them from each read and
+keeps their names in the browser's local storage (nothing else), which is what lets a reload ask for everything at
+once. A first visit asks in two rounds, and a read that finds a new project asks once more for just that. More than
+50 open pull requests in a project or 100 checks on a pull request don't fit into the answer and are read through
+the REST API.
+
+Release runs aren't read by the page at all. The relay sends every one it knows of when the page connects to its
+event stream, and each run whole as it changes (see "Release runs in the relay"); the page shows what the relay last
+said, of the projects it shows. A run is on the page while it is going and for five minutes after it finished, then
+without its jobs and with a link to it on GitHub. While the stream is down the runs stay as they were last told, and
+the relay tells all of them again on reconnecting. The one thing the page asks GitHub about a run is whether the
+signed-in user may approve the deployment it waits for: one request per waiting run, again after someone reviews it.
 
 GraphQL counts against its own rate limit, 5,000 points an hour, and a read costs about one point per two shown
-projects. It doesn't say when a later attempt of a run started, so a run that was re-run shows the time it was first
-started.
+projects.
 
 ## Telegram
 

@@ -13,24 +13,20 @@ import { createSecretCopy } from "./github/secret_copy.ts";
 import type { Dashboard } from "./model.ts";
 
 /**
- * Where the browser keeps which workflows a read asks about (see `Shape`): names of projects and of workflow files,
- * so that a reload reads everything in one request. Nothing of what GitHub answered, and nothing of the sign-in.
+ * Where the browser keeps which projects a read asks about (see `Shape`): their names, so that a reload reads
+ * everything in one round of requests. Nothing of what GitHub answered, and nothing of the sign-in.
  */
 export const SHAPE_KEY = "github-dashboard:shape";
 
 const keptShape = {
   load(): Shape | undefined {
     const kept: unknown = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? "null");
-    if (typeof kept !== "object" || kept === null || Array.isArray(kept)) {
+    if (typeof kept !== "object" || kept === null) {
       return undefined;
     }
-    const shape: Shape = {};
-    for (const [repo, paths] of Object.entries(kept)) {
-      if (Array.isArray(paths)) {
-        shape[repo] = paths.filter((path): path is string => typeof path === "string");
-      }
-    }
-    return shape;
+    // An older version kept each project's workflow files under its name.
+    const names: unknown[] = Array.isArray(kept) ? kept : Object.keys(kept);
+    return names.filter((name): name is string => typeof name === "string");
   },
   save(shape: Shape): void {
     localStorage.setItem(SHAPE_KEY, JSON.stringify(shape));

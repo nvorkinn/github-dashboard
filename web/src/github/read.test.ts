@@ -4,48 +4,13 @@ import type { DashboardData } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 import { readEverything } from "./graphql.ts";
-import {
-  checkState,
-  checks,
-  isReleaseName,
-  mergeMethod,
-  mergeState,
-  type Plan,
-  PROMOTE_WORKFLOW,
-  planFor,
-  type ReleasePaths,
-  readChanged,
-  releaseTag,
-  runState,
-  settledJobs,
-  shownRuns,
-  job as toJob,
-} from "./read.ts";
-import { account, fakeGitHub, job, type Routes, repo, run, withPull, withWorkflow } from "./testing.ts";
+import { checks, mergeMethod, mergeState, type Plan, planFor, readChanged } from "./read.ts";
+import { account, fakeGitHub, type Routes, repo, withPull } from "./testing.ts";
 
 function read(routes: Record<string, unknown>, previous?: DashboardData) {
   const github = fakeGitHub(routes);
   return { ...github, result: readEverything(github.auth, { previous }) };
 }
-
-test.each([
-  ["queued", null, "queued"],
-  ["requested", null, "queued"],
-  ["pending", null, "queued"],
-  ["in_progress", null, "running"],
-  ["waiting", null, "waiting"],
-  ["completed", "success", "passed"],
-  ["completed", "failure", "failed"],
-  ["completed", "timed_out", "failed"],
-  ["completed", "startup_failure", "failed"],
-  ["completed", "action_required", "failed"],
-  ["completed", "stale", "failed"],
-  ["completed", "cancelled", "cancelled"],
-  ["completed", "skipped", "skipped"],
-  ["completed", "neutral", "neutral"],
-])("a check, run or job that is %s with conclusion %s is %s", (status, conclusion, state) => {
-  expect(checkState(status, conclusion)).toBe(state);
-});
 
 test.each([
   [true, "clean", "clean"],
@@ -93,29 +58,6 @@ test("checks are the check runs and then the newest status of each context", () 
     { name: "ci/scan", state: "failed", url: undefined },
     { name: "ci/docs", state: "failed", url: undefined },
   ]);
-});
-
-test.each([
-  ["Release", true],
-  ["Publish release notes", true],
-  ["DEPLOY to production", true],
-  ["Promote", true],
-  ["CI", false],
-  ["Preview", false],
-  [null, false],
-])("a workflow named %s is a release: %s", (name, expected) => {
-  expect(isReleaseName(name)).toBe(expected);
-});
-
-test("of a workflow's runs, the unfinished ones and the latest finished one are shown", () => {
-  const runs = [
-    { id: 5, status: "queued" },
-    { id: 4, status: "completed" },
-    { id: 3, status: "in_progress" },
-    { id: 2, status: "completed" },
-  ];
-  expect(shownRuns(runs).map((run) => run.id)).toEqual([5, 3, 4]);
-  expect(shownRuns([])).toEqual([]);
 });
 
 test("projects are the installations' repositories, without archived ones, the last pushed first", async () => {
@@ -250,174 +192,23 @@ test("a pull request that closed or went away while being read is left out", asy
   expect(problem).toBeUndefined();
 });
 
-test("releases are the active release workflows' unfinished runs with their jobs, and the last finished one", async () => {
-  const routes = account("octo/app");
-  withWorkflow(routes, "octo/app", { id: 1, name: "CI" }, [{ id: 9 }]);
-  withWorkflow(routes, "octo/app", { id: 2, name: "Old deploy", state: "disabled_manually" }, [{ id: 8 }]);
-  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
-    {
-      id: 4,
-      status: "in_progress",
-      conclusion: null,
-      triggering_actor: { login: "hubot" },
-      jobs: [
-        job(41),
-        job(42, { status: "waiting", conclusion: null, completed_at: null }),
-        job(43, { status: "queued", conclusion: null, completed_at: null }),
-        job(44, { status: "in_progress", conclusion: null, completed_at: null }),
-      ],
-    },
-    { id: 3, conclusion: "failure", jobs: [job(31, { conclusion: "failure" }), job(32, { conclusion: "skipped" })] },
-    { id: 2 },
-  ]);
-  withWorkflow(routes, "octo/app", { id: 4, name: "Promote" }, [{ id: 1, display_title: undefined }]);
-  routes["repos/octo/app/actions/runs/4/pending_deployments"] = [
-    {
-      environment: { id: 70, name: "production" },
-      wait_timer: 0,
-      current_user_can_approve: true,
-      reviewers: [],
-    },
-    { environment: { id: 71, name: "billing" }, wait_timer: 5, current_user_can_approve: false, reviewers: [] },
-  ];
-
-  const { result, calls, queries } = read(routes);
-  const { data } = await result;
-  expect(data.releases).toEqual([
-    {
-      repo: "octo/app",
-      id: 4,
-      workflow: "Release",
-      title: "v1.0.4",
-      url: "https://github.com/octo/app/actions/runs/4",
-      // In progress to GitHub, but a job is waiting for approval.
-      state: "waiting",
-      actor: "hubot",
-      // When the run was made: GraphQL doesn't say when a later attempt of it started.
-      startedAt: "2026-11-04T12:00:00Z",
-      finishedAt: undefined,
-      jobs: [
-        {
-          id: 41,
-          name: "job 41",
-          state: "passed",
-          url: "https://github.com/octo/app/actions/runs/1/job/41",
-          startedAt: "2026-11-01T12:00:10Z",
-          finishedAt: "2026-11-01T12:05:00Z",
-        },
-        expect.objectContaining({ id: 42, state: "waiting", startedAt: undefined, finishedAt: undefined }),
-        expect.objectContaining({ id: 43, state: "queued", startedAt: undefined, finishedAt: undefined }),
-        expect.objectContaining({ id: 44, state: "running", startedAt: "2026-11-01T12:00:10Z" }),
-      ],
-      approvals: [
-        { environmentId: 70, environment: "production", canApprove: true },
-        { environmentId: 71, environment: "billing", canApprove: false },
-      ],
-    },
-    expect.objectContaining({
-      id: 3,
-      state: "failed",
-      finishedAt: "2026-11-03T12:10:00Z",
-      // Finished: a link to it is all it shows, so its jobs aren't read.
-      jobs: [],
-      approvals: [],
-    }),
-    expect.objectContaining({ id: 1, workflow: "Promote", title: "Promote", state: "passed", actor: "octocat" }),
-  ]);
-  // The release workflows are asked about by their files, and not the CI workflow.
-  expect(queries.join("\n")).toContain('resource(url: "https://github.com/octo/app/actions/workflows/3.yml")');
-  expect(queries.join("\n")).not.toContain("actions/workflows/1.yml");
-  expect(new Set(calls)).toEqual(new Set(["graphql"]));
-  // No workflow is at promote.yml.
-  expect(data.projects[0]?.promoteWorkflow).toBeUndefined();
-});
-
-test("a waiting run whose approvals GitHub won't show has none, and still shows", async () => {
-  const routes = account("octo/app");
-  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
-    { id: 4, status: "waiting", conclusion: null, jobs: [job(42, { status: "waiting", conclusion: null })] },
-  ]);
-  routes["repos/octo/app/actions/runs/4/pending_deployments"] = () => Response.json({}, { status: 403 });
-  const { data, problem } = await read(routes).result;
-  expect(data.releases).toEqual([expect.objectContaining({ id: 4, state: "waiting", approvals: [] })]);
-  expect(problem).toBeUndefined();
-});
-
-test("a run GitHub calls waiting with nothing to approve, such as one waiting for a runner, is queued", async () => {
-  const routes = account("octo/app");
-  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [
-    { id: 4, status: "waiting", conclusion: null, jobs: [job(42, { status: "waiting", conclusion: null })] },
-  ]);
-  routes["repos/octo/app/actions/runs/4/pending_deployments"] = [];
-  const { data } = await read(routes).result;
-  expect(data.releases).toEqual([expect.objectContaining({ id: 4, state: "queued", approvals: [] })]);
-  expect(data.releases[0]?.jobs).toEqual([expect.objectContaining({ id: 42, state: "queued" })]);
-});
-
-test("a job GitHub calls waiting is waiting only with something to approve, or when that couldn't be read", () => {
-  const jobs = [
-    toJob(job(1, { status: "waiting", conclusion: null })),
-    toJob(job(2, { status: "in_progress", conclusion: null })),
-  ];
-  const states = (approvals: Parameters<typeof settledJobs>[1]) => settledJobs(jobs, approvals).map((one) => one.state);
-  expect(states([])).toEqual(["queued", "running"]);
-  expect(states([{ environmentId: 7, environment: "production", canApprove: false }])).toEqual(["waiting", "running"]);
-  expect(states(undefined)).toEqual(["waiting", "running"]);
-
-  // The run goes by its jobs, whatever GitHub calls it.
-  const waiting = { status: "waiting", conclusion: null };
-  expect(runState(waiting, settledJobs(jobs, undefined))).toBe("waiting");
-  expect(runState(waiting, settledJobs(jobs, []))).toBe("running");
-  expect(runState(waiting, settledJobs(jobs.slice(0, 1), []))).toBe("queued");
-  expect(runState(waiting, [])).toBe("queued");
-  expect(runState({ status: "in_progress", conclusion: null }, settledJobs(jobs, undefined))).toBe("waiting");
-  expect(runState({ status: "completed", conclusion: "success" }, jobs)).toBe("passed");
-});
-
-test("a project's Promote workflow is the active one at promote.yml, found in the same list of workflows", async () => {
-  const routes = account("octo/app", "octo/off", "octo/none");
-  withWorkflow(routes, "octo/app", { id: 1, name: "CI" }, []);
-  withWorkflow(routes, "octo/app", { id: 6, name: "Ship to prod", path: PROMOTE_WORKFLOW }, []);
-  withWorkflow(routes, "octo/off", { id: 7, name: "Promote", state: "disabled_manually", path: PROMOTE_WORKFLOW }, []);
-  withWorkflow(routes, "octo/none", { id: 8, name: "Promote" }, []);
-  const { result, calls } = read(routes);
-  const { data } = await result;
-  expect(data.projects.map((one) => [one.repo, one.promoteWorkflow])).toEqual([
-    ["octo/app", 6],
-    ["octo/off", undefined],
-    ["octo/none", undefined],
-  ]);
-  expect(calls.filter((call) => call.includes("actions/workflows/6"))).toEqual([]);
-
-  // A read of the release runs reads it again; a read of something else keeps it.
-  routes["repos/octo/app/actions/workflows"] = { total_count: 0, workflows: [] };
-  const kept = await changed(routes, [{ kind: "release", repo: "octo/app" }], data);
-  expect(kept.data.projects[0]?.promoteWorkflow).toBe(6);
-  const gone = await changed(routes, [{ kind: "workflow_run", repo: "octo/app", run: 1 }], data);
-  expect(gone.data.projects[0]?.promoteWorkflow).toBeUndefined();
-});
-
 test("a project that can't be read keeps what was read before, and the others are read", async () => {
   const routes = account("octo/app", "octo/broken", "octo/worse");
   withPull(routes, "octo/app", 1);
   withPull(routes, "octo/broken", 2);
-  withWorkflow(routes, "octo/broken", { id: 1, name: "Release" }, [{ id: 5 }]);
   const before = (await read(routes).result).data;
   expect(before.pulls.map((pull) => pull.repo)).toEqual(["octo/app", "octo/broken"]);
 
   routes["repos/octo/broken/pulls"] = () => new Response(null, { status: 502 });
-  routes["repos/octo/broken/actions/workflows"] = () => Response.json({ message: "no" }, { status: 403 });
   withPull(routes, "octo/app", 3);
 
   const first = await read(routes).result;
   expect(first.problem).toBe("Couldn't read everything from octo/broken.");
   expect(first.data.projects).toHaveLength(3);
   expect(first.data.pulls.map((pull) => pull.number)).toEqual([1, 3]);
-  expect(first.data.releases).toEqual([]);
 
   const later = await read(routes, before).result;
   expect(later.data.pulls.map((pull) => pull.number)).toEqual([1, 3, 2]);
-  expect(later.data.releases.map((run) => run.id)).toEqual([5]);
 
   routes["repos/octo/worse/pulls"] = () => new Response(null, { status: 500 });
   expect((await read(routes).result).problem).toBe("Couldn't read everything from 2 projects.");
@@ -454,13 +245,12 @@ const known: DashboardData = {
 };
 
 /** A plan, spelled with only what it reads. */
-function plan(repos: Record<string, { pulls?: "all" | number[]; releases?: true; latestRelease?: true }>): Plan {
+function plan(repos: Record<string, { pulls?: "all" | number[]; latestRelease?: true }>): Plan {
   return new Map(
     Object.entries(repos).map(([name, wanted]) => [
       name,
       {
         pulls: wanted.pulls === "all" ? "all" : new Set(wanted.pulls ?? []),
-        releases: wanted.releases ?? false,
         latestRelease: wanted.latestRelease ?? false,
       },
     ]),
@@ -495,20 +285,16 @@ test.each<[string, Change[], Plan]>([
   ],
   ["a check that names no commit", [{ kind: "check_suite", repo: "octo/app" }], plan({ "octo/app": { pulls: "all" } })],
   [
-    "a workflow's job on the default branch",
+    "a workflow's job on the default branch, which the relay tells of if it is a release",
     [{ kind: "workflow_job", repo: "octo/app", sha: "main1", run: 9 }],
-    plan({ "octo/app": { releases: true } }),
+    plan({}),
   ],
   [
     "a workflow run on a pull request",
     [{ kind: "workflow_run", repo: "octo/lib", sha: "sha1", run: 9 }],
-    plan({ "octo/lib": { releases: true, pulls: [5] } }),
+    plan({ "octo/lib": { pulls: [5] } }),
   ],
-  [
-    "an approval of a deployment",
-    [{ kind: "deployment_review", repo: "octo/app", run: 9 }],
-    plan({ "octo/app": { releases: true, pulls: "all" } }),
-  ],
+  ["an approval of a deployment", [{ kind: "deployment_review", repo: "octo/app", run: 9 }], plan({})],
   [
     "a push",
     [{ kind: "push", repo: "octo/app", sha: "main2" }],
@@ -525,7 +311,7 @@ test.each<[string, Change[], Plan]>([
       { kind: "workflow_job", repo: "octo/lib", sha: "sha1" },
       { kind: "check_run", repo: "octo/lib", sha: "main1" },
     ],
-    plan({ "octo/app": { pulls: [1, 2], latestRelease: true }, "octo/lib": { releases: true, pulls: [5] } }),
+    plan({ "octo/app": { pulls: [1, 2], latestRelease: true }, "octo/lib": { pulls: [5] } }),
   ],
   [
     "a push among checks",
@@ -562,7 +348,6 @@ async function everything() {
   withPull(routes, "octo/app", 1);
   withPull(routes, "octo/app", 2);
   withPull(routes, "octo/lib", 5);
-  withWorkflow(routes, "octo/app", { id: 3, name: "Release" }, [{ id: 4, jobs: [job(41)] }]);
   routes["repos/octo/app/releases/latest"] = {
     tag_name: "v1.0.0",
     html_url: "https://github.com/octo/app/releases/tag/v1.0.0",
@@ -573,13 +358,13 @@ async function everything() {
 }
 
 /** Reads what `changes` name. `calls` are the requests that took, sorted. */
-async function changed(routes: Routes, changes: Change[], before: DashboardData, releasePaths: ReleasePaths = {}) {
-  const wanted = planFor(changes, before, new Set(), releasePaths);
+async function changed(routes: Routes, changes: Change[], before: DashboardData) {
+  const wanted = planFor(changes, before, new Set());
   if (wanted === "everything") {
     throw new Error("These changes read everything");
   }
   const github = fakeGitHub(routes);
-  const result = await readChanged(createApi(github.auth), wanted, before, releasePaths);
+  const result = await readChanged(createApi(github.auth), wanted, before);
   return { ...result, calls: github.calls.sort() };
 }
 
@@ -655,149 +440,10 @@ test("pull requests read by number are changed, added at the front, or gone", as
   );
 });
 
-test("a repository that marks its release workflows shows those and no others, whatever their names", async () => {
-  const routes = account("octo/app");
-  withWorkflow(routes, "octo/app", { id: 1, name: "Ship it" }, [{ id: 11 }]);
-  withWorkflow(routes, "octo/app", { id: 2, name: "Deploy docs" }, [{ id: 12 }]);
-  withWorkflow(routes, "octo/app", { id: 3, name: "Release notes", path: ".github/workflows/notes.yaml" }, [
-    { id: 13 },
-  ]);
-  const blob = (text: string) => ({ encoding: "base64", content: btoa(text) });
-  routes["repos/octo/app/contents/.github/workflows"] = [
-    { type: "file", path: ".github/workflows/1.yml", sha: "ship" },
-    { type: "file", path: ".github/workflows/2.yml", sha: "docs" },
-    { type: "file", path: ".github/workflows/notes.yaml", sha: "notes" },
-    { type: "file", path: ".github/workflows/README.md", sha: "readme" },
-    { type: "dir", path: ".github/workflows/scripts", sha: "scripts" },
-  ];
-  routes["repos/octo/app/git/blobs/ship"] = blob("name: Ship it\n\n#  Dashboard: Release\non: push\n");
-  // Not a line of its own, so no mark.
-  routes["repos/octo/app/git/blobs/docs"] = blob("name: Deploy docs # dashboard: release\non: push\n");
-  routes["repos/octo/app/git/blobs/notes"] = blob("name: Release notes\n# dashboard: releases\non: push\n");
-
-  const first = read(routes);
-  expect((await first.result).data.releases.map((one) => one.id)).toEqual([11]);
-
-  routes["repos/octo/app/contents/.github/workflows"] = [
-    { type: "file", path: ".github/workflows/1.yml", sha: "ship" },
-    { type: "file", path: ".github/workflows/2.yml", sha: "docs2" },
-  ];
-  routes["repos/octo/app/git/blobs/docs2"] = blob("# dashboard: release\nname: Deploy docs\n");
-  const second = read(routes);
-  expect((await second.result).data.releases.map((one) => one.id).sort()).toEqual([11, 12]);
-});
-
-test("a repository that marks no workflow goes by their names, but never shows one GitHub runs by itself", async () => {
-  const routes = account("octo/app");
-  withWorkflow(routes, "octo/app", { id: 1, name: "Deploy" }, [{ id: 11 }]);
-  withWorkflow(routes, "octo/app", { id: 2, name: "CI" }, [{ id: 12 }]);
-  withWorkflow(
-    routes,
-    "octo/app",
-    { id: 3, name: "pages build and deployment", path: "dynamic/pages/pages-build-deployment" },
-    [{ id: 13 }],
-  );
-  routes["repos/octo/app/contents/.github/workflows"] = [
-    { type: "file", path: ".github/workflows/1.yml", sha: "unmarked" },
-  ];
-  routes["repos/octo/app/git/blobs/unmarked"] = { encoding: "base64", content: btoa("name: Deploy\n") };
-  const { result } = read(routes);
-  expect((await result).data.releases.map((one) => one.id)).toEqual([11]);
-});
-
-test("with the release workflows known, a run's event reads that run alone, and a CI run's reads nothing", async () => {
-  const { routes, before } = await everything();
-  const releasePaths = { "octo/app": [".github/workflows/3.yml"] };
-  const release = ".github/workflows/3.yml";
-  routes["repos/octo/app/actions/runs/5"] = run("octo/app", 5, {
-    status: "in_progress",
-    conclusion: null,
-    path: release,
-  });
-  routes["repos/octo/app/actions/runs/5/jobs"] = {
-    total_count: 1,
-    jobs: [job(51, { status: "in_progress", conclusion: null, completed_at: null })],
-  };
-  const started = await changed(
-    routes,
-    [
-      { kind: "workflow_run", repo: "octo/app", action: "in_progress", sha: "main1", run: 5, path: release },
-      // A job's event has no path: the run says which workflow it is of.
-      { kind: "workflow_job", repo: "octo/app", action: "in_progress", sha: "main1", run: 5 },
-    ],
-    before,
-    releasePaths,
-  );
-  expect(started.calls).toEqual(["repos/octo/app/actions/runs/5", "repos/octo/app/actions/runs/5/jobs?per_page=100"]);
-  expect(started.data.releases).toMatchObject([
-    { id: 5, state: "running", jobs: [{ id: 51, state: "running" }] },
-    { id: 4, state: "passed" },
-  ]);
-
-  // CI's run is known by its path to be no release: nothing is planned for it.
-  const ci = { kind: "workflow_run", repo: "octo/app", sha: "main1", run: 7, path: ".github/workflows/ci.yml" };
-  expect(planFor([ci], started.data, new Set(), releasePaths)).toEqual(new Map());
-  // Its job's event doesn't say, so the run is asked, and that is all.
-  routes["repos/octo/app/actions/runs/7"] = run("octo/app", 7, { path: ".github/workflows/ci.yml" });
-  const job7 = await changed(
-    routes,
-    [{ kind: "workflow_job", repo: "octo/app", sha: "main1", run: 7 }],
-    started.data,
-    releasePaths,
-  );
-  expect(job7.calls).toEqual(["repos/octo/app/actions/runs/7"]);
-  expect(job7.data.releases).toEqual(started.data.releases);
-
-  // Finished, it is the workflow's last finished run, and shows without its jobs.
-  routes["repos/octo/app/actions/runs/5"] = run("octo/app", 5, { path: release });
-  const finished = await changed(
-    routes,
-    [{ kind: "workflow_run", repo: "octo/app", action: "completed", sha: "main1", run: 5, path: release }],
-    started.data,
-    releasePaths,
-  );
-  expect(finished.calls).toEqual(["repos/octo/app/actions/runs/5"]);
-  expect(finished.data.releases).toMatchObject([{ id: 5, state: "passed", jobs: [] }]);
-  expect(finished.data.releases).toHaveLength(1);
-});
-
-test("while a project's release workflows aren't known, a run's event reads all its release runs", async () => {
-  const { routes, before } = await everything();
-  expect(before.releases).toMatchObject([{ id: 4, state: "passed" }]);
-  withWorkflow(routes, "octo/app", { id: 6, name: "CI" }, [{ id: 7 }]);
-  (routes["repos/octo/app/actions/workflows/3/runs"] as { workflow_runs: unknown[] }).workflow_runs.unshift(
-    run("octo/app", 5, { status: "in_progress", conclusion: null }),
-  );
-  routes["repos/octo/app/actions/runs/5/jobs"] = {
-    total_count: 1,
-    jobs: [job(51, { status: "in_progress", conclusion: null, completed_at: null })],
-  };
-  const { data, calls } = await changed(
-    routes,
-    [
-      { kind: "workflow_run", repo: "octo/app", action: "in_progress", sha: "main1", run: 5 },
-      { kind: "workflow_job", repo: "octo/app", action: "in_progress", sha: "main1", run: 5 },
-    ],
-    before,
-  );
-  // Not the jobs of the run that finished.
-  expect(calls).toEqual([
-    "repos/octo/app/actions/runs/5/jobs?per_page=100",
-    "repos/octo/app/actions/workflows/3/runs?per_page=5",
-    "repos/octo/app/actions/workflows?per_page=100",
-    "repos/octo/app/contents/.github/workflows",
-  ]);
-  expect(data.releases).toMatchObject([
-    { id: 5, state: "running", jobs: [{ id: 51, state: "running" }] },
-    { id: 4, state: "passed" },
-  ]);
-  expect(data.pulls).toEqual(before.pulls);
-});
-
 test("a workflow's run on a pull request reads that pull request too", async () => {
   const { routes, before } = await everything();
   const { calls } = await changed(routes, [{ kind: "workflow_run", repo: "octo/lib", sha: "sha5" }], before);
-  expect(calls).toEqual(["repos/octo/lib/actions/workflows?per_page=100", ...pullCalls("octo/lib", 5)]);
+  expect(calls).toEqual(pullCalls("octo/lib", 5));
 });
 
 test("a release reads the repository's latest release", async () => {
@@ -864,7 +510,6 @@ test("a part that can't be read again stays as it was, and is a problem", async 
   const { routes, before } = await everything();
   routes["repos/octo/app/pulls/1"] = () => new Response(null, { status: 502 });
   routes["repos/octo/lib/releases/latest"] = () => Response.json({ message: "no" }, { status: 403 });
-  routes["repos/octo/app/actions/runs/4/jobs"] = { total_count: 0, jobs: [] };
   const first = await changed(
     routes,
     [
@@ -874,9 +519,8 @@ test("a part that can't be read again stays as it was, and is a problem", async 
     before,
   );
   expect(first.problem).toBe("Couldn't read everything from octo/app.");
-  // Neither pull request is taken from a read that got only one of them; the release runs were read.
+  // Neither pull request is taken from a read that got only one of them.
   expect(first.data.pulls).toEqual(before.pulls);
-  expect(first.data.releases).toMatchObject([{ id: 4, jobs: [] }]);
 
   const second = await changed(
     routes,
@@ -901,27 +545,4 @@ test.each([
   );
   expect(error).toBeInstanceOf(GitHubError);
   expect(error).toMatchObject({ status });
-});
-
-test("a release run's tag is the tag it ran on, or the version its own title names", () => {
-  // Started by pushing a tag, or by publishing a release: the title is the commit's subject.
-  expect(releaseTag({ event: "push", head_branch: "v1.2.3", display_title: "Fix the thing (#7)" })).toBe("v1.2.3");
-  expect(releaseTag({ event: "release", head_branch: "2.0.0-rc.1", display_title: "Release" })).toBe("2.0.0-rc.1");
-  // Started by hand from main, with a run-name.
-  expect(releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Promote v1.12.3" })).toBe(
-    "v1.12.3",
-  );
-  expect(
-    releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Deploy 3.0.0-rc.3 to dev" }),
-  ).toBe("3.0.0-rc.3");
-  // A run that makes its tag as it goes doesn't say which.
-  expect(releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Release" })).toBeUndefined();
-  // A pushed commit's subject can name any version.
-  expect(
-    releaseTag({ event: "push", head_branch: "main", display_title: "Bump vite from 8.3.6 to 8.3.7" }),
-  ).toBeUndefined();
-  expect(releaseTag({ event: "workflow_dispatch", head_branch: "main", display_title: "Nightly 2026.11.11" })).toBe(
-    "2026.11.11",
-  );
-  expect(releaseTag({ event: "schedule", head_branch: "main" })).toBeUndefined();
 });
