@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/pr
 import { afterEach, expect, test, vi } from "vitest";
 import type { ChangedFile } from "../model.ts";
 import { ActionsContext } from "./actions.tsx";
-import { PullReview, usablePatch, wrapsByDefault } from "./PullReview.tsx";
+import { PullReview, treeOrder, usablePatch, wrapsByDefault } from "./PullReview.tsx";
 import { pull } from "./testing.ts";
 
 afterEach(cleanup);
@@ -82,12 +82,13 @@ test("filters the compact file tree without changing the selected diff", async (
   await screen.findByRole("button", { name: /example.ts/ });
   expect(screen.getByText("nested/folder")).toBeTruthy();
   const search = screen.getByRole("searchbox", { name: "Filter changed files" });
-  fireEvent.input(search, { target: { value: "OTHER" } });
-  expect(screen.queryByRole("button", { name: /example.ts/ })).toBeNull();
-  expect(screen.getByRole("button", { name: /other.ts/ })).toBeTruthy();
+  // The nested file is the tree's top file, so it is the one open; filtering it out leaves it open.
+  fireEvent.input(search, { target: { value: "EXAMPLE" } });
+  expect(screen.queryByRole("button", { name: /other.ts/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /example.ts/ })).toBeTruthy();
   expect(screen.getByRole("region", { name: /Before code/ })).toBeTruthy();
   expect(screen.getByRole("region", { name: /After code/ })).toBeTruthy();
-  expect(document.querySelector(".review-file-title")?.textContent).toContain("src/example.ts");
+  expect(document.querySelector(".review-file-title")?.textContent).toContain("src/nested/folder/other.ts");
   fireEvent.input(search, { target: { value: "no matches" } });
   expect(screen.getByText("No matching files.")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
@@ -278,4 +279,26 @@ test("resizes the two sides of a split diff, remembers the share and resets on a
   fireEvent.click(screen.getByRole("button", { name: "Unified" }));
   expect(screen.queryByRole("separator", { name: "Resize before and after" })).toBeNull();
   localStorage.clear();
+});
+
+test("orders files as the tree shows them, folders first, so the top file opens first", async () => {
+  const paths = ["README.md", "web/b.ts", "src/x.ts", "web/a/c.ts", "package.json"];
+  const files = paths.map((path) => ({ ...file, path }));
+  expect(treeOrder(files).map((item) => item.path)).toEqual([
+    "web/a/c.ts",
+    "web/b.ts",
+    "src/x.ts",
+    "README.md",
+    "package.json",
+  ]);
+  const initial = pull();
+  render(
+    <ActionsContext.Provider value={{ files: async () => ({ files, truncated: false }) }}>
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await screen.findByText("1 of 5 files");
+  expect(document.querySelector('.review-tree [aria-current="true"]')?.getAttribute("title")).toBe("web/a/c.ts");
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  expect(document.querySelector('.review-tree [aria-current="true"]')?.getAttribute("title")).toBe("web/b.ts");
 });

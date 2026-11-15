@@ -1,5 +1,5 @@
 import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui-slim.js";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { DIFF_FONT_SIZES, type DiffFontSize, rememberDiffFontSize, rememberedDiffFontSize } from "../diff_font.ts";
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
@@ -151,6 +151,23 @@ function Chevron() {
       <path d="m6 3.5 4.5 4.5L6 12.5" />
     </svg>
   );
+}
+
+/** The files in the order the tree shows them: each folder's files (folders first, by first appearance), then the
+    files beside them. The tree's top file opens first, and Previous and Next walk the tree from top to bottom. */
+export function treeOrder(files: ChangedFile[], prefix = ""): ChangedFile[] {
+  const folders = new Map<string, ChangedFile[]>();
+  const leaves: ChangedFile[] = [];
+  for (const file of files) {
+    const relative = file.path.slice(prefix.length);
+    const slash = relative.indexOf("/");
+    if (slash < 0) leaves.push(file);
+    else {
+      const folder = relative.slice(0, slash + 1);
+      folders.set(folder, [...(folders.get(folder) ?? []), file]);
+    }
+  }
+  return [...[...folders].flatMap(([folder, group]) => treeOrder(group, `${prefix}${folder}`)), ...leaves];
 }
 
 function FileTree({
@@ -392,13 +409,17 @@ export function PullReview({
   const [autoMerge, setAutoMerge] = useState<boolean>();
   const action = useAction();
   const key = `${current.repo}#${current.number}`;
-  const index = Math.max(0, files?.files.findIndex((f) => f.path === paths[key]) ?? 0);
-  const file = files?.files[index];
+  const ordered = useMemo(() => (files ? treeOrder(files.files) : []), [files]);
+  const index = Math.max(
+    0,
+    ordered.findIndex((f) => f.path === paths[key]),
+  );
+  const file = ordered[index];
   const wrapKey = `${key}:${file?.path}`;
   const wrap = wrapping[wrapKey] ?? wrapsByDefault(file?.path ?? "");
   const prIndex = pulls.findIndex((p) => p.repo === current.repo && p.number === current.number);
   function moveFile(delta: number) {
-    const next = files?.files[index + delta];
+    const next = ordered[index + delta];
     if (next) setPaths((previous) => ({ ...previous, [key]: next.path }));
   }
   useEffect(() => {
