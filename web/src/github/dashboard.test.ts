@@ -70,11 +70,7 @@ async function pass(ms: number): Promise<void> {
   await settle();
 }
 
-const pullCalls = (number: number) => [
-  `repos/octo/app/pulls/${number}`,
-  `repos/octo/app/commits/sha${number}/check-runs?filter=latest&per_page=100`,
-  `repos/octo/app/commits/sha${number}/statuses?per_page=100`,
-];
+const pullCalls = (number: number) => [`graphql octo/app#${number}`];
 
 /** An answer that waits to be let go, to have a read under way for as long as a test wants. */
 function held(answer: unknown): { route: () => Promise<Response>; release: () => void } {
@@ -389,7 +385,7 @@ test("a change is read a second after it came, and only what it names", async ()
   expect(states).toMatchObject([{ status: "ready", readAt: NOW + CHANGE_WAIT_MS, refreshing: false, live: true }]);
 
   await pass(60_000);
-  expect(calls).toHaveLength(3);
+  expect(calls).toEqual(pullCalls(1));
   dashboard.stop();
 });
 
@@ -435,9 +431,9 @@ test("changes that keep coming are read no later than five seconds after the fir
   // The next burst counts from its own first change.
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
   await pass(CHANGE_WAIT_MS - 1);
-  expect(calls).toHaveLength(3);
+  expect(calls).toEqual(pullCalls(1));
   await pass(1);
-  expect(calls).toHaveLength(6);
+  expect(calls).toEqual([...pullCalls(1), ...pullCalls(1)]);
   dashboard.stop();
 });
 
@@ -449,19 +445,19 @@ test("changes that arrive during a read of changes are read once more after it",
   routes["repos/octo/app/pulls/1"] = hold.route;
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
   await pass(CHANGE_WAIT_MS);
-  expect(calls).toEqual(["repos/octo/app/pulls/1"]);
+  expect(calls).toEqual(pullCalls(1));
 
   routes["repos/octo/app/pulls/1"] = answer;
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
   stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
   await pass(CHANGE_MAX_WAIT_MS);
-  expect(calls).toEqual(["repos/octo/app/pulls/1"]);
+  expect(calls).toEqual(pullCalls(1));
 
   hold.release();
   await settle();
   expect(calls).toEqual([...pullCalls(1), ...pullCalls(1)]);
   await pass(60_000);
-  expect(calls).toHaveLength(6);
+  expect(calls).toEqual([...pullCalls(1), ...pullCalls(1)]);
   dashboard.stop();
 });
 
@@ -481,9 +477,9 @@ test("a change that arrives during a read of everything is read after it", async
   hold.release();
   await settle();
   expect(reads()).toBe(1);
-  expect(calls.slice(-3)).toEqual(pullCalls(2));
+  expect(calls.slice(-pullCalls(2).length)).toEqual(pullCalls(2));
   // Once: the read of everything is a query of its own.
-  expect(calls.filter((call) => call === "repos/octo/app/pulls/2")).toHaveLength(1);
+  expect(calls.filter((call) => pullCalls(2).includes(call))).toEqual(pullCalls(2));
   dashboard.stop();
 });
 
@@ -494,7 +490,7 @@ test("a read of everything takes the changes that were waiting with it", async (
   await dashboard.refresh();
   await pass(CHANGE_MAX_WAIT_MS);
   expect(reads()).toBe(1);
-  expect(calls.filter((call) => call === "repos/octo/app/pulls/1")).toEqual([]);
+  expect(calls.filter((call) => pullCalls(1).includes(call))).toEqual([]);
   dashboard.stop();
 });
 
@@ -512,7 +508,7 @@ test("a refresh during a read of changes reads everything after it", async () =>
   hold.release();
   await refreshed;
   expect(reads()).toBe(1);
-  expect(calls.slice(0, 3)).toEqual(pullCalls(1));
+  expect(calls.slice(0, pullCalls(1).length)).toEqual(pullCalls(1));
   expect(dashboard.state()).toMatchObject({ status: "ready", refreshing: false });
   dashboard.stop();
 });
@@ -732,7 +728,7 @@ test("a pull request whose merge state GitHub hasn't worked out is asked about a
   for (let second = 0; second < 30; second++) {
     await pass(1000);
   }
-  expect(calls).toHaveLength(3 * SETTLE_TRIES);
+  expect(calls).toHaveLength(pullCalls(1).length * SETTLE_TRIES);
   dashboard.stop();
 });
 
@@ -935,18 +931,21 @@ test("the merge states the relay tells show on the pull requests still at that h
   dashboard.stop();
 });
 
+/** Whether a call reads pull requests: the list of them, or one by one. */
+const readsPull = (call: string) => call.includes("/pulls") || /^graphql \S+#\d+$/.test(call);
+
 test("with the relay reading GitHub as the app, a push reads no pull request; without, it reads every one", async () => {
   const { dashboard, stream, calls } = await setUpLive(appWithPulls());
   stream.change({ kind: "push", repo: "octo/app", sha: "main1" });
   await pass(CHANGE_WAIT_MS);
-  expect(calls.filter((call) => call.includes("/pulls"))).not.toEqual([]);
+  expect(calls.filter((call) => readsPull(call))).not.toEqual([]);
 
   calls.length = 0;
   stream.emit("releases", snapshot());
   stream.change({ kind: "push", repo: "octo/app", sha: "main2" });
   await pass(CHANGE_WAIT_MS);
   expect(calls).toContain("repos/octo/app/releases/latest");
-  expect(calls.filter((call) => call.includes("/pulls"))).toEqual([]);
+  expect(calls.filter((call) => readsPull(call))).toEqual([]);
   dashboard.stop();
 });
 

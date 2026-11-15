@@ -6,7 +6,7 @@ import { createApi, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 import { readEverything } from "./graphql.ts";
 import { checks, mergeMethod, type Plan, planFor, readChanged } from "./read.ts";
-import { account, fakeGitHub, type Routes, repo, withPull } from "./testing.ts";
+import { account, answerQuery, fakeGitHub, type Routes, repo, withPull } from "./testing.ts";
 
 function read(routes: Record<string, unknown>, previous?: DashboardData) {
   const github = fakeGitHub(routes);
@@ -369,11 +369,7 @@ async function changed(routes: Routes, changes: Change[], before: DashboardData)
   return { ...result, calls: github.calls.sort() };
 }
 
-const pullCalls = (repo: string, number: number) => [
-  `repos/${repo}/commits/sha${number}/check-runs?filter=latest&per_page=100`,
-  `repos/${repo}/commits/sha${number}/statuses?per_page=100`,
-  `repos/${repo}/pulls/${number}`,
-];
+const pullCalls = (repo: string, number: number) => [`graphql ${repo}#${number}`];
 
 test("a check on a pull request reads that pull request and nothing else", async () => {
   const { routes, before } = await everything();
@@ -395,6 +391,29 @@ test("a check on a pull request reads that pull request and nothing else", async
   expect(data.pulls[2]).toBe(before.pulls[2]);
   expect(data.projects).toEqual(before.projects);
   expect(data.releases).toEqual(before.releases);
+});
+
+test("a pull request with more checks than one query's answer holds is read through the REST API", async () => {
+  const { routes, before } = await everything();
+  routes["repos/octo/app/commits/sha2/check-runs"] = {
+    total_count: 1,
+    check_runs: [{ name: "all of them", status: "completed", conclusion: "success", html_url: null }],
+  };
+  routes["POST graphql"] = async (_path: string, body: { query: string }) => {
+    const answer = await (await answerQuery(routes, body.query)).json();
+    answer.data.p.pullRequest.statusCheckRollup.contexts = { pageInfo: { hasNextPage: true }, nodes: [] };
+    return Response.json(answer);
+  };
+  const { data, calls } = await changed(routes, [{ kind: "check_run", repo: "octo/app", sha: "sha2" }], before);
+  expect(data.pulls[1]?.checks).toEqual([{ name: "all of them", state: "passed", url: undefined }]);
+  expect(calls).toEqual(
+    [
+      ...pullCalls("octo/app", 2),
+      "repos/octo/app/commits/sha2/check-runs?filter=latest&per_page=100",
+      "repos/octo/app/commits/sha2/statuses?per_page=100",
+      "repos/octo/app/pulls/2",
+    ].sort(),
+  );
 });
 
 test("a check on a commit that is no pull request's head reads nothing", async () => {
@@ -429,11 +448,11 @@ test("pull requests read by number are changed, added at the front, or gone", as
     ["octo/lib", 5],
   ]);
   expect(data.pulls[2]?.title).toBe("Renamed");
-  // A closed one's checks aren't asked for, and the list of open ones isn't either.
+  // One query each, and the list of open ones isn't asked for.
   expect(calls).toEqual(
     [
-      "repos/octo/app/pulls/1",
-      "repos/octo/app/pulls/10",
+      ...pullCalls("octo/app", 1),
+      ...pullCalls("octo/app", 10),
       ...pullCalls("octo/app", 2),
       ...pullCalls("octo/app", 8),
       ...pullCalls("octo/app", 9),

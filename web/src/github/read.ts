@@ -402,8 +402,91 @@ async function somePullRequests(
   return [...added, ...kept].filter((pull) => pull !== undefined);
 }
 
-/** One pull request with its checks, as it is now; undefined if it is closed or gone. */
+// How many checks of a pull request one GraphQL answer has. One with more is read through the REST API.
+export const CHECKS_PER_PULL = 100;
+
+// The parts of a pull request in GitHub's GraphQL answers that are used, for a read of everything (graphql.ts) and
+// of one pull request alike.
+type GqlContext =
+  | {
+      __typename: "CheckRun";
+      databaseId: number | null;
+      name: string;
+      status: string;
+      conclusion: string | null;
+      permalink: string | null;
+    }
+  | { __typename: "StatusContext"; context: string; state: string; targetUrl: string | null };
+type GqlActor = { __typename: string; login: string; avatarUrl?: string } | null;
+export type GqlPull = {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  isDraft: boolean;
+  headRefName: string;
+  baseRefName: string;
+  headRefOid: string;
+  createdAt: string;
+  updatedAt: string;
+  mergeable: string;
+  mergeStateStatus: string;
+  autoMergeRequest: object | null;
+  author: GqlActor;
+  statusCheckRollup: { contexts: { pageInfo: { hasNextPage: boolean }; nodes: (GqlContext | null)[] } } | null;
+};
+
+/** What a GraphQL query asks of a pull request, as the fragment `Pull`. */
+export const PULL = `fragment Pull on PullRequest {
+  id number title url isDraft headRefName baseRefName headRefOid createdAt updatedAt
+  mergeable mergeStateStatus
+  autoMergeRequest { enabledAt }
+  author { __typename login avatarUrl }
+  statusCheckRollup { contexts(first: ${CHECKS_PER_PULL}) {
+    pageInfo { hasNextPage }
+    nodes {
+      __typename
+      ... on CheckRun { databaseId name status conclusion permalink }
+      ... on StatusContext { context state targetUrl }
+    }
+  } }
+}`;
+
+/**
+ * One pull request with its checks, as it is now; undefined if it is closed or gone. One GraphQL query, where the
+ * REST API takes three: the pull request's own page (the list doesn't say whether it can be merged), its head's check
+ * runs and its head's statuses. Only a pull request with more checks than fit into the answer is read that way.
+ */
 export async function pullRequest(api: Api, repo: string, number: number): Promise<PullRequest | undefined> {
+  const [owner = "", name = ""] = repo.split("/");
+  const query = `query {
+  p: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { pullRequest(number: ${number}) { state ...Pull } }
+}
+${PULL}`;
+  const { data, errors } = await api.query(query);
+  // GitHub answers NOT_FOUND for a pull request or repository that isn't there (any more), as the REST API's 404.
+  if (errors.some((error) => error?.type === "NOT_FOUND")) {
+    return undefined;
+  }
+  if (errors.length > 0) {
+    throw new GitHubError("graphql", 502, undefined);
+  }
+  const pull = (data.p as { pullRequest: (GqlPull & { state: string }) | null } | null)?.pullRequest;
+  if (pull?.state !== "OPEN") {
+    return undefined;
+  }
+  if (pull.statusCheckRollup?.contexts.pageInfo.hasNextPage) {
+    return pullRequestWithAllChecks(api, repo, number);
+  }
+  return pullFrom(repo, pull);
+}
+
+/** One pull request with every one of its checks, through the REST API; undefined if it is closed or gone. */
+export async function pullRequestWithAllChecks(
+  api: Api,
+  repo: string,
+  number: number,
+): Promise<PullRequest | undefined> {
   // The list doesn't say whether a pull request can be merged; only its own page does.
   const pull = await unlessGone(api.get<RawPull>(`repos/${repo}/pulls/${number}`));
   if (pull?.state !== "open") {
@@ -438,6 +521,62 @@ export function pullOf(repo: string, pull: RawPull, checkRuns: RawCheckRun[], st
     checks: checks(checkRuns, statuses),
     nodeId: pull.node_id,
   };
+}
+
+/** A pull request as GitHub's GraphQL API gives it, in the model's words: put into the REST API's shapes first. */
+export function pullFrom(repo: string, pull: GqlPull): PullRequest {
+  const raw: RawPull = {
+    number: pull.number,
+    state: "open",
+    title: pull.title,
+    html_url: pull.url,
+    user: pull.author && {
+      login: login(pull.author),
+      ...(pull.author.avatarUrl ? { avatar_url: pull.author.avatarUrl } : {}),
+    },
+    draft: pull.isDraft,
+    head: { ref: pull.headRefName, sha: pull.headRefOid },
+    base: { ref: pull.baseRefName },
+    created_at: pull.createdAt,
+    updated_at: pull.updatedAt,
+    // GitHub works mergeability out in the background; until then it is UNKNOWN.
+    mergeable: pull.mergeable === "MERGEABLE" ? true : pull.mergeable === "CONFLICTING" ? false : null,
+    mergeable_state: pull.mergeStateStatus.toLowerCase(),
+    auto_merge: pull.autoMergeRequest,
+    node_id: pull.id,
+  };
+  const checkRuns: RawCheckRun[] = [];
+  const statuses: RawStatus[] = [];
+  const contexts = pull.statusCheckRollup?.contexts.nodes ?? [];
+  // The newest check run first, as the REST API lists them, so that the checks keep their places whichever way
+  // they were read last.
+  const newestFirst = contexts
+    .filter((context) => context?.__typename === "CheckRun")
+    .sort((a, b) => (b.databaseId ?? 0) - (a.databaseId ?? 0));
+  for (const context of [...newestFirst, ...contexts.filter((context) => context?.__typename !== "CheckRun")]) {
+    if (context?.__typename === "CheckRun") {
+      checkRuns.push({
+        name: context.name,
+        status: context.status.toLowerCase(),
+        conclusion: lower(context.conclusion),
+        html_url: context.permalink,
+      });
+    } else if (context?.__typename === "StatusContext") {
+      // EXPECTED is a required status nobody has reported yet, which is as good as pending.
+      const state = context.state === "EXPECTED" ? "pending" : context.state.toLowerCase();
+      statuses.push({ context: context.context, state, target_url: context.targetUrl });
+    }
+  }
+  return pullOf(repo, raw, checkRuns, statuses);
+}
+
+function lower(word: string | null | undefined): string | null {
+  return word?.toLowerCase() ?? null;
+}
+
+/** GraphQL leaves the `[bot]` off an app's name, which the REST API and github.com have. */
+function login(actor: NonNullable<GqlActor>): string {
+  return actor.__typename === "Bot" ? `${actor.login}[bot]` : actor.login;
 }
 
 export function checks(checkRuns: RawCheckRun[], statuses: RawStatus[]): Check[] {

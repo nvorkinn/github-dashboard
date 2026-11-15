@@ -43,7 +43,7 @@ export type DashboardOptions = {
 /**
  * The dashboard's data. The projects and their pull requests are read from api.github.com as the signed-in user:
  * everything at the start and then every so often, through GraphQL (graphql.ts); in between, the relay's events say
- * what changed, and only that is read again, through the REST API (read.ts).
+ * what changed, and only that is read again (read.ts): a pull request with one GraphQL query of its own.
  *
  * The release runs aren't read at all: the relay keeps them and tells the page, all of them on connecting and each
  * one whole as it changes (releases.ts). The page shows what the relay last said, of the projects it shows. The one

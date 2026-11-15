@@ -1,7 +1,10 @@
 import type { Auth } from "../auth.ts";
 import type { Change, Connect, EventStream } from "./events.ts";
 
-/** What a fake GitHub answers for a path: JSON, or a function for anything else (an error, headers, a delay). */
+/**
+ * What a fake GitHub answers for a path: JSON, or a function for anything else (an error, headers, a delay), which is
+ * given the path and the request's body read as JSON.
+ */
 export type Routes = Record<string, unknown>;
 
 /** A request the fake GitHub was sent: its method, path, and body read as JSON. */
@@ -11,7 +14,7 @@ export type SentRequest = { method: string; path: string; body: unknown };
  * An `Auth` whose `github` answers from `routes`, keyed by the path as asked for (query included) or, failing that,
  * the path without its query; a write is keyed by its method and path, such as `PUT repos/o/r/pulls/1/merge`.
  * A GraphQL query (`POST graphql`) without a route of its own is answered from the REST routes, see `answerQuery`.
- * Anything else is a 404. `calls` are the paths asked for so far, `requests` everything about each, and `peak` the
+ * Anything else is a 404. `calls` are the paths asked for so far (see `callOf`), `requests` everything about each, and `peak` the
  * most requests that were under way at once.
  */
 export function fakeGitHub(routes: Routes): {
@@ -33,9 +36,10 @@ export function fakeGitHub(routes: Routes): {
     start: async () => {},
     signOut: async () => true,
     async github(path, init) {
-      calls.push(path);
       const method = init?.method ?? "GET";
-      requests.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push(callOf(path, body));
+      requests.push({ method, path, body });
       running++;
       peak = Math.max(peak, running);
       try {
@@ -52,13 +56,26 @@ export function fakeGitHub(routes: Routes): {
         }
         // A real answer takes a moment, during which other requests start.
         await new Promise((resolve) => setImmediate(resolve));
-        return typeof route === "function" ? await route(path) : Response.json(route);
+        return typeof route === "function" ? await route(path, body) : Response.json(route);
       } finally {
         running--;
       }
     },
   };
   return { auth, calls, requests, queries, peak: () => peak };
+}
+
+/**
+ * How `calls` names a request: by its path, except a GraphQL query of one pull request (read.ts), which is named
+ * after the pull request, such as `graphql octo/app#2`, so a test can tell which one was read.
+ */
+function callOf(path: string, body: unknown): string {
+  const query = (body as { query?: unknown } | undefined)?.query;
+  const one =
+    path === "graphql" && typeof query === "string"
+      ? /^\s*p\d*: repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ pullRequest\(number: (\d+)\)/m.exec(query)
+      : null;
+  return one ? `graphql ${one[1]}/${one[2]}#${one[3]}` : path;
 }
 
 /** Ends the answering of a query with an HTTP answer of its own, as GitHub does for what fails every call. */
@@ -80,7 +97,7 @@ const upper = (word: unknown) => (typeof word === "string" ? word.toUpperCase() 
  * query with that answer, and so does anything wrong with the list of installations; any other failure fails the
  * field of its repository.
  */
-async function answerQuery(routes: Routes, query: string): Promise<Response> {
+export async function answerQuery(routes: Routes, query: string): Promise<Response> {
   // biome-ignore lint/suspicious/noExplicitAny: answers shaped like GitHub's, as loosely typed as its JSON.
   type Json = any;
   /** A route's JSON; undefined for one that isn't there. */
@@ -144,9 +161,11 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
 
   async function pullOf(repo: string, number: number): Promise<Json> {
     const one = await get(`repos/${repo}/pulls/${number}`);
-    if (one?.state !== "open") {
-      return undefined;
-    }
+    return one?.state === "open" ? nodeOf(repo, one) : undefined;
+  }
+
+  /** A pull request as the fragment `Pull` has it, from the REST routes of it and its head's checks. */
+  async function nodeOf(repo: string, one: Json): Promise<Json> {
     const checkRuns = (await get(`repos/${repo}/commits/${one.head.sha}/check-runs`))?.check_runs ?? [];
     const seen = new Set<string>();
     const statuses = ((await get(`repos/${repo}/commits/${one.head.sha}/statuses`)) ?? []).filter(
@@ -243,6 +262,18 @@ async function answerQuery(routes: Routes, query: string): Promise<Response> {
       /^\s*(r\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ \.\.\.Pulls/gm,
     )) {
       await field(alias ?? "", () => details(`${owner}/${name}`));
+    }
+    for (const [, alias, owner, name, number] of query.matchAll(
+      /^\s*(p\d*): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ pullRequest\(number: (\d+)\)/gm,
+    )) {
+      await field(alias ?? "", async () => {
+        const one = await get(`repos/${owner}/${name}/pulls/${number}`);
+        if (one === undefined) {
+          errors.push({ type: "NOT_FOUND", path: [alias, "pullRequest"], message: "Could not resolve" });
+          return { pullRequest: null };
+        }
+        return { pullRequest: { state: upper(one.state), ...(await nodeOf(`${owner}/${name}`, one)) } };
+      });
     }
     for (const [, alias, owner, name, tag, branch] of query.matchAll(
       /^\s*(c\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ ref\(qualifiedName: "refs\/tags\/([^"]+)"\) \{ compare\(headRef: "([^"]+)"\)/gm,

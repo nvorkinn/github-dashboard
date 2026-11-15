@@ -113,8 +113,7 @@ function altered(routes: Routes, change: (data: Json, body: Json) => void) {
   const inner = fakeGitHub(routes);
   const outer = fakeGitHub({
     ...routes,
-    "POST graphql": async () => {
-      const query = outer.requests.at(-1)?.body as { query: string };
+    "POST graphql": async (_path: string, query: unknown) => {
       const response = await inner.auth.github("graphql", { method: "POST", body: JSON.stringify(query) });
       const body = await response.json();
       change(body.data, body);
