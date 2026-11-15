@@ -251,5 +251,31 @@ test("resizes the file tree from the divider, remembers the width and resets on 
   expect(body?.style.getPropertyValue("--tree-width")).toBe("");
   expect(localStorage.getItem("github-dashboard:review-tree-width")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
-  expect(screen.queryByRole("separator")).toBeNull();
+  expect(screen.queryByRole("separator", { name: "Resize changed files" })).toBeNull();
+});
+
+test("resizes the two sides of a split diff, remembers the share and resets on a double click", async () => {
+  localStorage.setItem("github-dashboard:review-split", "0.6");
+  const initial = pull();
+  render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [file], truncated: false }) }}>
+      <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  const divider = await screen.findByRole("separator", { name: "Resize before and after" });
+  const code = document.querySelector<HTMLElement>(".review-code");
+  expect(code?.style.getPropertyValue("--split")).toBe("60%");
+  expect(divider.getAttribute("aria-valuenow")).toBe("60");
+  fireEvent.keyDown(divider, { key: "ArrowLeft" });
+  expect(code?.style.getPropertyValue("--split")).toBe("58%");
+  expect(localStorage.getItem("github-dashboard:review-split")).toBe("0.58");
+  fireEvent.keyDown(divider, { key: "Home" });
+  expect(localStorage.getItem("github-dashboard:review-split")).toBe("0.15");
+  fireEvent.dblClick(divider);
+  expect(code?.style.getPropertyValue("--split")).toBe("");
+  expect(localStorage.getItem("github-dashboard:review-split")).toBeNull();
+  // A unified diff has no sides to resize.
+  fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+  expect(screen.queryByRole("separator", { name: "Resize before and after" })).toBeNull();
+  localStorage.clear();
 });
