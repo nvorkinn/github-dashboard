@@ -31,7 +31,7 @@ export type InstalledRepo = { repo: string; installation: number; defaultBranch:
  * Reads api.github.com as the GitHub App: as one of its installations, with that installation's token. Octokit
  * (`@octokit/auth-app`) makes the tokens from the app's ID and private key: it signs the app's own short-lived token,
  * trades it for an installation's, which lasts an hour, and keeps that in memory until shortly before it ends.
- * Everything here reads; the relay writes nothing to GitHub.
+ * Everything here reads, GraphQL queries included; the relay writes nothing to GitHub.
  */
 export type GitHubApp = {
   /** Every repository the app's installations reach, archived ones left out. */
@@ -40,7 +40,14 @@ export type GitHubApp = {
   get<T>(installation: number, path: string): Promise<T>;
   /** Every page of a list: an array, or the array under `key` of an object. */
   list<T>(installation: number, path: string, key?: string): Promise<T[]>;
+  /**
+   * One GraphQL query as the installation. What GitHub wouldn't say of single fields comes back in `errors`, beside
+   * the rest; an answer without data throws an `AppError`.
+   */
+  query(installation: number, query: string, variables?: Record<string, unknown>): Promise<GraphQLAnswer>;
 };
+
+export type GraphQLAnswer = { data: Record<string, unknown>; errors: { type?: string; path?: unknown[] }[] };
 
 export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fetch }): GitHubApp {
   const { config } = options;
@@ -76,7 +83,7 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
   const installationToken = (installation: number, fresh = false) =>
     token(auth({ type: "installation", installationId: installation, refresh: fresh }));
 
-  async function request(method: string, path: string, bearer: string): Promise<unknown> {
+  async function request(method: string, path: string, bearer: string, body?: unknown): Promise<unknown> {
     let response: Response;
     try {
       response = await fetcher(`${API}/${path}`, {
@@ -86,7 +93,9 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
           Authorization: `Bearer ${bearer}`,
           "X-GitHub-Api-Version": "2022-11-28",
           "User-Agent": "github-dashboard-relay",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (error) {
@@ -105,17 +114,19 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
     }
   }
 
-  async function get<T>(installation: number, path: string): Promise<T> {
+  async function asInstallation(installation: number, method: string, path: string, body?: unknown): Promise<unknown> {
     try {
-      return (await request("GET", path, await installationToken(installation))) as T;
+      return await request(method, path, await installationToken(installation), body);
     } catch (error) {
       if (!(error instanceof AppError) || error.status !== 401) {
         throw error;
       }
       // A token GitHub no longer takes, such as after the app was suspended and let back: once more with a new one.
-      return (await request("GET", path, await installationToken(installation, true))) as T;
+      return await request(method, path, await installationToken(installation, true), body);
     }
   }
+
+  const get = async <T>(installation: number, path: string) => (await asInstallation(installation, "GET", path)) as T;
 
   async function pages<T>(read: (path: string) => Promise<unknown>, path: string, key?: string): Promise<T[]> {
     const all: T[] = [];
@@ -136,6 +147,15 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
   return {
     get,
     list: (installation, path, key) => pages((one) => get(installation, one), path, key),
+
+    async query(installation, query, variables) {
+      const answer = await asInstallation(installation, "POST", "graphql", { query, variables: variables ?? {} });
+      if (!isRecord(answer) || !isRecord(answer.data)) {
+        throw new AppError(502, "no data");
+      }
+      const errors = Array.isArray(answer.errors) ? answer.errors.filter(isRecord) : [];
+      return { data: answer.data, errors: errors as GraphQLAnswer["errors"] };
+    },
 
     async repositories() {
       const installations = await pages<unknown>(

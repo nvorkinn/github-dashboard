@@ -282,6 +282,14 @@ once. A first visit asks in two rounds, and a read that finds a new project asks
 50 open pull requests in a project or 100 checks on a pull request don't fit into the answer and are read through
 the REST API.
 
+GitHub sends no webhook when a push to a pull request's base makes it conflict or fall behind, so after each push the
+relay, reading as the GitHub App, asks one GraphQL query for the merge state of every open pull request into the
+branch pushed to, and tells the open pages (`relay/src/merge_states.ts`). GitHub works mergeability out in the
+background, so the ones that come back unknown are asked about again 2, 4, 8 and 16 seconds later, five tries in
+all; what is still unknown then stays so on the page until the next push or the next read of everything. A push
+while that goes on starts it over, and nothing is asked while no page is open. Without the app's key (see "Release
+runs in the relay") the page reads every open pull request again after a push instead.
+
 Release runs aren't read by the page at all. The relay sends every one it knows of when the page connects to its
 event stream, and each run whole as it changes (see "Release runs in the relay"); the page shows what the relay last
 said, of the projects it shows. A run is on the page while it is going and for five minutes after it finished, then

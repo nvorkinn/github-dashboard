@@ -1,10 +1,11 @@
 import { expect, test } from "vitest";
+import { mergeState } from "../../../shared/pulls.ts";
 import { project, pull } from "../components/testing.ts";
 import type { DashboardData } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 import { readEverything } from "./graphql.ts";
-import { checks, mergeMethod, mergeState, type Plan, planFor, readChanged } from "./read.ts";
+import { checks, mergeMethod, type Plan, planFor, readChanged } from "./read.ts";
 import { account, fakeGitHub, type Routes, repo, withPull } from "./testing.ts";
 
 function read(routes: Record<string, unknown>, previous?: DashboardData) {
@@ -545,4 +546,11 @@ test.each([
   );
   expect(error).toBeInstanceOf(GitHubError);
   expect(error).toMatchObject({ status });
+});
+
+test("with the relay telling merge states, a push reads only the latest release, and no pull request", async () => {
+  const { before } = await everything();
+  expect(
+    planFor([{ kind: "push", repo: "octo/app", sha: "main1" }], before, new Set(), { mergeStatesFromRelay: true }),
+  ).toEqual(new Map([["octo/app", { pulls: new Set(), latestRelease: true }]]));
 });

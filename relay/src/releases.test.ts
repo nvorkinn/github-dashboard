@@ -180,3 +180,48 @@ test("a workflow marked as a release gets its notice whatever its name, and the 
   expect(logged).not.toContain("PRIVATE KEY");
   closing.abort();
 });
+
+test("a push tells the open pages, read as the app, how the pull requests into the branch can be merged", async () => {
+  const github = fakeGitHub();
+  const head = "b".repeat(40);
+  github.answers["/graphql"] = {
+    data: {
+      repository: {
+        pullRequests: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            {
+              number: 3,
+              state: "OPEN",
+              baseRefName: "main",
+              headRefOid: head,
+              mergeable: "CONFLICTING",
+              mergeStateStatus: "DIRTY",
+            },
+          ],
+        },
+      },
+    },
+  };
+  const closing = new AbortController();
+  const app = createApp({
+    staticRoot,
+    webhookSecret: SECRET,
+    githubApp,
+    fetch: github.fetcher,
+    closing: closing.signal,
+  });
+  await github.started();
+
+  const stream = await app.request("/api/events");
+  await post(app, "push", {
+    ref: "refs/heads/main",
+    after: "c".repeat(40),
+    repository: { full_name: REPO },
+    installation: { id: 1 },
+  });
+  await settle();
+  const merge = (await events(stream, 4)).find((event) => event.name === "merge");
+  expect(merge?.data).toEqual({ repo: REPO, base: "main", pulls: [{ number: 3, sha: head, mergeState: "conflicts" }] });
+  closing.abort();
+});

@@ -5,6 +5,8 @@ import { authRoutes } from "./auth.ts";
 import type { AppConfig, AuthConfig, TelegramConfig } from "./config.ts";
 import type { Hub } from "./events.ts";
 import { createHub, eventStream } from "./events.ts";
+import { createGitHubApp } from "./github_app.ts";
+import { createMergeStates } from "./merge_states.ts";
 import { createReleases, NOT_CONFIGURED } from "./releases.ts";
 import { createStatusCache } from "./status.ts";
 import { telegramNotifier } from "./telegram.ts";
@@ -19,10 +21,12 @@ const PING_MS = 20_000;
  * events.ts). It keeps no database, stores no user's token and remembers no events. What it holds on to, in memory
  * only: which Telegram notices it sent lately, so as not to send them twice (see telegram.ts); a minute of public
  * GitHub service status (see status.ts); and, given `githubApp`, the release workflows and their runs of the
- * repositories the GitHub App reaches, read as the app itself with a token that lasts an hour (see releases.ts).
+ * repositories the GitHub App reaches, read as the app itself with a token that lasts an hour (see releases.ts). As
+ * the app it also works out, after each push, whether the pull requests into the branch pushed to can still be
+ * merged, and tells the pages (see merge_states.ts).
  *
  * Without `auth` the sign-in endpoints answer 503, and without `webhookSecret` the webhook endpoint does. Without
- * `githubApp` the relay knows of no release runs, and tells the pages so. With
+ * `githubApp` the relay knows of no release runs, and tells the pages so; nor does it read merge states. With
  * `telegram`, webhooks that need attention are also sent to a Telegram chat while no page is open (see telegram.ts),
  * with a link to the page when `auth` gives its address. `fetch` is how the relay reaches GitHub and Telegram; tests
  * pass their own. `hub` carries the changes from the webhook endpoint to the event streams, `pingMs` is how often a
@@ -67,12 +71,20 @@ export function createApp(options: {
   app.get("/healthz", (c) => c.text("ok"));
 
   const fetcher = options.fetch ?? fetch;
-  const releases = options.githubApp
+  const githubApp = options.githubApp ? createGitHubApp({ config: options.githubApp, fetch: fetcher }) : undefined;
+  const releases = githubApp
     ? createReleases({
-        config: options.githubApp,
-        fetch: fetcher,
-        onRun: (run) => hub.release({ name: "run", data: run }),
-        onSnapshot: (snapshot) => hub.release({ name: "releases", data: snapshot }),
+        app: githubApp,
+        onRun: (run) => hub.tell({ name: "run", data: run }),
+        onSnapshot: (snapshot) => hub.tell({ name: "releases", data: snapshot }),
+        closing: options.closing,
+      })
+    : undefined;
+  const mergeStates = githubApp
+    ? createMergeStates({
+        app: githubApp,
+        onUpdate: (update) => hub.tell({ name: "merge", data: update }),
+        listening: () => hub.listeners() > 0,
         closing: options.closing,
       })
     : undefined;
@@ -87,6 +99,7 @@ export function createApp(options: {
     : undefined;
   const onWebhook: OnWebhook = (kind, payload, delivery) => {
     releases?.onWebhook(kind, payload);
+    mergeStates?.onWebhook(kind, payload);
     return telegram?.(kind, payload, delivery);
   };
 

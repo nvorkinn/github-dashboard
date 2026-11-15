@@ -277,3 +277,33 @@ test.each([
   expect(notices).toEqual([]);
   events.stop();
 });
+
+test("merge states from the relay are passed on, leaving out a pull request not in order", () => {
+  const fake = fakeStreams();
+  const updates: unknown[] = [];
+  const events = createEvents({
+    connect: fake.connect,
+    onLive: () => {},
+    onChange: () => {},
+    onMerge: (update) => updates.push(update),
+  });
+  events.start();
+  fake.last().emit(
+    "merge",
+    JSON.stringify({
+      repo: "octo/app",
+      base: "main",
+      pulls: [
+        { number: 1, sha: "abc", mergeState: "conflicts" },
+        { number: 2, sha: "def", mergeState: "mergeable" },
+        { number: "3", sha: "ghi", mergeState: "clean" },
+        null,
+      ],
+    }),
+  );
+  fake.last().emit("merge", JSON.stringify({ repo: "octo/app", pulls: [] }));
+  expect(updates).toEqual([
+    { repo: "octo/app", base: "main", pulls: [{ number: 1, sha: "abc", mergeState: "conflicts" }] },
+  ]);
+  events.stop();
+});
