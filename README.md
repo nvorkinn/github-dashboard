@@ -266,8 +266,8 @@ permission beyond the ones it has for the page (Actions, Contents, Deployments a
 The projects and their pull requests are read through GitHub's GraphQL API (`web/src/github/graphql.ts`), in a
 handful of requests sent side by side: at the start, on **Refresh**, every minute while the relay's events don't
 arrive, and every five minutes while they do. In between, an event from the relay reads only the pull request it
-names, through the REST API (`web/src/github/read.ts`). Both end in the same code, so a pull request reads the same
-either way.
+names (`web/src/github/read.ts`), with one GraphQL query of that pull request and its checks. Both end in the same
+code, so a pull request reads the same either way.
 
 A read asks for every repository the signed-in user reaches (what its row shows), and for the pull requests and
 checks of the projects that aren't hidden, with what each default branch has that its latest release hasn't. GitHub

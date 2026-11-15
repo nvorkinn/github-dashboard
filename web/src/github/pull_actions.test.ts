@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { fakeDashboard, project, pull, ready } from "../components/testing.ts";
 import type { MergeMethod, PullRequest } from "../model.ts";
 import { ActionError, AUTO_MERGE_OFF, createPullActions, DRAFT_REFUSED } from "./pull_actions.ts";
-import { fakeGitHub, type Routes, withPull } from "./testing.ts";
+import { answerQuery, fakeGitHub, type Routes, withPull } from "./testing.ts";
 
 const REPO = "octocat/weather-station";
 const PULL = `repos/${REPO}/pulls/1`;
@@ -22,7 +22,12 @@ const graphql = (errors?: string[]) => () =>
       : { data: { mutation: { clientMutationId: null } } },
   );
 
-const writes = (requests: { method: string }[]) => requests.filter((request) => request.method !== "GET");
+/** The requests that change something: not a GET, and not a GraphQL query, which is sent as a POST too. */
+const writes = (requests: { method: string; body: unknown }[]) =>
+  requests.filter(
+    (request) =>
+      request.method !== "GET" && !String((request.body as { query?: unknown } | undefined)?.query).startsWith("query"),
+  );
 
 test("turning auto-merge on asks GitHub's GraphQL API, with the pull request's id and the repository's method", async () => {
   const { actions, requests, dashboard } = setUp({ "POST graphql": graphql() }, { mergeMethod: "squash" });
@@ -95,8 +100,11 @@ test("GitHub refusing auto-merge says GitHub's reason", async () => {
 
 /** A GitHub where turning auto-merge on is refused, as the base branch requires nothing; the pull request's head is now `sha1`. */
 function cleanStatus(checkRuns: unknown[], pullFields: Record<string, unknown> = {}): Routes {
+  const refused = graphql(["Pull request Pull request is in clean status"]);
   const routes: Routes = {
-    "POST graphql": graphql(["Pull request Pull request is in clean status"]),
+    // The mutation is refused; a query, of the pull request as it is now, is answered from the routes below.
+    "POST graphql": (_path: string, body: { query: string }) =>
+      body.query.startsWith("query") ? answerQuery(routes, body.query) : refused(),
     [`PUT ${PULL}/merge`]: { sha: "merged", merged: true, message: "Pull Request successfully merged" },
     [`repos/${REPO}/pulls`]: [],
   };
@@ -107,16 +115,14 @@ function cleanStatus(checkRuns: unknown[], pullFields: Record<string, unknown> =
 const passedRun = { name: "test", status: "completed", conclusion: "success", html_url: null };
 
 test("when the base branch requires nothing, auto-merge merges now: at the head whose checks all passed", async () => {
-  const { actions, requests, dashboard } = setUp(cleanStatus([passedRun]), { mergeMethod: "rebase" });
+  const { actions, requests, calls, dashboard } = setUp(cleanStatus([passedRun]), { mergeMethod: "rebase" });
   // The page still shows an older head; the merge is of the one whose checks were just read.
   await expect(actions.setAutoMerge(pull({ sha: "old" }), true)).resolves.toEqual({ merged: true });
   expect(writes(requests)).toEqual([
     expect.objectContaining({ method: "POST", path: "graphql" }),
     { method: "PUT", path: `${PULL}/merge`, body: { merge_method: "rebase", sha: "sha1" } },
   ]);
-  expect(requests.map((request) => request.path)).toContain(
-    `repos/${REPO}/commits/sha1/check-runs?filter=latest&per_page=100`,
-  );
+  expect(calls).toContain(`graphql ${REPO}#1`);
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "push", repo: REPO });
 });
 
