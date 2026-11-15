@@ -4,6 +4,7 @@ import { DIFF_FONT_SIZES, type DiffFontSize, rememberDiffFontSize, rememberedDif
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
+import { clampSplitShare, rememberedSplitShare, rememberSplitShare } from "../split_share.ts";
 import { clampTreeWidth, MIN_TREE_WIDTH, rememberedTreeWidth, rememberTreeWidth } from "../tree_width.ts";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
@@ -297,6 +298,70 @@ function TreeDivider({
   );
 }
 
+/** The line between the two sides of a split diff. Drag it, or focus it and use the arrow keys, to give one side more room. */
+function SplitDivider({
+  share,
+  setShare,
+}: {
+  share: number | undefined;
+  setShare: (share: number | undefined) => void;
+}) {
+  const dragging = useRef(false);
+  const chosen = useRef<number | undefined>(undefined);
+  const choose = (divider: HTMLElement, clientX: number) => {
+    const area = divider.parentElement?.getBoundingClientRect();
+    if (!area?.width) return;
+    chosen.current = clampSplitShare((clientX - area.left) / area.width);
+    setShare(chosen.current);
+  };
+  const finish = () => {
+    if (dragging.current && chosen.current !== undefined) rememberSplitShare(chosen.current);
+    dragging.current = false;
+    chosen.current = undefined;
+  };
+  const percent = Math.round((share ?? 0.5) * 100);
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: an <hr> can't be focused or dragged; this is the ARIA window splitter.
+    <div
+      class="review-split-divider"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize before and after"
+      aria-valuenow={percent}
+      aria-valuemin={15}
+      aria-valuemax={85}
+      aria-valuetext={`Before takes ${percent} percent`}
+      tabIndex={0}
+      title="Drag to resize, double-click to reset"
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        dragging.current = true;
+      }}
+      onPointerMove={(event) => {
+        if (dragging.current) choose(event.currentTarget, event.clientX);
+      }}
+      onPointerUp={finish}
+      onPointerCancel={finish}
+      onDblClick={() => {
+        setShare(undefined);
+        rememberSplitShare(undefined);
+      }}
+      onKeyDown={(event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const from = share ?? 0.5;
+        const wanted = { ArrowLeft: from - 0.02, ArrowRight: from + 0.02, Home: 0, End: 1 }[event.key];
+        if (wanted === undefined) return;
+        event.preventDefault();
+        const next = clampSplitShare(wanted);
+        setShare(next);
+        rememberSplitShare(next);
+      }}
+    />
+  );
+}
+
 export function PullReview({
   initial,
   pulls,
@@ -320,6 +385,7 @@ export function PullReview({
   const [tree, setTree] = useState(true);
   const [fontSize, setFontSize] = useState<DiffFontSize>(rememberedDiffFontSize);
   const [treeWidth, setTreeWidth] = useState(rememberedTreeWidth);
+  const [splitShare, setSplitShare] = useState(rememberedSplitShare);
   const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
   // Auto-merge as last turned on or off here, until the review is read again.
@@ -593,7 +659,11 @@ export function PullReview({
           </nav>
         )}
         {tree && <TreeDivider width={treeWidth} setWidth={setTreeWidth} />}
-        <section class="review-code" aria-label="File diff">
+        <section
+          class="review-code"
+          aria-label="File diff"
+          style={split && splitShare !== undefined ? `--split: ${Math.round(splitShare * 1000) / 10}%` : undefined}
+        >
           <div class="review-toolbar">
             <div class="review-file-title">
               {file ? (
@@ -660,29 +730,32 @@ export function PullReview({
               {tree ? "Hide" : "Show"} files
             </button>
           </div>
-          <div class={`review-column-headings ${split ? "" : "review-unified-heading"}`}>
-            {split && (
+          <div class="review-split-area">
+            <div class={`review-column-headings ${split ? "" : "review-unified-heading"}`}>
+              {split && (
+                <span>
+                  − Before <span>({pull.base})</span>
+                </span>
+              )}
               <span>
-                − Before <span>({pull.base})</span>
+                + {split ? "After" : "Changes"} <span>({pull.head})</span>
               </span>
-            )}
-            <span>
-              + {split ? "After" : "Changes"} <span>({pull.head})</span>
-            </span>
+            </div>
+            <section class="review-code-scroll" key={`${key}:${file?.path}:${split}`} aria-label="Scrollable code diff">
+              {file ? (
+                <FileDiff file={file} split={split} wrap={wrap} fontSize={fontSize} />
+              ) : (
+                <p class="empty">
+                  {problem
+                    ? "Diff could not be loaded. Refresh to try again."
+                    : files
+                      ? "No changed files."
+                      : "Loading diff…"}
+                </p>
+              )}
+            </section>
+            {split && file && usablePatch(file) && <SplitDivider share={splitShare} setShare={setSplitShare} />}
           </div>
-          <section class="review-code-scroll" key={`${key}:${file?.path}:${split}`} aria-label="Scrollable code diff">
-            {file ? (
-              <FileDiff file={file} split={split} wrap={wrap} fontSize={fontSize} />
-            ) : (
-              <p class="empty">
-                {problem
-                  ? "Diff could not be loaded. Refresh to try again."
-                  : files
-                    ? "No changed files."
-                    : "Loading diff…"}
-              </p>
-            )}
-          </section>
         </section>
       </div>
     </dialog>
