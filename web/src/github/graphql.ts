@@ -19,17 +19,16 @@ import type { Auth } from "../auth.ts";
 import type { DashboardData, PullRequest, Unreleased } from "../model.ts";
 import { createApi, GitHubError, limiter, MAX_PARALLEL, type QueryAnswer, sendQuery } from "./api.ts";
 import {
+  type GqlPull,
   latestOf,
   of,
+  PULL,
   problemOf,
   project,
-  pullOf,
-  pullRequest,
+  pullFrom,
   pullRequests,
-  type RawCheckRun,
-  type RawPull,
+  pullRequestWithAllChecks,
   type RawRepo,
-  type RawStatus,
   type ReadResult,
   refused,
   settingsOf,
@@ -41,7 +40,6 @@ import { comparisonField, type GqlComparison, unreleasedFrom } from "./unrelease
 // the way a read of changes reads it.
 export const REPOS_PER_PAGE = 100;
 export const PULLS_PER_REPO = 50;
-export const CHECKS_PER_PULL = 100;
 // How many projects one request asks about. GitHub answers a query's fields one after another, each project taking
 // about a tenth of a second, so a read sends its requests side by side: a few in each is several times faster than
 // all in one.
@@ -82,34 +80,6 @@ type GqlRepo = {
   latestRelease: { tagName: string; url: string; publishedAt: string | null; createdAt: string } | null;
   defaultBranchRef: { name: string } | null;
 };
-type GqlContext =
-  | {
-      __typename: "CheckRun";
-      databaseId: number | null;
-      name: string;
-      status: string;
-      conclusion: string | null;
-      permalink: string | null;
-    }
-  | { __typename: "StatusContext"; context: string; state: string; targetUrl: string | null };
-type GqlActor = { __typename: string; login: string; avatarUrl?: string } | null;
-type GqlPull = {
-  id: string;
-  number: number;
-  title: string;
-  url: string;
-  isDraft: boolean;
-  headRefName: string;
-  baseRefName: string;
-  headRefOid: string;
-  createdAt: string;
-  updatedAt: string;
-  mergeable: string;
-  mergeStateStatus: string;
-  autoMergeRequest: object | null;
-  author: GqlActor;
-  statusCheckRollup: { contexts: { pageInfo: { hasNextPage: boolean }; nodes: (GqlContext | null)[] } } | null;
-};
 type GqlDetails = {
   pullRequests: { pageInfo: { hasNextPage: boolean }; nodes: (GqlPull | null)[] };
 };
@@ -124,20 +94,7 @@ const LISTED = `fragment Listed on Repository {
 const PULLS = `fragment Pulls on Repository {
   pullRequests(first: ${PULLS_PER_REPO}, states: OPEN, orderBy: {field: CREATED_AT, direction: DESC}) {
     pageInfo { hasNextPage }
-    nodes {
-      id number title url isDraft headRefName baseRefName headRefOid createdAt updatedAt
-      mergeable mergeStateStatus
-      autoMergeRequest { enabledAt }
-      author { __typename login avatarUrl }
-      statusCheckRollup { contexts(first: ${CHECKS_PER_PULL}) {
-        pageInfo { hasNextPage }
-        nodes {
-          __typename
-          ... on CheckRun { databaseId name status conclusion permalink }
-          ... on StatusContext { context state targetUrl }
-        }
-      } }
-    }
+    nodes { ...Pull }
   }
 }`;
 
@@ -181,7 +138,7 @@ export function queryFor(asked: Asked): string {
   asked.compares.forEach(({ repo, tag, branch }, index) => {
     fields.push(`c${index}: ${comparisonField(repo, tag, branch)}`);
   });
-  const fragments = [...(asked.list ? [LISTED] : []), ...(asked.repos.length > 0 ? [PULLS] : [])];
+  const fragments = [...(asked.list ? [LISTED] : []), ...(asked.repos.length > 0 ? [PULLS, PULL] : [])];
   return [`query {\n  ${fields.join("\n  ")}\n}`, ...fragments].join("\n");
 }
 
@@ -380,15 +337,6 @@ function queue<T>(key: (one: T) => string): { add(one: T): void; take(): T[] } {
   };
 }
 
-function lower(word: string | null | undefined): string | null {
-  return word?.toLowerCase() ?? null;
-}
-
-/** GraphQL leaves the `[bot]` off an app's name, which the REST API and github.com have. */
-function login(actor: NonNullable<GqlActor>): string {
-  return actor.__typename === "Bot" ? `${actor.login}[bot]` : actor.login;
-}
-
 function rawRepo(repo: GqlRepo): RawRepo {
   return {
     full_name: repo.nameWithOwner,
@@ -405,7 +353,10 @@ function rawRepo(repo: GqlRepo): RawRepo {
   };
 }
 
-/** The project's open pull requests. What didn't fit into the answer is read the way a read of changes reads it. */
+/**
+ * The project's open pull requests. More than fit into the answer are read the way a read of changes reads them, and
+ * a pull request with more checks than fit through the REST API.
+ */
 async function pullsOf(api: ReturnType<typeof createApi>, repo: string, answer: GqlDetails): Promise<PullRequest[]> {
   if (answer.pullRequests.pageInfo.hasNextPage) {
     return pullRequests(api, repo);
@@ -415,55 +366,9 @@ async function pullsOf(api: ReturnType<typeof createApi>, repo: string, answer: 
       .filter((pull) => pull !== null)
       .map((pull) =>
         pull.statusCheckRollup?.contexts.pageInfo.hasNextPage
-          ? pullRequest(api, repo, pull.number)
+          ? pullRequestWithAllChecks(api, repo, pull.number)
           : pullFrom(repo, pull),
       ),
   );
   return pulls.filter((pull) => pull !== undefined);
-}
-
-function pullFrom(repo: string, pull: GqlPull): PullRequest {
-  const raw: RawPull = {
-    number: pull.number,
-    state: "open",
-    title: pull.title,
-    html_url: pull.url,
-    user: pull.author && {
-      login: login(pull.author),
-      ...(pull.author.avatarUrl ? { avatar_url: pull.author.avatarUrl } : {}),
-    },
-    draft: pull.isDraft,
-    head: { ref: pull.headRefName, sha: pull.headRefOid },
-    base: { ref: pull.baseRefName },
-    created_at: pull.createdAt,
-    updated_at: pull.updatedAt,
-    // GitHub works mergeability out in the background; until then it is UNKNOWN.
-    mergeable: pull.mergeable === "MERGEABLE" ? true : pull.mergeable === "CONFLICTING" ? false : null,
-    mergeable_state: pull.mergeStateStatus.toLowerCase(),
-    auto_merge: pull.autoMergeRequest,
-    node_id: pull.id,
-  };
-  const checkRuns: RawCheckRun[] = [];
-  const statuses: RawStatus[] = [];
-  const contexts = pull.statusCheckRollup?.contexts.nodes ?? [];
-  // The newest check run first, as the REST API lists them, so that the checks keep their places whichever way
-  // they were read last.
-  const newestFirst = contexts
-    .filter((context) => context?.__typename === "CheckRun")
-    .sort((a, b) => (b.databaseId ?? 0) - (a.databaseId ?? 0));
-  for (const context of [...newestFirst, ...contexts.filter((context) => context?.__typename !== "CheckRun")]) {
-    if (context?.__typename === "CheckRun") {
-      checkRuns.push({
-        name: context.name,
-        status: context.status.toLowerCase(),
-        conclusion: lower(context.conclusion),
-        html_url: context.permalink,
-      });
-    } else if (context?.__typename === "StatusContext") {
-      // EXPECTED is a required status nobody has reported yet, which is as good as pending.
-      const state = context.state === "EXPECTED" ? "pending" : context.state.toLowerCase();
-      statuses.push({ context: context.context, state, target_url: context.targetUrl });
-    }
-  }
-  return pullOf(repo, raw, checkRuns, statuses);
 }
