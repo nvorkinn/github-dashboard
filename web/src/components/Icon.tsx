@@ -21,7 +21,8 @@ export type IconName =
   | "refresh"
   | "info"
   | "eye"
-  | "key";
+  | "key"
+  | "sidebar";
 
 const paths: Record<IconName, ComponentChildren> = {
   settings: (
@@ -132,6 +133,12 @@ const paths: Record<IconName, ComponentChildren> = {
     <>
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-4-4" />
+    </>
+  ),
+  sidebar: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
     </>
   ),
   workflow: (

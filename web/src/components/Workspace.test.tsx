@@ -241,3 +241,27 @@ test("handles no repositories and a removed selection without leaking stale cont
   expect(screen.getByText("Nothing running")).toBeTruthy();
   expect(screen.getByText("No repositories")).toBeTruthy();
 });
+
+test("folds the repository sidebar to a rail and remembers it across reloads", () => {
+  dashboard();
+  const sidebar = screen.getByRole("complementary", { name: "Repository navigation" });
+  const toggle = within(sidebar).getByRole("button", { name: "Collapse sidebar" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(toggle);
+  expect(sidebar.closest(".workspace")?.classList.contains("sidebar-collapsed")).toBe(true);
+  expect(localStorage.getItem("github-dashboard:sidebar")).toBe("collapsed");
+  // Repositories keep their names for screen readers and a tooltip, and still select.
+  const repo = within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", {
+    name: /home-ledger/,
+  });
+  expect(repo.getAttribute("title")).toBe("home-ledger");
+  expect(repo.textContent).toContain("HL");
+
+  cleanup();
+  dashboard();
+  const reloaded = screen.getByRole("button", { name: "Expand sidebar" });
+  expect(reloaded.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(reloaded);
+  expect(localStorage.getItem("github-dashboard:sidebar")).toBeNull();
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
