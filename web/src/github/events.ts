@@ -22,6 +22,7 @@ export type Change = {
   path?: string;
 };
 
+import { MERGE_STATES, type MergeState, type MergeUpdate } from "../../../shared/pulls.ts";
 import type { ReleaseRun, ReleasesSnapshot } from "../../../shared/runs.ts";
 import { NOTICE_TYPES, type Notice, type NoticeType } from "../model.ts";
 import { releaseRun, releasesSnapshot } from "./releases.ts";
@@ -47,6 +48,8 @@ export type EventsOptions = {
   onReleases?(snapshot: ReleasesSnapshot): void;
   /** One release run as it is now. */
   onRun?(run: ReleaseRun): void;
+  /** Some pull requests' merge states, which the relay worked out after a push to their base. */
+  onMerge?(update: MergeUpdate): void;
 };
 
 export type Events = {
@@ -126,6 +129,12 @@ export function createEvents(options: EventsOptions): Events {
       const run = stream === mine ? releaseRun(dataOf(event)) : undefined;
       if (run) {
         options.onRun?.(run);
+      }
+    });
+    mine.addEventListener("merge", (event) => {
+      const update = stream === mine ? mergeUpdate(dataOf(event)) : undefined;
+      if (update) {
+        options.onMerge?.(update);
       }
     });
     mine.addEventListener("error", () => {
@@ -230,4 +239,24 @@ function parse(event: Event): Change | undefined {
     ...(typeof run === "number" && Number.isInteger(run) ? { run } : {}),
     ...(typeof path === "string" ? { path } : {}),
   };
+}
+
+/** The merge states an event carries, or nothing if its data isn't that. A pull request not in order is left out. */
+export function mergeUpdate(data: Record<string, unknown> | undefined): MergeUpdate | undefined {
+  if (!data || typeof data.repo !== "string" || typeof data.base !== "string" || !Array.isArray(data.pulls)) {
+    return undefined;
+  }
+  const pulls: MergeUpdate["pulls"] = [];
+  for (const one of data.pulls) {
+    const { number, sha, mergeState } = (typeof one === "object" && one !== null ? one : {}) as Record<string, unknown>;
+    if (
+      typeof number === "number" &&
+      Number.isInteger(number) &&
+      typeof sha === "string" &&
+      (MERGE_STATES as readonly unknown[]).includes(mergeState)
+    ) {
+      pulls.push({ number, sha, mergeState: mergeState as MergeState });
+    }
+  }
+  return { repo: data.repo, base: data.base, pulls };
 }

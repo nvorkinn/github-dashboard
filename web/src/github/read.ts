@@ -1,3 +1,4 @@
+import { mergeState } from "../../../shared/pulls.ts";
 import { approval, checkState, type RawPendingDeployment } from "../../../shared/runs.ts";
 import type {
   Approval,
@@ -91,7 +92,8 @@ const SHOWN = new Set([
  * - `workflow_run`, `workflow_job`: the pull request it is about, with its checks. How a release run stands isn't
  *   read: the relay says (see dashboard.ts).
  * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged; and the
- *   latest release, as the default branch may have moved past it.
+ *   latest release, as the default branch may have moved past it. With `mergeStatesFromRelay` only the latest
+ *   release: the relay then tells the merge states itself (relay/src/merge_states.ts), so the page reads none.
  * - `release`: the repository's latest release.
  *
  * The pull request a change is about is the one it numbers, or else the ones whose head is its commit: none for a
@@ -103,7 +105,12 @@ const SHOWN = new Set([
  * read everything, and so does one of the kinds above that names no repository or one that isn't known. Any other
  * kind reads nothing.
  */
-export function planFor(changes: Change[], known: DashboardData, hidden: ReadonlySet<string> = new Set()): Plan {
+export function planFor(
+  changes: Change[],
+  known: DashboardData,
+  hidden: ReadonlySet<string> = new Set(),
+  options: { mergeStatesFromRelay?: boolean } = {},
+): Plan {
   const plan = new Map<string, RepoPlan>();
   for (const change of changes) {
     if (WHICH_PROJECTS.has(change.kind)) {
@@ -136,7 +143,10 @@ export function planFor(changes: Change[], known: DashboardData, hidden: Readonl
         repo.pulls = both(repo.pulls, pullsOf(change, known));
         break;
       case "push":
-        repo.pulls = "all";
+        // The relay, where it reads GitHub as the app, says itself what a moved base did to the pull requests.
+        if (!options.mergeStatesFromRelay) {
+          repo.pulls = "all";
+        }
         repo.latestRelease = true;
         break;
       case "release":
@@ -567,33 +577,6 @@ function lower(word: string | null | undefined): string | null {
 /** GraphQL leaves the `[bot]` off an app's name, which the REST API and github.com have. */
 function login(actor: NonNullable<GqlActor>): string {
   return actor.__typename === "Bot" ? `${actor.login}[bot]` : actor.login;
-}
-
-/**
- * GitHub's `mergeable_state` in the model's words. `has_hooks` is mergeable with pre-receive hooks to pass, and
- * `unstable` is mergeable with checks that failed but aren't required, so both are `clean`: the checks show the
- * failure themselves. A draft can't be merged until it is marked ready, so it is `blocked`.
- */
-export function mergeState(pull: { mergeable?: boolean | null; mergeable_state?: string }): PullRequest["mergeState"] {
-  // GitHub works mergeability out in the background; until then `mergeable` is null.
-  if (pull.mergeable == null) {
-    return "unknown";
-  }
-  switch (pull.mergeable_state) {
-    case "clean":
-    case "has_hooks":
-    case "unstable":
-      return "clean";
-    case "dirty":
-      return "conflicts";
-    case "behind":
-      return "behind";
-    case "blocked":
-    case "draft":
-      return "blocked";
-    default:
-      return "unknown";
-  }
 }
 
 export function checks(checkRuns: RawCheckRun[], statuses: RawStatus[]): Check[] {

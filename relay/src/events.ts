@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { MergeUpdate } from "../../shared/pulls.ts";
 import type { ReleaseRun, ReleasesSnapshot } from "../../shared/runs.ts";
 import type { PageNotice } from "./notices.ts";
 
@@ -25,10 +26,14 @@ export type Change = {
 };
 
 /**
- * What an open page is told of release runs, which the relay keeps itself (see releases.ts): one run as it is now,
- * or everything at once.
+ * What an open page is told of what the relay reads from GitHub itself: of release runs, which it keeps (see
+ * releases.ts), one run as it is now or everything at once; and pull requests' merge states after a push to their
+ * base (see merge_states.ts).
  */
-export type ReleaseEvent = { name: "run"; data: ReleaseRun } | { name: "releases"; data: ReleasesSnapshot };
+export type RelayEvent =
+  | { name: "run"; data: ReleaseRun }
+  | { name: "releases"; data: ReleasesSnapshot }
+  | { name: "merge"; data: MergeUpdate };
 
 /** Passes changes from the webhook endpoint to the event streams that are open at that moment. */
 export type Hub = {
@@ -39,16 +44,16 @@ export type Hub = {
    * change, with nobody listening; the Telegram notices cover that case.
    */
   announce(notice: PageNotice): void;
-  /** Hands a release run, or all of them, to everyone listening now. Dropped, like a change, with nobody listening. */
-  release(event: ReleaseEvent): void;
+  /** Hands what the relay read itself to everyone listening now. Dropped, like a change, with nobody listening. */
+  tell(event: RelayEvent): void;
   /**
-   * Starts listening, to changes and, given `onNotice` and `onRelease`, to notices and release runs. The function
+   * Starts listening, to changes and, given `onNotice` and `onTold`, to notices and what the relay read. The function
    * returned stops it; calling that twice does no harm.
    */
   subscribe(
     listener: (change: Change) => void,
     onNotice?: (notice: PageNotice) => void,
-    onRelease?: (event: ReleaseEvent) => void,
+    onTold?: (event: RelayEvent) => void,
   ): () => void;
   /** How many are listening now. */
   listeners(): number;
@@ -64,7 +69,7 @@ export function createHub(): Hub {
   const listeners = new Set<{
     listener: (change: Change) => void;
     onNotice?: ((notice: PageNotice) => void) | undefined;
-    onRelease?: ((event: ReleaseEvent) => void) | undefined;
+    onTold?: ((event: RelayEvent) => void) | undefined;
   }>();
   // A restart counts as everyone having just left: open pages connect again within seconds.
   let idleSince: number | undefined = Date.now();
@@ -87,17 +92,17 @@ export function createHub(): Hub {
         }
       }
     },
-    release(event) {
+    tell(event) {
       for (const entry of [...listeners]) {
         try {
-          entry.onRelease?.(event);
+          entry.onTold?.(event);
         } catch {
           // As for a change.
         }
       }
     },
-    subscribe(listener, onNotice, onRelease) {
-      const entry = { listener, onNotice, onRelease };
+    subscribe(listener, onNotice, onTold) {
+      const entry = { listener, onNotice, onTold };
       listeners.add(entry);
       idleSince = undefined;
       return () => {
@@ -122,7 +127,8 @@ const MAX_UNREAD = 256;
  * reads the state from api.github.com.
  *
  * Release runs are the exception, as the relay keeps them: given `releases`, the stream sends `releases` with all of
- * them right after `hello`, then `run` for each run that changes and `releases` again when more than one did.
+ * them right after `hello`, then `run` for each run that changes and `releases` again when more than one did. After a
+ * push, `merge` says how the pull requests into the branch pushed to can be merged (see merge_states.ts).
  *
  * The stream ends when the client goes away or `closing` fires, and then leaves no listener or timer behind.
  */

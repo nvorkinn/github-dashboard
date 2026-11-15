@@ -902,3 +902,87 @@ test("a waiting run whose approvals GitHub won't show the user keeps what the re
   await settle();
   expect(releases(dashboard)?.[0]?.approvals).toEqual(approvals);
 });
+
+const merge = (pulls: { number: number; sha: string; mergeState: string }[], base = "main") =>
+  JSON.stringify({ repo: "octo/app", base, pulls });
+
+function mergeStates(dashboard: { state(): DashboardState }) {
+  const state = dashboard.state();
+  return state.status === "ready" ? state.data.pulls.map((pull) => [pull.number, pull.mergeState]) : undefined;
+}
+
+test("the merge states the relay tells show on the pull requests still at that head and base, and nothing is read", async () => {
+  const { dashboard, stream, calls } = await setUpLive(appWithPulls());
+  stream.emit(
+    "merge",
+    merge([
+      { number: 1, sha: "sha1", mergeState: "conflicts" },
+      // Pushed to since: the relay's word is for a head the page no longer shows.
+      { number: 2, sha: "old", mergeState: "conflicts" },
+    ]),
+  );
+  stream.emit("merge", merge([{ number: 2, sha: "sha2", mergeState: "behind" }], "elsewhere"));
+  await pass(60_000);
+  expect(mergeStates(dashboard)).toEqual([
+    [1, "conflicts"],
+    [2, "clean"],
+  ]);
+  expect(calls).toEqual([]);
+  dashboard.stop();
+});
+
+/** Whether a call reads pull requests: the list of them, or one by one. */
+const readsPull = (call: string) => call.includes("/pulls") || /^graphql \S+#\d+$/.test(call);
+
+test("with the relay reading GitHub as the app, a push reads no pull request; without, it reads every one", async () => {
+  const { dashboard, stream, calls } = await setUpLive(appWithPulls());
+  stream.change({ kind: "push", repo: "octo/app", sha: "main1" });
+  await pass(CHANGE_WAIT_MS);
+  expect(calls.filter((call) => readsPull(call))).not.toEqual([]);
+
+  calls.length = 0;
+  stream.emit("releases", snapshot());
+  stream.change({ kind: "push", repo: "octo/app", sha: "main2" });
+  await pass(CHANGE_WAIT_MS);
+  expect(calls).toContain("repos/octo/app/releases/latest");
+  expect(calls.filter((call) => readsPull(call))).toEqual([]);
+  dashboard.stop();
+});
+
+test("a merge state the relay told is unknown isn't asked about by the page; the relay tried already", async () => {
+  const { dashboard, stream, calls } = await setUpLive(appWithPulls());
+  stream.emit("merge", merge([{ number: 1, sha: "sha1", mergeState: "unknown" }]));
+  // A read of something else doesn't start the page asking either.
+  stream.change({ kind: "pull_request", repo: "octo/app", pull: 2 });
+  for (let second = 0; second < 30; second++) {
+    await pass(1000);
+  }
+  expect(calls).toEqual(pullCalls(2));
+  expect(mergeStates(dashboard)).toEqual([
+    [1, "unknown"],
+    [2, "clean"],
+  ]);
+  dashboard.stop();
+});
+
+test("a merge state the relay tells during a read of changes isn't undone by it", async () => {
+  const routes = appWithPulls();
+  const { dashboard, stream } = await setUpLive(routes);
+  const hold = held(routes["repos/octo/app/pulls/1"]);
+  routes["repos/octo/app/pulls/1"] = hold.route;
+  stream.change({ kind: "check_run", repo: "octo/app", sha: "sha1" });
+  await pass(CHANGE_WAIT_MS);
+
+  stream.emit("merge", merge([{ number: 2, sha: "sha2", mergeState: "conflicts" }]));
+  expect(mergeStates(dashboard)).toEqual([
+    [1, "clean"],
+    [2, "conflicts"],
+  ]);
+  hold.release();
+  await settle();
+  expect(mergeStates(dashboard)).toEqual([
+    [1, "clean"],
+    [2, "conflicts"],
+  ]);
+  dashboard.stop();
+});

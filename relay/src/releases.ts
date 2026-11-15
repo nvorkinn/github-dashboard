@@ -1,6 +1,5 @@
 import type { ReleaseRun, ReleasesSnapshot } from "../../shared/runs.ts";
-import type { AppConfig } from "./config.ts";
-import { createGitHubApp } from "./github_app.ts";
+import type { GitHubApp } from "./github_app.ts";
 import { createRuns } from "./runs.ts";
 import { createDefinitions } from "./workflows.ts";
 
@@ -29,8 +28,8 @@ export type Releases = {
 };
 
 export function createReleases(options: {
-  config: AppConfig;
-  fetch?: typeof fetch;
+  /** Reads GitHub as the app. */
+  app: GitHubApp;
   /** One run changed. */
   onRun(run: ReleaseRun): void;
   /** More than one run changed, or what is known of a repository did: everything is told again. */
@@ -38,7 +37,7 @@ export function createReleases(options: {
   /** Stops the timers when it fires. */
   closing?: AbortSignal | undefined;
 }): Releases {
-  const app = createGitHubApp({ config: options.config, ...(options.fetch ? { fetch: options.fetch } : {}) });
+  const { app } = options;
   // What was last told as a whole, so that looking at a repository again and finding it the same tells nothing.
   let told: string | undefined;
 

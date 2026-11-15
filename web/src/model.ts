@@ -4,6 +4,7 @@
  *
  * Times are ISO strings as GitHub gives them. Addresses ending in `Url` open the thing on github.com.
  */
+import type { MergeState } from "../../shared/pulls.ts";
 import type { Approval, CheckState, Job, ReleaseRun } from "../../shared/runs.ts";
 
 export type { Approval, CheckState, Job, JobGraph, JobNode, ReleaseRun } from "../../shared/runs.ts";
@@ -35,7 +36,7 @@ export type PullRequest = {
    * `conflicts` it conflicts with its base, `behind` its base moved and the rules want it updated, `unknown` GitHub
    * is still working it out.
    */
-  mergeState: "clean" | "blocked" | "conflicts" | "behind" | "unknown";
+  mergeState: MergeState;
   autoMerge: boolean;
   checks: Check[];
   /** GitHub's global id for it, which its GraphQL API (auto-merge) asks for. */

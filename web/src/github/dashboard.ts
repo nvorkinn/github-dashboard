@@ -1,3 +1,4 @@
+import type { MergeState, MergeUpdate } from "../../../shared/pulls.ts";
 import type { ReleasesSnapshot } from "../../../shared/runs.ts";
 import type { Auth } from "../auth.ts";
 import type { Approval, Dashboard, DashboardData, DashboardState, Notice, PullRequest, ReleaseRun } from "../model.ts";
@@ -68,6 +69,14 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
   // How often each pull request whose merge state is unknown was asked about again.
   const unsettled = new Map<string, number>();
+  // Whether the relay reads GitHub as the app, and so tells merge states itself after a push (see onMerge).
+  let mergeStatesFromRelay = false;
+  // The merge states the relay told, per pull request (`owner/name#number`), with the head and base they are for and
+  // when they came: one that came during a read is newer than what the read found.
+  const merges = new Map<string, { sha: string; base: string; mergeState: MergeState; at: number }>();
+  // The pull requests as the relay last told their merge state. The page doesn't ask GitHub again about one of these
+  // that is unknown: the relay tried, and the next push or read of everything asks again.
+  const fromRelay = new WeakSet<PullRequest>();
   // Which projects a read of everything asks about: what the last one found, or what the last visit kept.
   let shape: Shape | undefined;
   // The release runs and each project's Promote workflow, as the relay last told them.
@@ -78,7 +87,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const noticeListeners = new Set<(notice: Notice) => void>();
-  const events = createEvents({ connect: options.connect, onLive, onChange, onNotice, onReleases, onRun });
+  const events = createEvents({ connect: options.connect, onLive, onChange, onNotice, onReleases, onRun, onMerge });
 
   function setState(next: DashboardState): void {
     state = next;
@@ -166,6 +175,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
 
   function onReleases(snapshot: ReleasesSnapshot): void {
     if (started) {
+      mergeStatesFromRelay = snapshot.configured;
       relayed = snapshot;
       showReleases();
     }
@@ -211,6 +221,52 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     }
   }
 
+  /** Shows the merge states the relay worked out after a push, of the pull requests still at the head they are for. */
+  function onMerge(update: MergeUpdate): void {
+    if (!started) {
+      return;
+    }
+    const at = Date.now();
+    for (const pull of update.pulls) {
+      merges.set(`${update.repo}#${pull.number}`, {
+        sha: pull.sha,
+        base: update.base,
+        mergeState: pull.mergeState,
+        at,
+      });
+    }
+    if (state.status === "ready") {
+      const data = withMerges(state.data, at);
+      if (data !== state.data) {
+        setState({ ...state, data });
+      }
+    }
+  }
+
+  /**
+   * `data` with the merge states the relay told since `since` (`Date.now()`), each where the pull request still has
+   * the head and base it was told for. With `prune`, what the relay told before is forgotten: `data` is newer.
+   */
+  function withMerges(data: DashboardData, since: number, prune = false): DashboardData {
+    for (const [key, told] of merges) {
+      if (prune && told.at < since) {
+        merges.delete(key);
+      }
+    }
+    let changed = false;
+    const pulls = data.pulls.map((pull) => {
+      const told = merges.get(keyOf(pull));
+      if (!told || told.at < since || told.sha !== pull.sha || told.base !== pull.base) {
+        return pull;
+      }
+      const next = told.mergeState === pull.mergeState ? pull : { ...pull, mergeState: told.mergeState };
+      fromRelay.add(next);
+      changed ||= next !== pull;
+      return next;
+    });
+    return changed ? { ...data, pulls } : data;
+  }
+
   function onChange(change: Change): void {
     if (!started) {
       return;
@@ -241,7 +297,9 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       return;
     }
     const plan =
-      missed || hidden() || state.status !== "ready" ? "everything" : planFor(changes, state.data, hiddenProjects());
+      missed || hidden() || state.status !== "ready"
+        ? "everything"
+        : planFor(changes, state.data, hiddenProjects(), { mergeStatesFromRelay });
     changes = [];
     if (plan === "everything") {
       missed = true;
@@ -301,6 +359,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   async function readOnce(plan: Plan): Promise<void> {
     const controller = new AbortController();
     abort = controller;
+    const startedAt = Date.now();
     const previous = state.status === "ready" ? state.data : undefined;
     const all = plan === "everything" || !previous;
     // A read of changes is small and frequent, and the page doesn't flicker for each.
@@ -329,14 +388,17 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       }
       setState({
         status: "ready",
-        data: withReleases(result.data),
+        // What the relay told while this was read is newer than what it found.
+        data: withReleases(withMerges(result.data, startedAt, true)),
         readAt: Date.now(),
         refreshing: false,
         // What a read of everything couldn't read is still unread after a read of something else.
         problem: result.problem ?? (!all && state.status === "ready" ? state.problem : undefined),
         live: events.live(),
       });
-      settle(result.data);
+      if (state.status === "ready") {
+        settle(state.data);
+      }
       if (state.status === "ready") {
         askApprovals(state.data.releases);
       }
@@ -378,9 +440,12 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     }
   }
 
-  /** Asks again, in a moment, about the pull requests whose merge state GitHub hadn't worked out yet. */
+  /**
+   * Asks again, in a moment, about the pull requests whose merge state GitHub hadn't worked out yet, but those the
+   * relay last told of: it asked often enough already.
+   */
   function settle(data: DashboardData): void {
-    const unknown = data.pulls.filter((pull) => pull.mergeState === "unknown");
+    const unknown = data.pulls.filter((pull) => pull.mergeState === "unknown" && !fromRelay.has(pull));
     const keys = new Set(unknown.map(keyOf));
     for (const key of unsettled.keys()) {
       if (!keys.has(key)) {
