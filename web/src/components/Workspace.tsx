@@ -71,6 +71,67 @@ function destinationOf(event: Event): WorkspaceDestination | undefined {
   return destination;
 }
 
+// A preference, not a secret: fine to keep in the browser.
+const SIDEBAR_KEY = "github-dashboard:sidebar";
+
+export function rememberedSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+  } catch {
+    // Storage can be switched off; open will do.
+    return false;
+  }
+}
+
+/** Whether the repository sidebar is folded to a narrow rail, as the browser remembers it, and a way to change it. */
+function useSidebarCollapsed(): [boolean, (collapsed: boolean) => void] {
+  const [collapsed, setCollapsed] = useState(rememberedSidebarCollapsed);
+  return [
+    collapsed,
+    (chosen) => {
+      setCollapsed(chosen);
+      try {
+        if (chosen) {
+          localStorage.setItem(SIDEBAR_KEY, "collapsed");
+        } else {
+          localStorage.removeItem(SIDEBAR_KEY);
+        }
+      } catch {
+        // Not remembered, then.
+      }
+    },
+  ];
+}
+
+/**
+ * Keeps `--command-top-height` at the header's real height, so the sticky sidebar starts below it even when the
+ * header's controls wrap onto a second line.
+ */
+function useHeaderHeight(): void {
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>(".command-top");
+    if (!header || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const root = document.documentElement;
+    const update = () => root.style.setProperty("--command-top-height", `${header.offsetHeight}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--command-top-height");
+    };
+  }, []);
+}
+
+/** The first letters of a repository's name, which stand for it on the folded rail. */
+function initials(name: string): string {
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const letters = words.length > 1 ? `${words[0]?.[0]}${words[1]?.[0]}` : name.slice(0, 2);
+  return letters.toUpperCase();
+}
+
 function active(run: ReleaseRun): boolean {
   return ACTIVE_RUNS.has(run.state) && !run.finishedAt;
 }
@@ -102,6 +163,8 @@ export function Workspace({
   const [scope, setScope] = useState<Scope>(undefined);
   const [tab, setTab] = useState<WorkspaceTab>("all");
   const [filter, setFilter] = useState("");
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
+  useHeaderHeight();
   const repositoryConfig = useActions()?.repositories;
   const secretCopy = useActions()?.secrets;
   const shown = projects.filter((project) => !hidden.has(project.repo));
@@ -164,11 +227,22 @@ export function Workspace({
   ];
 
   return (
-    <div class="workspace">
-      <aside class="workspace-sidebar" aria-label="Repository navigation">
+    <div class={collapsed ? "workspace sidebar-collapsed" : "workspace"}>
+      <aside id="workspace-sidebar" class="workspace-sidebar" aria-label="Repository navigation">
         <div class="workspace-sidebar-head">
           <h2>Repositories</h2>
-          <span>{shown.length}</span>
+          <span class="workspace-sidebar-total">{shown.length}</span>
+          <button
+            type="button"
+            class="workspace-sidebar-toggle"
+            aria-controls="workspace-sidebar"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            <Icon name="sidebar" />
+          </button>
         </div>
         <button
           type="button"
@@ -176,6 +250,7 @@ export function Workspace({
             currentScope === undefined ? "workspace-nav workspace-overview active" : "workspace-nav workspace-overview"
           }
           aria-current={currentScope === undefined ? "page" : undefined}
+          title={collapsed ? "Overview" : undefined}
           onClick={() => {
             setScope(undefined);
             setTab("all");
@@ -184,7 +259,7 @@ export function Workspace({
           <span class="workspace-nav-icon">
             <Icon name="overview" />
           </span>
-          <span>Overview</span>
+          <span class="workspace-nav-label">Overview</span>
           <span class="workspace-nav-count">{shown.length}</span>
         </button>
         <label class="workspace-search-wrap">
@@ -213,6 +288,7 @@ export function Workspace({
                 type="button"
                 class={currentScope === project.repo ? "workspace-nav active" : "workspace-nav"}
                 aria-current={currentScope === project.repo ? "page" : undefined}
+                title={collapsed ? project.name : undefined}
                 onClick={() => {
                   setScope(project.repo);
                   setTab("all");
@@ -223,7 +299,10 @@ export function Workspace({
                     class={problem ? "workspace-status problem" : busy ? "workspace-status busy" : "workspace-status"}
                     aria-hidden="true"
                   />
-                  {project.name}
+                  <span class="workspace-repo-initials" aria-hidden="true">
+                    {initials(project.name)}
+                  </span>
+                  <span class="workspace-nav-label">{project.name}</span>
                 </span>
                 {busy && <span class="visually-hidden">Active workflow</span>}
                 {problem && <span class="visually-hidden">Needs attention</span>}
