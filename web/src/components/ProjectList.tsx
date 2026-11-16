@@ -110,7 +110,7 @@ export function ProjectList({
 
 /**
  * Release, which publishes the next minor version at once, and Promote, which starts the project's Promote workflow
- * for its latest release. Neither can be taken back, so each asks first, naming the tag.
+ * for its latest release. Release goes at once; Promote, which deploys to production, asks first, naming the tag.
  */
 export function ProjectActions({ project, actions }: { project: Project; actions: RunActions }) {
   const promote = promoteTag(project);
@@ -122,7 +122,6 @@ export function ProjectActions({ project, actions }: { project: Project; actions
         title={`Publish the next minor release of ${project.repo}'s default branch, with notes GitHub writes`}
         busy={`Releasing ${project.name}…`}
         prepare={() => actions.nextRelease(project)}
-        ask={(tag) => `Release ${project.repo} as ${tag} from its default branch?`}
         run={async (tag) => {
           await actions.release(project, tag);
           return `Released ${project.repo} as ${tag}.`;
