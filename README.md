@@ -300,6 +300,24 @@ signed-in user may approve the deployment it waits for: one request per waiting 
 GraphQL counts against its own rate limit, 5,000 points an hour, and a read costs about one point per two shown
 projects.
 
+## Telemetry
+
+To measure how the dashboard reads GitHub, the relay prints one line of JSON to stdout for every request it answers
+(`"telemetry":"http_in"`) and every request it sends (`"telemetry":"http_out"`), which the deploy's log collector
+(VictoriaLogs) keeps alongside the rest of the relay's output (`relay/src/telemetry.ts`):
+
+```text
+{"telemetry":"http_out","ts":"2026-11-16T07:00:00.000Z","method":"POST","host":"api.github.com","path":"/graphql","status":200,"ms":212,"bytes":5120,"rateResource":"graphql","rateRemaining":4990,"rateUsed":10}
+```
+
+A line has the method, the path without its query, the status (or `error`, the kind of failure, for a request that
+never got an answer), the time taken in milliseconds, the size when the answer says it, and for GitHub the rate limit
+it counts against and what is left of it. Nothing else: no query strings, no bodies, no other headers, and Telegram's
+bot token is cut out of its path. The health check isn't logged. For `/api/events` the time is how long the stream
+took to open. The page's own calls go from the browser to api.github.com and are not in these lines.
+
+It is on by default; `TELEMETRY=off` turns it off.
+
 ## Telegram
 
 When nobody is looking at the dashboard, the relay sends a short message to a Telegram chat about the webhooks that

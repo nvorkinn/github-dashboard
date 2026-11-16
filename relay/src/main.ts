@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import type { AppConfig, AuthConfig, TelegramConfig } from "./config.ts";
 import { readAppConfig, readAuthConfig, readTelegramConfig, readWebhookSecret } from "./config.ts";
+import { createTelemetry, telemetryEnabled } from "./telemetry.ts";
 
 const port = Number(process.env.PORT ?? "8080");
 const staticRoot = process.env.STATIC_ROOT ?? "dist/web";
@@ -23,7 +24,9 @@ const webhookSecret = readWebhookSecret(process.env);
 // Fires when the relay is asked to stop, and ends the event streams, which would otherwise stay open for good.
 const closing = new AbortController();
 
-const app = createApp({ staticRoot, auth, webhookSecret, telegram, githubApp, closing: closing.signal });
+const telemetry = telemetryEnabled(process.env) ? createTelemetry() : undefined;
+
+const app = createApp({ staticRoot, auth, webhookSecret, telegram, githubApp, closing: closing.signal, telemetry });
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`relay listening on :${info.port}`);
   console.log(auth ? `sign-in set up for ${auth.publicOrigin}` : "sign-in not configured: its endpoints answer 503");
@@ -39,6 +42,9 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
       : webhookSecret
         ? "release runs set up: read as the GitHub App, then kept from its webhooks"
         : "release runs set up, but without webhooks they are only read again every few minutes",
+  );
+  console.log(
+    telemetry ? "telemetry on: one JSON line per request answered and sent (TELEMETRY=off stops it)" : "telemetry off",
   );
   // Whether it is set up, and never the token.
   console.log(

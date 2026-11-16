@@ -10,6 +10,7 @@ import { createMergeStates } from "./merge_states.ts";
 import { createReleases, NOT_CONFIGURED } from "./releases.ts";
 import { createStatusCache } from "./status.ts";
 import { telegramNotifier } from "./telegram.ts";
+import type { Telemetry } from "./telemetry.ts";
 import { type OnWebhook, webhookRoutes } from "./webhook.ts";
 
 // Often enough that a reverse proxy's idle timeout (60 seconds is a common default) never closes a quiet stream.
@@ -31,6 +32,7 @@ const PING_MS = 20_000;
  * with a link to the page when `auth` gives its address. `fetch` is how the relay reaches GitHub and Telegram; tests
  * pass their own. `hub` carries the changes from the webhook endpoint to the event streams, `pingMs` is how often a
  * stream sends a line to stay open, and `closing` ends every open stream when it fires, so the server can shut down.
+ * With `telemetry`, every request the relay answers and every one it sends through `fetch` is logged (telemetry.ts).
  *
  * The relay has no list of who may read the event stream, by design: in production the reverse proxy puts
  * /api/events behind Tinyauth like the page, and leaves /api/github/webhook open for GitHub, whose signature the
@@ -46,9 +48,14 @@ export function createApp(options: {
   hub?: Hub;
   pingMs?: number;
   closing?: AbortSignal;
+  telemetry?: Telemetry | undefined;
 }) {
   const app = new Hono();
   const hub = options.hub ?? createHub();
+
+  if (options.telemetry) {
+    app.use(options.telemetry.inbound);
+  }
 
   // The page only talks to itself and api.github.com, and loads nothing from anywhere else.
   app.use(
@@ -70,7 +77,7 @@ export function createApp(options: {
 
   app.get("/healthz", (c) => c.text("ok"));
 
-  const fetcher = options.fetch ?? fetch;
+  const fetcher = options.telemetry ? options.telemetry.outbound(options.fetch ?? fetch) : (options.fetch ?? fetch);
   const githubApp = options.githubApp ? createGitHubApp({ config: options.githubApp, fetch: fetcher }) : undefined;
   const releases = githubApp
     ? createReleases({
