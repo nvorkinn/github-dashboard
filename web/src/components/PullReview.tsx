@@ -11,7 +11,7 @@ import { useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { fileIcon, folderIcon } from "./file_icons.ts";
 import { Icon } from "./Icon.tsx";
-import { Markdown } from "./Markdown.tsx";
+import { PullInfo } from "./PullInfo.tsx";
 import { ReviewChecks, withWorkflows } from "./ReviewChecks.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
 
@@ -408,6 +408,7 @@ export function PullReview({
   const [splitShare, setSplitShare] = useState(rememberedSplitShare);
   const [filter, setFilter] = useState("");
   const [done, setDone] = useState("");
+  const [showInfo, setShowInfo] = useState(false);
   // Auto-merge as last turned on or off here, until the review is read again.
   const [autoMerge, setAutoMerge] = useState<boolean>();
   const action = useAction();
@@ -510,6 +511,14 @@ export function PullReview({
           </div>
         </div>
         <div class="review-controls">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            title="Description, checks and reviews"
+            onClick={() => setShowInfo(true)}
+          >
+            <Icon name="info" /> PR info
+          </button>
           <button
             type="button"
             disabled={action.busy !== undefined || prIndex <= 0}
@@ -629,46 +638,20 @@ export function PullReview({
         </p>
       )}
       {done && <p role="status">{done}</p>}
-      <details class="review-info">
-        <summary>
-          <strong>PR information</strong>
-          <span>
-            Description · Checks ({pull.checks.length}) · Reviews ({info?.reviews.length ?? 0})
-          </span>
-        </summary>
-        {info ? (
-          <>
-            {info.description.trim() ? (
-              <Markdown class="review-description" text={info.description} base={pull.url} />
-            ) : (
-              <p class="review-description">No description.</p>
-            )}
-            <ul>
-              {pull.checks.map((check, i) => (
-                <li key={`${check.name}-${i}`}>
-                  {check.name}: {check.state}
-                </li>
-              ))}
-            </ul>
-            <ul>
-              {info.reviews.map((review, i) => (
-                <li key={i}>
-                  {review.user?.login ?? "Deleted user"}: {review.state}
-                  {review.body?.trim() && <Markdown text={review.body} base={pull.url} />}
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p>
-            {problem
+      {showInfo && (
+        <PullInfo
+          pull={pull}
+          info={info}
+          status={
+            problem
               ? "PR information could not be loaded."
               : actions?.review
                 ? "Loading PR information…"
-                : "PR information is unavailable."}
-          </p>
-        )}
-      </details>
+                : "PR information is unavailable."
+          }
+          onClose={() => setShowInfo(false)}
+        />
+      )}
       {files?.truncated && <p role="status">Only the first 300 files are shown. Review remaining files on GitHub.</p>}
       <div
         class={`review-body ${tree ? "" : "review-no-tree"}`}
