@@ -11,7 +11,7 @@ import { createMergeStates } from "./merge_states.ts";
 import { createReleases, NOT_CONFIGURED } from "./releases.ts";
 import { createStatusCache } from "./status.ts";
 import { telegramNotifier } from "./telegram.ts";
-import type { Telemetry } from "./telemetry.ts";
+import { pageEvents, type Telemetry } from "./telemetry.ts";
 import { type OnWebhook, webhookRoutes } from "./webhook.ts";
 
 // Often enough that a reverse proxy's idle timeout (60 seconds is a common default) never closes a quiet stream.
@@ -135,6 +135,8 @@ export function createApp(options: {
       telemetry: options.telemetry,
     }),
   );
+  // A page's own events: what it asked GitHub and why (see telemetry.ts).
+  app.post("/api/telemetry", pageEvents(options.telemetry));
   app.get(
     "/api/events",
     eventStream({

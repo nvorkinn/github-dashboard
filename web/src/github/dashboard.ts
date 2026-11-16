@@ -2,6 +2,7 @@ import type { MergeState, MergeUpdate } from "../../../shared/pulls.ts";
 import type { ReleasesSnapshot } from "../../../shared/runs.ts";
 import type { Auth } from "../auth.ts";
 import type { Approval, Dashboard, DashboardData, DashboardState, Notice, PullRequest, ReleaseRun } from "../model.ts";
+import { labelled, record, sinceLoad } from "../telemetry.ts";
 import { createApi, GitHubError } from "./api.ts";
 import { type Change, type Connect, createEvents } from "./events.ts";
 import { readEverything, type Shape } from "./graphql.ts";
@@ -67,6 +68,8 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   let changes: Change[] = [];
   let changesSince = 0;
   let changeTimer: ReturnType<typeof setTimeout> | undefined;
+  // When each change came and what from, for the telemetry: how long it took to show (see recordRead).
+  const told = new WeakMap<Change, { at: number; source: ChangeSource }>();
   // How often each pull request whose merge state is unknown was asked about again.
   const unsettled = new Map<string, number>();
   // Whether the relay reads GitHub as the app, and so tells merge states itself after a push (see onMerge).
@@ -99,10 +102,10 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   // All the timing of re-reads is in the functions from here to `begin`.
 
   /** Reads everything in `delay`, unless the page is stopped or hidden. Never sooner than a rate limit allows. */
-  function schedule(delay: number): void {
+  function schedule(delay: number, reason: Reason): void {
     clearTimeout(timer);
     if (started && !hidden()) {
-      timer = setTimeout(() => void readAll(), Math.max(delay, notBefore - Date.now(), 0));
+      timer = setTimeout(() => void readAll(reason), Math.max(delay, notBefore - Date.now(), 0));
     }
   }
 
@@ -117,7 +120,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
 
   function onVisibility(): void {
     // Nobody is looking at a hidden page; coming back to it, what it shows may be old.
-    schedule(0);
+    schedule(0, "visible");
   }
 
   function onLive(live: boolean): void {
@@ -127,14 +130,15 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     if (state.status === "ready" && state.live !== live) {
       setState({ ...state, live });
     }
+    record("stream", { live });
     if (!live) {
-      schedule(refreshMs);
+      schedule(refreshMs, "fallback");
       return;
     }
     // What changed while not connected never arrives, so everything is read: now, or at its slower pace if it
     // just was.
     const fresh = reading?.all || Date.now() - allReadAt < JUST_READ_MS;
-    schedule(fresh ? fallbackMs() : 0);
+    schedule(fresh ? fallbackMs() : 0, fresh ? "fallback" : "reconnect");
   }
 
   function onNotice(notice: Notice): void {
@@ -207,7 +211,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         continue;
       }
       approvals.set(key, { asked, found: before?.found });
-      void pendingApprovals(createApi(auth), run.repo, run.id)
+      void pendingApprovals(createApi(labelled(auth, "approvals")), run.repo, run.id)
         .catch(() => undefined)
         .then((found) => {
           // Asked again meanwhile, or no longer wanted: that answer counts, not this one.
@@ -267,10 +271,11 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     return changed ? { ...data, pulls } : data;
   }
 
-  function onChange(change: Change): void {
+  function onChange(change: Change, source: ChangeSource = "event"): void {
     if (!started) {
       return;
     }
+    told.set(change, { at: Date.now(), source });
     if (change.kind === "deployment_review" && change.repo !== undefined && change.run !== undefined) {
       // Someone approved or rejected: whether the rest is the user's to approve is asked again.
       approvals.delete(runKey({ repo: change.repo, id: change.run }));
@@ -300,33 +305,40 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       missed || hidden() || state.status !== "ready"
         ? "everything"
         : planFor(changes, state.data, hiddenProjects(), { mergeStatesFromRelay });
+    const batch = changes;
     changes = [];
     if (plan === "everything") {
       missed = true;
       if (hidden() || Date.now() < notBefore) {
         // Not now: when the page is shown again, or the rate limit ends.
-        schedule(0);
+        schedule(0, "changes");
       } else {
-        void readAll();
+        void readAll("changes");
       }
     } else if (plan.size > 0) {
-      void begin(plan);
+      void begin(plan, reasonOf(batch), batch);
     }
   }
 
   /** Reads everything. Callers that arrive during such a read share it. */
-  function readAll(): Promise<void> {
+  function readAll(reason: Reason): Promise<void> {
     if (!reading) {
-      return begin("everything");
+      return begin("everything", reason);
     }
     if (reading.all) {
       return reading.done;
     }
     // Some changes are being read: everything is, once that is done.
-    return reading.done.then(() => (started ? readAll() : undefined));
+    return reading.done.then(() => (started ? readAll(reason) : undefined));
   }
 
-  function begin(plan: Plan): Promise<void> {
+  /** Why the page asks again: what the changes in `batch` came from, the relay's events before anything else. */
+  function reasonOf(batch: Change[]): Reason {
+    const sources = new Set(batch.map((change) => told.get(change)?.source ?? "event"));
+    return sources.has("event") ? "event" : sources.has("action") ? "action" : "settle";
+  }
+
+  function begin(plan: Plan, reason: Reason, batch: Change[] = []): Promise<void> {
     const all = plan === "everything";
     if (all) {
       // Whatever the changes so far named is read with everything else.
@@ -335,7 +347,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       changeTimer = undefined;
     }
     const wasTroubled = troubled();
-    const done = readOnce(plan).finally(() => {
+    const done = readOnce(plan, reason, batch).finally(() => {
       // A stop() in the meantime has already cleared this, and a start() after it may have begun another.
       if (reading?.done !== done) {
         return;
@@ -346,7 +358,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       }
       // A read of changes leaves the next read of everything where it was, unless it is what ran into trouble.
       if (all || (troubled() && !wasTroubled)) {
-        schedule(fallbackMs());
+        schedule(fallbackMs(), "fallback");
       }
       if (changes.length > 0 && changeTimer === undefined) {
         readChanges();
@@ -356,10 +368,11 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
     return done;
   }
 
-  async function readOnce(plan: Plan): Promise<void> {
+  async function readOnce(plan: Plan, reason: Reason, batch: Change[]): Promise<void> {
     const controller = new AbortController();
     abort = controller;
     const startedAt = Date.now();
+    const firstData = state.status !== "ready";
     const previous = state.status === "ready" ? state.data : undefined;
     const all = plan === "everything" || !previous;
     // A read of changes is small and frequent, and the page doesn't flicker for each.
@@ -371,7 +384,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         plan === "everything" || !previous
           ? await readAllOf(controller.signal, previous)
           : await readChanged(
-              createApi(auth, {
+              createApi(labelled(auth, "read.changes"), {
                 signal: controller.signal,
                 ...(options.parallel ? { parallel: options.parallel } : {}),
               }),
@@ -397,6 +410,19 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         live: events.live(),
       });
       if (state.status === "ready") {
+        recordRead({
+          reason,
+          all,
+          plan,
+          startedAt,
+          previous,
+          data: state.data,
+          problem: result.problem,
+          firstData,
+          batch,
+        });
+      }
+      if (state.status === "ready") {
         settle(state.data);
       }
       if (state.status === "ready") {
@@ -409,12 +435,18 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       notBefore = error instanceof GitHubError ? (error.retryAt ?? 0) : 0;
       missed = true;
       const problem = describe(error);
+      record("read", {
+        reason,
+        all,
+        ms: Date.now() - startedAt,
+        failed: error instanceof GitHubError ? error.status : 0,
+      });
       setState(state.status === "ready" ? { ...state, refreshing: false, problem } : { status: "failed", problem });
     }
   }
 
   async function readAllOf(signal: AbortSignal, previous: DashboardData | undefined): Promise<ReadResult> {
-    const result = await readEverything(auth, {
+    const result = await readEverything(labelled(auth, "read.everything"), {
       previous,
       hidden: hiddenProjects(),
       shape: shape ?? load(),
@@ -458,9 +490,48 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       settleTimer = setTimeout(() => {
         for (const pull of again) {
           unsettled.set(keyOf(pull), (unsettled.get(keyOf(pull)) ?? 0) + 1);
-          onChange({ kind: "pull_request", repo: pull.repo, pull: pull.number });
+          onChange({ kind: "pull_request", repo: pull.repo, pull: pull.number }, "settle");
         }
       }, SETTLE_MS);
+    }
+  }
+
+  /**
+   * Records a read for the telemetry: why it ran, how long it took, and what it found that the page didn't already
+   * show; and of each change it read for that came with a webhook's delivery id, how long the change took to show.
+   */
+  function recordRead(read: {
+    reason: Reason;
+    all: boolean;
+    plan: Plan;
+    startedAt: number;
+    previous: DashboardData | undefined;
+    data: DashboardData;
+    problem: string | undefined;
+    firstData: boolean;
+    batch: Change[];
+  }): void {
+    const now = Date.now();
+    record("read", {
+      reason: read.reason,
+      all: read.all,
+      repos: read.plan === "everything" ? undefined : read.plan.size,
+      ms: now - read.startedAt,
+      ...differences(read.previous, read.data),
+      problem: read.problem !== undefined || undefined,
+      sinceLoadMs: read.firstData ? sinceLoad() : undefined,
+    });
+    for (const change of read.batch) {
+      const came = told.get(change);
+      if (change.delivery !== undefined && came) {
+        record("change_shown", {
+          delivery: change.delivery,
+          // Not `kind`, which is the event's own.
+          change: change.kind,
+          waitedMs: read.startedAt - came.at,
+          totalMs: now - came.at,
+        });
+      }
     }
   }
 
@@ -485,18 +556,18 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       if (typeof document !== "undefined") {
         document.addEventListener("visibilitychange", onVisibility);
       }
-      void readAll();
+      void readAll("start");
       events.start();
     },
 
     refresh() {
       // Nothing to read for a page that is stopped, such as after sign-out.
-      return started ? readAll() : Promise.resolve();
+      return started ? readAll("refresh") : Promise.resolve();
     },
 
     changed(change) {
       // Read like the relay's events: with whatever else changed in the same moment.
-      onChange(change);
+      onChange(change, "action");
     },
 
     stop() {
@@ -524,6 +595,34 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       }
     },
   };
+}
+
+/** Why a read ran, for the telemetry. */
+type Reason = "start" | "refresh" | "visible" | "fallback" | "reconnect" | "changes" | "event" | "action" | "settle";
+/** Where a change came from: the relay's events, the page's own buttons, or asking again about a merge state. */
+type ChangeSource = "event" | "action" | "settle";
+
+/**
+ * How what a read found differs from what the page showed before, in counts: projects and pull requests added,
+ * removed or changed. All zero is a read that found nothing new.
+ */
+export function differences(
+  before: DashboardData | undefined,
+  after: DashboardData,
+): Record<"projectsChanged" | "pullsAdded" | "pullsRemoved" | "pullsChanged", number> {
+  const was = new Map(before?.pulls.map((pull) => [keyOf(pull), JSON.stringify(pull)]) ?? []);
+  const is = new Map(after.pulls.map((pull) => [keyOf(pull), JSON.stringify(pull)]));
+  let pullsAdded = 0;
+  let pullsChanged = 0;
+  for (const [key, now] of is) {
+    const then = was.get(key);
+    if (then === undefined) pullsAdded++;
+    else if (then !== now) pullsChanged++;
+  }
+  const pullsRemoved = [...was.keys()].filter((key) => !is.has(key)).length;
+  const projects = new Map(before?.projects.map((one) => [one.repo, JSON.stringify(one)]) ?? []);
+  const projectsChanged = after.projects.filter((one) => projects.get(one.repo) !== JSON.stringify(one)).length;
+  return { projectsChanged, pullsAdded, pullsRemoved, pullsChanged };
 }
 
 function hidden(): boolean {

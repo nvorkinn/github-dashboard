@@ -12,6 +12,7 @@ import { createReviewService } from "./github/review.ts";
 import { createRunActions } from "./github/run_actions.ts";
 import { createSecretCopy } from "./github/secret_copy.ts";
 import type { Dashboard } from "./model.ts";
+import { labelled } from "./telemetry.ts";
 
 /**
  * Where the browser keeps which projects a read asks about (see `Shape`): their names, so that a reload reads
@@ -68,12 +69,13 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     };
   }
   return {
-    review: createReviewService(auth, dashboard),
-    repositories: createRepositoryConfig(auth, dashboard),
-    secrets: createSecretCopy(auth),
-    pulls: createPullActions(auth, dashboard),
-    runs: createRunActions(auth, dashboard),
-    files: createFilesReader(createApi(auth)),
-    image: createImageReader(auth),
+    // Each labelled with what it is for, for the telemetry (telemetry.ts).
+    review: createReviewService(labelled(auth, "review"), dashboard),
+    repositories: createRepositoryConfig(labelled(auth, "settings"), dashboard),
+    secrets: createSecretCopy(labelled(auth, "secrets")),
+    pulls: createPullActions(labelled(auth, "action.pull"), dashboard),
+    runs: createRunActions(labelled(auth, "action.run"), dashboard),
+    files: createFilesReader(createApi(labelled(auth, "review.files"))),
+    image: createImageReader(labelled(auth, "review.image")),
   };
 }

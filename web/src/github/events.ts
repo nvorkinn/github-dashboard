@@ -20,6 +20,8 @@ export type Change = {
   run?: number;
   /** The workflow file of the run, such as `.github/workflows/release.yml`, where the event says. */
   path?: string;
+  /** The webhook's delivery id, to trace how long its change took to show (see telemetry.ts). */
+  delivery?: string;
 };
 
 import { MERGE_STATES, type MergeState, type MergeUpdate } from "../../../shared/pulls.ts";
@@ -226,7 +228,7 @@ function parse(event: Event): Change | undefined {
   if (!data) {
     return undefined;
   }
-  const { kind, repo, action, pull, sha, run, path } = data;
+  const { kind, repo, action, pull, sha, run, path, delivery } = data;
   if (typeof kind !== "string" || kind === "") {
     return undefined;
   }
@@ -238,6 +240,7 @@ function parse(event: Event): Change | undefined {
     ...(typeof sha === "string" ? { sha } : {}),
     ...(typeof run === "number" && Number.isInteger(run) ? { run } : {}),
     ...(typeof path === "string" ? { path } : {}),
+    ...(typeof delivery === "string" && /^[0-9A-Za-z-]{1,64}$/.test(delivery) ? { delivery } : {}),
   };
 }
 

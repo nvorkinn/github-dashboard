@@ -1,3 +1,5 @@
+import { recorded } from "./telemetry.ts";
+
 /**
  * `unavailable`: the relay (or GitHub behind it) didn't answer, so it isn't known whether the user is signed in.
  * `failed` on `signedOut`: the user just came back from a sign-in that didn't work.
@@ -115,7 +117,7 @@ export function createAuth(): Auth {
     // A caller may ask for another media type, such as a file's raw bytes.
     if (!headers.has("Accept")) headers.set("Accept", "application/vnd.github+json");
     headers.set("X-GitHub-Api-Version", GITHUB_API_VERSION);
-    return fetch(new URL(path, "https://api.github.com/"), { ...init, headers });
+    return recorded(path, init, () => fetch(new URL(path, "https://api.github.com/"), { ...init, headers }));
   }
 
   return {
