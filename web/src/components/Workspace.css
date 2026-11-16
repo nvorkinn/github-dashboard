@@ -313,6 +313,29 @@ body:has(.workspace) {
     top: -0.2rem;
     right: -0.45rem;
   }
+
+  .sidebar-collapsed .workspace-repos .workspace-nav {
+    grid-template-columns: minmax(0, 1fr);
+    padding-right: 0;
+  }
+
+  .sidebar-collapsed .workspace-repo-release,
+  .sidebar-collapsed .workspace-release-toggle {
+    display: none;
+  }
+
+  /* Changes waiting for a release: an amber mark under the initials. */
+  .sidebar-collapsed .workspace-repo-pending {
+    position: absolute;
+    right: -0.45rem;
+    bottom: -0.2rem;
+    display: block;
+    width: 0.45rem;
+    height: 0.45rem;
+    background: var(--waiting);
+    border-radius: 0.1rem;
+    transform: rotate(45deg);
+  }
 }
 
 .workspace-sidebar-head > span,
@@ -385,6 +408,165 @@ body:has(.workspace) {
   gap: 0.6rem;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* A repository in the sidebar: its name and latest release, with its release controls one click away. */
+.workspace-repo + .workspace-repo {
+  margin-top: 0.15rem;
+}
+
+.workspace-repo-row {
+  position: relative;
+}
+
+.workspace-repos .workspace-nav {
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 0.1rem;
+  padding-right: 3.25rem;
+}
+
+.workspace-repos .workspace-repo-name {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.workspace-repo-release {
+  display: flex;
+  grid-row: 2;
+  grid-column: 1;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-left: 1.05rem;
+  overflow: hidden;
+  color: #6f7d91;
+  font-size: 0.66rem;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.workspace-repo-tag {
+  overflow: hidden;
+  color: #7fb5ef;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  text-overflow: ellipsis;
+}
+
+.workspace-repos .workspace-nav-count {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+}
+
+.workspace-release-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.05rem;
+  min-width: 2.25rem;
+  height: 1.5rem;
+  min-height: 0;
+  padding: 0 0.4rem;
+  line-height: 1;
+  color: #6f7d91;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border: 1px solid #22324b;
+  border-radius: 999px;
+  transform: translateY(-50%);
+}
+
+.workspace-release-toggle:hover,
+.workspace-release-toggle:focus-visible,
+.workspace-release-toggle[aria-expanded="true"] {
+  color: var(--text);
+  background: #172235;
+  border-color: #33486a;
+}
+
+.workspace-release-toggle.release-pending {
+  color: var(--waiting);
+  background: color-mix(in srgb, var(--waiting) 12%, transparent);
+  border-color: color-mix(in srgb, var(--waiting) 45%, transparent);
+}
+
+.workspace-release-toggle.release-pending:hover,
+.workspace-release-toggle.release-pending:focus-visible,
+.workspace-release-toggle.release-pending[aria-expanded="true"] {
+  color: #ffd98f;
+  background: color-mix(in srgb, var(--waiting) 22%, transparent);
+  border-color: var(--waiting);
+}
+
+.workspace-release-toggle.release-current {
+  color: color-mix(in srgb, var(--done) 70%, #6f7d91);
+}
+
+.workspace-release-drawer {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.4rem 1.1rem;
+  padding: 0.55rem 0.6rem 0.6rem;
+  font-size: 0.72rem;
+  background: #0c1523;
+  border: 1px solid #22324b;
+  border-left: 2px solid var(--waiting);
+  border-radius: 0.5rem;
+}
+
+.workspace-repo:not(:has(.release-pending)) .workspace-release-drawer {
+  border-left-color: #33486a;
+}
+
+.workspace-release-summary {
+  margin: 0;
+  color: var(--quiet);
+  line-height: 1.5;
+}
+
+.workspace-release-summary strong {
+  color: var(--waiting);
+}
+
+.workspace-release-summary .tag {
+  font-size: 0.72rem;
+}
+
+.workspace-release-compare {
+  white-space: nowrap;
+}
+
+.workspace-release-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.workspace-release-actions .action {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+}
+
+.workspace-release-actions .action-group.asking {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.workspace-release-actions .action-question {
+  flex: 1 1 100%;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.workspace-repo-pending {
+  display: none;
 }
 
 .workspace-status {
@@ -1163,9 +1345,25 @@ body:has(.workspace) {
     overflow-x: auto;
   }
 
+  .workspace-repo {
+    flex: none;
+  }
+
+  .workspace-repo + .workspace-repo {
+    margin-top: 0;
+  }
+
   .workspace-repos .workspace-nav {
     width: auto;
     flex: none;
+    padding-right: 0.65rem;
+  }
+
+  /* The strip has no room for release controls: the Releases tab has them. */
+  .workspace-repo-release,
+  .workspace-release-toggle,
+  .workspace-release-drawer {
+    display: none;
   }
 
   .workspace-main {

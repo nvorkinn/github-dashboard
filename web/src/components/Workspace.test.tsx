@@ -22,7 +22,11 @@ function dashboard(state = data(), refresh = vi.fn()) {
 }
 
 function select(name: string | RegExp) {
-  fireEvent.click(within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", { name }));
+  // The repository's own button, not its release controls, whose name also mentions it.
+  const named = typeof name === "string" ? name : new RegExp(`^${name.source}`, name.flags);
+  fireEvent.click(
+    within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", { name: named }),
+  );
 }
 
 afterEach(() => {
@@ -55,7 +59,7 @@ test("searches repository owners and names without changing the selected workspa
   fireEvent.input(screen.getByRole("searchbox"), { target: { value: "HOME-ledger" } });
   const nav = screen.getByRole("navigation", { name: "Repositories" });
   expect(within(nav).queryByRole("button", { name: /weather-station/ })).toBeNull();
-  expect(within(nav).getByRole("button", { name: /home-ledger/ })).toBeTruthy();
+  expect(within(nav).getByRole("button", { name: /^home-ledger/ })).toBeTruthy();
   expect(screen.getByText("Weather change")).toBeTruthy();
   fireEvent.input(screen.getByRole("searchbox"), { target: { value: "missing" } });
   expect(screen.getByText("No matching repositories")).toBeTruthy();
@@ -172,7 +176,7 @@ test("uses summary metrics to open focused operational views", () => {
   expect(screen.getByText("Broken change")).toBeTruthy();
 });
 
-test("keeps the overview concise and exposes the complete workflow view", () => {
+test("shows up to three workflows on the overview and exposes the complete workflow view", () => {
   dashboard(
     ready({
       projects: [project()],
@@ -180,15 +184,55 @@ test("keeps the overview concise and exposes the complete workflow view", () => 
         run({ id: 1, title: "First deploy", state: "running", finishedAt: undefined }),
         run({ id: 2, title: "Second deploy", state: "waiting", finishedAt: undefined }),
         run({ id: 3, title: "Third deploy", state: "queued", finishedAt: undefined }),
+        run({ id: 4, title: "Fourth deploy", state: "queued", finishedAt: undefined }),
       ],
     }),
   );
 
-  expect(screen.queryByText("First deploy")).toBeNull();
-  expect(screen.queryByText("Second deploy")).toBeNull();
-  expect(screen.getByText("Third deploy")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "View all 3 workflows" }));
-  expect(screen.getByText("First deploy")).toBeTruthy();
+  expect(screen.getAllByText(/^(First|Second|Third|Fourth) deploy$/)).toHaveLength(3);
+  fireEvent.click(screen.getByRole("button", { name: "View all 4 workflows" }));
+  expect(screen.getAllByText(/^(First|Second|Third|Fourth) deploy$/)).toHaveLength(4);
+});
+
+test("keeps release control in the sidebar, not on the overview", async () => {
+  const shipped = {
+    tag: "v1.2.0",
+    url: "https://github.com/octocat/weather-station/releases/v1.2.0",
+    publishedAt: "2026-01-01T00:00:00Z",
+  };
+  const actions = fakeRunActions();
+  render(
+    <ActionsContext.Provider value={{ runs: actions }}>
+      <DashboardView
+        state={ready({
+          projects: [
+            project({ latestRelease: shipped, unreleased: { commits: 4, pulls: 2 } }),
+            project({ repo: other, name: "home-ledger", latestRelease: shipped, unreleased: { commits: 0, pulls: 0 } }),
+          ],
+        })}
+        now={NOW}
+        refresh={() => {}}
+        view="workspace"
+      />
+    </ActionsContext.Provider>,
+  );
+  expect(screen.queryByText("RELEASE CONTROL")).toBeNull();
+  const nav = screen.getByRole("navigation", { name: "Repositories" });
+  expect(within(nav).getByRole("button", { name: "Release controls for home-ledger, up to date" })).toBeTruthy();
+  const toggle = within(nav).getByRole("button", { name: "Release controls for weather-station, 2 unreleased" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  const drawer = screen.getByRole("region", { name: "Release controls for weather-station" });
+  expect(drawer.textContent).toContain("2 pull requests on main since");
+  fireEvent.click(within(drawer).getByRole("button", { name: /Release .*weather-station/ }));
+  expect(await screen.findByText("Release octocat/weather-station as v1.3.0 from its default branch?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(actions.release).toHaveBeenCalledOnce();
+  // Still the overview: release control doesn't change what is selected.
+  expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+  fireEvent.click(toggle);
+  expect(screen.queryByRole("region", { name: "Release controls for weather-station" })).toBeNull();
 });
 
 test("accepts repository and section navigation from application commands", () => {
@@ -252,7 +296,7 @@ test("folds the repository sidebar to a rail and remembers it across reloads", (
   expect(localStorage.getItem("github-dashboard:sidebar")).toBe("collapsed");
   // Repositories keep their names for screen readers and a tooltip, and still select.
   const repo = within(screen.getByRole("navigation", { name: "Repositories" })).getByRole("button", {
-    name: /home-ledger/,
+    name: /^home-ledger/,
   });
   expect(repo.getAttribute("title")).toBe("home-ledger");
   expect(repo.textContent).toContain("HL");
