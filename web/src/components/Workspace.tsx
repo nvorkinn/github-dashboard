@@ -8,6 +8,7 @@ import { ProjectActions, ProjectList } from "./ProjectList.tsx";
 import { columnOf, PullList } from "./PullList.tsx";
 import { ReleaseList, shownRuns, sortRuns } from "./ReleaseList.tsx";
 import { RepositorySettings } from "./RepositorySettings.tsx";
+import { SidebarReleaseDrawer, SidebarReleaseLine, SidebarReleaseToggle, waiting } from "./SidebarRelease.tsx";
 import { Unreleased } from "./Unreleased.tsx";
 import "./Workspace.css";
 
@@ -38,6 +39,9 @@ const TAB_ICONS: Record<VisibleTab, IconName> = {
   attention: "attention",
   settings: "settings",
 };
+
+/** How many workflows the overview shows before "View all". */
+export const OVERVIEW_RUNS = 3;
 
 const ACTIVE_RUNS = new Set(["running", "waiting", "queued"]);
 const SECTIONS: Record<WorkspaceSection, VisibleTab> = {
@@ -164,6 +168,8 @@ export function Workspace({
   const [tab, setTab] = useState<WorkspaceTab>("all");
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useSidebarCollapsed();
+  // The repository whose release controls are unfolded in the sidebar; one at a time.
+  const [releaseOpen, setReleaseOpen] = useState<string | undefined>(undefined);
   useHeaderHeight();
   const repositoryConfig = useActions()?.repositories;
   const secretCopy = useActions()?.secrets;
@@ -204,7 +210,7 @@ export function Workspace({
   const attentionRuns = visibleRuns.filter(runNeedsAttention);
   const attentionCount = attentionPulls.length + attentionRuns.length;
   const ready = visiblePulls.filter((pull) => columnOf(pull) === "ready");
-  const overviewRuns = sortRuns(visibleRuns).slice(0, 1);
+  const overviewRuns = sortRuns(visibleRuns).slice(0, OVERVIEW_RUNS);
   const actions = useActions()?.runs;
   const listed = [...shown]
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -282,32 +288,53 @@ export function Workspace({
             const problem =
               pulls.some((pull) => pull.repo === project.repo && pullNeedsAttention(pull)) ||
               runs.some((run) => run.repo === project.repo && runNeedsAttention(run));
+            const drawer = `workspace-release-${project.repo.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+            const open = releaseOpen === project.repo && !collapsed;
+            const pending = (waiting(project) ?? 0) > 0;
             return (
-              <button
-                key={project.repo}
-                type="button"
-                class={currentScope === project.repo ? "workspace-nav active" : "workspace-nav"}
-                aria-current={currentScope === project.repo ? "page" : undefined}
-                title={collapsed ? project.name : undefined}
-                onClick={() => {
-                  setScope(project.repo);
-                  setTab("all");
-                }}
-              >
-                <span class="workspace-repo-name">
-                  <span
-                    class={problem ? "workspace-status problem" : busy ? "workspace-status busy" : "workspace-status"}
-                    aria-hidden="true"
+              <div key={project.repo} class={open ? "workspace-repo release-open" : "workspace-repo"}>
+                <div class="workspace-repo-row">
+                  <button
+                    type="button"
+                    class={currentScope === project.repo ? "workspace-nav active" : "workspace-nav"}
+                    aria-current={currentScope === project.repo ? "page" : undefined}
+                    title={collapsed ? project.name : undefined}
+                    onClick={() => {
+                      setScope(project.repo);
+                      setTab("all");
+                    }}
+                  >
+                    <span class="workspace-repo-name">
+                      <span
+                        class={
+                          problem ? "workspace-status problem" : busy ? "workspace-status busy" : "workspace-status"
+                        }
+                        aria-hidden="true"
+                      />
+                      <span class="workspace-repo-initials" aria-hidden="true">
+                        {initials(project.name)}
+                      </span>
+                      {pending && <span class="workspace-repo-pending" aria-hidden="true" />}
+                      <span class="workspace-nav-label">{project.name}</span>
+                    </span>
+                    <SidebarReleaseLine project={project} now={now} />
+                    {busy && <span class="visually-hidden">Active workflow</span>}
+                    {problem && <span class="visually-hidden">Needs attention</span>}
+                    {count > 0 && (
+                      <span class="workspace-nav-count" title={`${count} open pull requests`}>
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                  <SidebarReleaseToggle
+                    project={project}
+                    open={open}
+                    controls={drawer}
+                    onToggle={() => setReleaseOpen(open ? undefined : project.repo)}
                   />
-                  <span class="workspace-repo-initials" aria-hidden="true">
-                    {initials(project.name)}
-                  </span>
-                  <span class="workspace-nav-label">{project.name}</span>
-                </span>
-                {busy && <span class="visually-hidden">Active workflow</span>}
-                {problem && <span class="visually-hidden">Needs attention</span>}
-                {count > 0 && <span class="workspace-nav-count">{count}</span>}
-              </button>
+                </div>
+                {open && <SidebarReleaseDrawer id={drawer} project={project} actions={actions} />}
+              </div>
             );
           })}
           {listed.length === 0 && <p class="quiet workspace-no-repos">No matching repositories</p>}
@@ -462,7 +489,6 @@ export function Workspace({
                         View all {visibleRuns.length} workflows
                       </button>
                     )}
-                    <ReleasePanel projects={selected ? [selected] : shown} now={now} />
                   </div>
                 </>
               )}

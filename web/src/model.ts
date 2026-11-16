@@ -14,6 +14,11 @@ export type Check = {
   name: string;
   state: CheckState;
   url: string | undefined;
+  /**
+   * What GitHub groups it under: its workflow for a GitHub Actions job, else the app that ran it. Only the review asks
+   * GitHub for it, as it opens; the dashboard's own read leaves it unset, as it is for a commit status.
+   */
+  workflow?: string | undefined;
 };
 
 export type PullRequest = {

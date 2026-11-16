@@ -12,6 +12,7 @@ import { ExternalLink } from "./ExternalLink.tsx";
 import { fileIcon, folderIcon } from "./file_icons.ts";
 import { Icon } from "./Icon.tsx";
 import { PullInfo } from "./PullInfo.tsx";
+import { ReviewChecks, withWorkflows } from "./ReviewChecks.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
 
 import "./PullReview.css";
@@ -683,6 +684,8 @@ export function PullReview({
                 <p class="empty">No matching files.</p>
               )}
             </div>
+            {/* The dashboard's own read when it is of this commit: it keeps up as the checks run. */}
+            <ReviewChecks checks={withWorkflows((current.sha === pull.sha ? current : pull).checks, info?.workflows)} />
           </nav>
         )}
         {tree && <TreeDivider width={treeWidth} setWidth={setTreeWidth} />}
