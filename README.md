@@ -306,7 +306,7 @@ To measure how the dashboard reads GitHub, the relay prints one line of JSON to 
 (`"telemetry":"http_in"`) and every request it sends (`"telemetry":"http_out"`), which the deploy's log collector
 (VictoriaLogs) keeps alongside the rest of the relay's output (`relay/src/telemetry.ts`):
 
-```json
+```text
 {"telemetry":"http_out","ts":"2026-11-16T07:00:00.000Z","method":"POST","host":"api.github.com","path":"/graphql","status":200,"ms":212,"bytes":5120,"rateResource":"graphql","rateRemaining":4990,"rateUsed":10}
 ```
 
