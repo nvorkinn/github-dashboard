@@ -1,6 +1,7 @@
 import { type MergeUpdate, mergeStateOf } from "../../shared/pulls.ts";
 import { type GitHubApp, reasonOf } from "./github_app.ts";
 import { commit, record, text, wholeNumber } from "./payload.ts";
+import { withPurpose } from "./telemetry.ts";
 
 /**
  * How long after each try the pull requests still `unknown` are asked about again: GitHub works mergeability out in
@@ -11,7 +12,9 @@ export const RETRY_MS = [2000, 4000, 8000, 16_000] as const;
 // No more open pull requests into one branch than this many pages of 100 are asked about.
 const MAX_PAGES = 5;
 
+// Each asks for its own cost too, for the relay's telemetry (see github_app.ts), which takes it out of the answer.
 const OPEN_PULLS = `query($owner: String!, $name: String!, $base: String!, $after: String) {
+  rateLimit { cost remaining }
   repository(owner: $owner, name: $name) {
     pullRequests(states: OPEN, baseRefName: $base, first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
@@ -24,6 +27,7 @@ const OPEN_PULLS = `query($owner: String!, $name: String!, $base: String!, $afte
 function byNumber(numbers: number[]): string {
   const fields = numbers.map((number) => `p${number}: pullRequest(number: ${number}) { ...M }`);
   return `query($owner: String!, $name: String!) {
+  rateLimit { cost remaining }
   repository(owner: $owner, name: $name) {
     ${fields.join("\n    ")}
   }
@@ -177,7 +181,7 @@ export function createMergeStates(options: {
       }
       const loop: Loop = { cancelled: false };
       loops.set(key, loop);
-      void run(loop, installation, repo, base)
+      void withPurpose("merge_states.push", () => run(loop, installation, repo, base))
         .catch((error: unknown) => {
           if (!loop.cancelled) {
             console.warn(`merge states of ${repo} not read: ${reasonOf(error)}`);

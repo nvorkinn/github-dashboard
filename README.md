@@ -179,7 +179,8 @@ data: {"kind":"pull_request","repo":"nvorkinn/github-dashboard","action":"synchr
 - `change` comes once per webhook. `kind` is the webhook's event name (`X-GitHub-Event`) and is always there. The
   rest is there when the webhook has it: `repo` (the repository's full name), `action`, `pull` (the pull request's
   number), `sha` (the head commit), `run` (the workflow run's id) and `path` (that run's workflow file, which a
-  `workflow_run` carries). Nothing else from the webhook is passed on in a `change`.
+  `workflow_run` carries), and `delivery`, the webhook's delivery id (`X-GitHub-Delivery`), to trace what the
+  change led to (see "Telemetry"). Nothing else from the webhook is passed on in a `change`.
 - `notice` comes after the `change` of a webhook that needs attention, the same ones Telegram is told about (see
   "Telegram"), for the page's desktop notifications (see "Desktop notifications"):
   `{"type":"merged","key":"merged:owner/name#7","repo":"owner/name","headline":"Merged owner/name#7: its title","url":"https://github.com/owner/name/pull/7"}`.
@@ -315,6 +316,23 @@ never got an answer), the time taken in milliseconds, the size when the answer s
 it counts against and what is left of it. Nothing else: no query strings, no bodies, no other headers, and Telegram's
 bot token is cut out of its path. The health check isn't logged. For `/api/events` the time is how long the stream
 took to open. The page's own calls go from the browser to api.github.com and are not in these lines.
+
+A request the relay sends also says what it was for, as `purpose`, where that is more than its path says:
+`workflows.start`, `workflows.hourly` and `workflows.push` for the workflow files, `runs.recheck`, `runs.reconcile` and
+`runs.<webhook>` for release runs, `merge_states.push` for merge states, and `deliveries.hourly` (below). Besides the
+requests there are these lines:
+
+| `telemetry`        | When                                        | What it says                                                                                                                                     |
+| ------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `webhook`          | A signed webhook arrived                    | Its kind, action, delivery id, size, repository, pull request, head commit, run, how many pages were open, and the notice it made, if any        |
+| `webhook_delivery` | Hourly, for each delivery not logged before | GitHub's own account of it, from the app's delivery log: delivery id, kind, when it was sent, how long the relay took (`ms`), status, redelivery |
+| `graphql_cost`     | A relay GraphQL query answered              | Its purpose, what it cost in points and what is left                                                                                             |
+| `stream_opened`    | A page connected to `/api/events`           | How many pages are now connected                                                                                                                 |
+| `stream_closed`    | It went away                                | How long it was open, and per event name how many were sent and how many bytes                                                                   |
+
+A `webhook` and its `webhook_delivery` share the delivery id, which tells how late a webhook arrived and which never
+did; the pages get it too, as `delivery` on the `change` (see "The event stream"). The deliveries are read only with
+the app's key and the webhook secret both set.
 
 It is on by default; `TELEMETRY=off` turns it off.
 

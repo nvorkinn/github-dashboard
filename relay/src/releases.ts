@@ -1,6 +1,7 @@
 import type { ReleaseRun, ReleasesSnapshot } from "../../shared/runs.ts";
 import type { GitHubApp } from "./github_app.ts";
 import { createRuns } from "./runs.ts";
+import { withPurpose } from "./telemetry.ts";
 import { createDefinitions } from "./workflows.ts";
 
 /** How often every repository's workflow files are looked at again, in case a push's webhook never came. */
@@ -66,7 +67,7 @@ export function createReleases(options: {
   const definitions = createDefinitions({
     app,
     onChange(repo) {
-      void runs.reconcile(repo).then(tellAll);
+      void withPurpose("runs.reconcile", () => runs.reconcile(repo)).then(tellAll);
     },
   });
   const runs = createRuns({
@@ -80,10 +81,10 @@ export function createReleases(options: {
     onRuns: tellAll,
   });
 
-  const ready = definitions.load();
+  const ready = withPurpose("workflows.start", () => definitions.load());
   if (!options.closing?.aborted) {
-    const again = setInterval(() => void definitions.load(), DEFINITIONS_MS);
-    const recheck = setInterval(() => void runs.recheck(), RUNS_MS);
+    const again = setInterval(() => void withPurpose("workflows.hourly", () => definitions.load()), DEFINITIONS_MS);
+    const recheck = setInterval(() => void withPurpose("runs.recheck", () => runs.recheck()), RUNS_MS);
     // Neither keeps the relay from stopping.
     again.unref();
     recheck.unref();
@@ -95,8 +96,8 @@ export function createReleases(options: {
 
   return {
     onWebhook(kind, payload) {
-      definitions.onWebhook(kind, payload);
-      runs.onWebhook(kind, payload);
+      withPurpose(`workflows.${kind}`, () => definitions.onWebhook(kind, payload));
+      withPurpose(`runs.${kind}`, () => runs.onWebhook(kind, payload));
     },
     snapshot,
     isRelease: (repo, path) => definitions.isRelease(repo, path),

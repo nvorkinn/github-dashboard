@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import type { MergeUpdate } from "../../shared/pulls.ts";
 import type { ReleaseRun, ReleasesSnapshot } from "../../shared/runs.ts";
 import type { PageNotice } from "./notices.ts";
+import type { Telemetry } from "./telemetry.ts";
 
 /**
  * What an open page is told about a webhook: that something changed, and just enough to know what to fetch again.
@@ -138,6 +139,8 @@ export function eventStream(options: {
   closing?: AbortSignal | undefined;
   /** Everything known of release runs at this moment. */
   releases?: (() => ReleasesSnapshot) | undefined;
+  /** Logs each stream opening and closing, with how long it was open and how much it carried (telemetry.ts). */
+  telemetry?: Telemetry | undefined;
 }) {
   const encoder = new TextEncoder();
 
@@ -148,16 +151,27 @@ export function eventStream(options: {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         let open = true;
+        const opened = Date.now();
+        // What this stream carried, by event name (`ping` for the keep-alive line).
+        const sent: Record<string, { count: number; bytes: number }> = {};
+        let overflowed = false;
 
         const send = (text: string) => {
           if (!open) {
             return;
           }
           if ((controller.desiredSize ?? 0) < -MAX_UNREAD) {
+            overflowed = true;
             stop();
             return;
           }
-          controller.enqueue(encoder.encode(text));
+          const bytes = encoder.encode(text);
+          const name = /^event: (\w+)/.exec(text)?.[1] ?? "ping";
+          const tally = sent[name] ?? { count: 0, bytes: 0 };
+          tally.count++;
+          tally.bytes += bytes.byteLength;
+          sent[name] = tally;
+          controller.enqueue(bytes);
         };
 
         const unsubscribe = options.hub.subscribe(
@@ -166,6 +180,7 @@ export function eventStream(options: {
           (event) => send(`event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`),
         );
         const ping = setInterval(() => send(": ping\n\n"), options.pingMs);
+        options.telemetry?.event("stream_opened", { pages: options.hub.listeners() });
 
         stop = () => {
           if (!open) {
@@ -173,6 +188,12 @@ export function eventStream(options: {
           }
           open = false;
           unsubscribe();
+          options.telemetry?.event("stream_closed", {
+            seconds: Math.round((Date.now() - opened) / 1000),
+            sent,
+            overflowed: overflowed || undefined,
+            pages: options.hub.listeners(),
+          });
           clearInterval(ping);
           gone.removeEventListener("abort", stop);
           options.closing?.removeEventListener("abort", stop);

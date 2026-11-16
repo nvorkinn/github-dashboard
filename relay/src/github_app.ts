@@ -2,6 +2,7 @@ import { createAppAuth } from "@octokit/auth-app";
 import { request as octokitRequest } from "@octokit/request";
 import type { AppConfig } from "./config.ts";
 import { isRecord, text, wholeNumber } from "./payload.ts";
+import { currentPurpose, type Telemetry } from "./telemetry.ts";
 
 const API = "https://api.github.com";
 const TIMEOUT_MS = 10_000;
@@ -45,11 +46,24 @@ export type GitHubApp = {
    * the rest; an answer without data throws an `AppError`.
    */
   query(installation: number, query: string, variables?: Record<string, unknown>): Promise<GraphQLAnswer>;
+  /**
+   * One page of the app's webhook deliveries, newest first, as the app itself: what GitHub says it sent, when and how
+   * it went. `cursor` is the `next` of the page before.
+   */
+  deliveries(cursor?: string): Promise<{ deliveries: unknown[]; next: string | undefined }>;
 };
 
 export type GraphQLAnswer = { data: Record<string, unknown>; errors: { type?: string; path?: unknown[] }[] };
 
-export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fetch }): GitHubApp {
+/**
+ * With `telemetry`, a GraphQL query that asks for `rateLimit { cost remaining }` has what GitHub said of it logged
+ * (`graphql_cost`), and taken out of the answer.
+ */
+export function createGitHubApp(options: {
+  config: AppConfig;
+  fetch?: typeof fetch;
+  telemetry?: Telemetry | undefined;
+}): GitHubApp {
   const { config } = options;
   const fetcher = options.fetch ?? fetch;
   const auth = createAppAuth({
@@ -154,7 +168,44 @@ export function createGitHubApp(options: { config: AppConfig; fetch?: typeof fet
         throw new AppError(502, "no data");
       }
       const errors = Array.isArray(answer.errors) ? answer.errors.filter(isRecord) : [];
-      return { data: answer.data, errors: errors as GraphQLAnswer["errors"] };
+      const { rateLimit, ...data } = answer.data;
+      if (isRecord(rateLimit)) {
+        options.telemetry?.event("graphql_cost", {
+          purpose: currentPurpose(),
+          cost: wholeNumber(rateLimit.cost),
+          remaining: wholeNumber(rateLimit.remaining),
+        });
+      }
+      return { data, errors: errors as GraphQLAnswer["errors"] };
+    },
+
+    async deliveries(cursor) {
+      const path = `app/hook/deliveries?per_page=${PER_PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      let response: Response;
+      try {
+        response = await fetcher(`${API}/${path}`, {
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${await appToken()}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "github-dashboard-relay",
+          },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+      } catch (error) {
+        throw new AppError(0, error instanceof Error ? error.name : "request failed");
+      }
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw new AppError(response.status, `HTTP ${response.status}`);
+      }
+      const page: unknown = await response.json().catch(() => undefined);
+      if (!Array.isArray(page)) {
+        throw new AppError(502, "not a list");
+      }
+      const link = /<([^>]+)>;\s*rel="next"/.exec(response.headers.get("link") ?? "")?.[1];
+      const next = link ? (new URL(link).searchParams.get("cursor") ?? undefined) : undefined;
+      return { deliveries: page, next };
     },
 
     async repositories() {

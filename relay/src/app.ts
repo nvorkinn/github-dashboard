@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { authRoutes } from "./auth.ts";
 import type { AppConfig, AuthConfig, TelegramConfig } from "./config.ts";
+import { logDeliveries } from "./deliveries.ts";
 import type { Hub } from "./events.ts";
 import { createHub, eventStream } from "./events.ts";
 import { createGitHubApp } from "./github_app.ts";
@@ -78,7 +79,9 @@ export function createApp(options: {
   app.get("/healthz", (c) => c.text("ok"));
 
   const fetcher = options.telemetry ? options.telemetry.outbound(options.fetch ?? fetch) : (options.fetch ?? fetch);
-  const githubApp = options.githubApp ? createGitHubApp({ config: options.githubApp, fetch: fetcher }) : undefined;
+  const githubApp = options.githubApp
+    ? createGitHubApp({ config: options.githubApp, fetch: fetcher, telemetry: options.telemetry })
+    : undefined;
   const releases = githubApp
     ? createReleases({
         app: githubApp,
@@ -95,6 +98,10 @@ export function createApp(options: {
         closing: options.closing,
       })
     : undefined;
+  // How GitHub saw the webhooks it sent, for the telemetry: only where it can be asked, as the app.
+  if (githubApp && options.telemetry && options.webhookSecret) {
+    logDeliveries({ app: githubApp, telemetry: options.telemetry, closing: options.closing });
+  }
   const telegram = options.telegram
     ? telegramNotifier({
         config: options.telegram,
@@ -120,7 +127,13 @@ export function createApp(options: {
   app.route("/api/auth", authRoutes({ config: options.auth, fetch: fetcher }));
   app.route(
     "/api/github",
-    webhookRoutes({ secret: options.webhookSecret, hub, onWebhook, isRelease: releases?.isRelease }),
+    webhookRoutes({
+      secret: options.webhookSecret,
+      hub,
+      onWebhook,
+      isRelease: releases?.isRelease,
+      telemetry: options.telemetry,
+    }),
   );
   app.get(
     "/api/events",
@@ -129,6 +142,7 @@ export function createApp(options: {
       pingMs: options.pingMs ?? PING_MS,
       closing: options.closing,
       releases: releases ? releases.snapshot : () => NOT_CONFIGURED,
+      telemetry: options.telemetry,
     }),
   );
 
