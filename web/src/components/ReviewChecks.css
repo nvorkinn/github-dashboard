@@ -1,0 +1,119 @@
+/* The checks drawer at the foot of the review's file tree. Its rows are the tree's: 22px, edge to edge, no cards. */
+.review-tree-list {
+  flex: 1 1 auto;
+}
+.review-ci {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  border-top: 1px solid var(--review-border);
+  background: #0d0f1c;
+}
+/* Open, it takes what it needs, up to half the tree, and the files keep the rest. */
+.review-ci-open {
+  flex-shrink: 1;
+  max-height: 50%;
+}
+.review-tree .review-ci-toggle {
+  flex: none;
+  min-height: 24px;
+  padding-left: 7px;
+  background: #16182b;
+  color: #e4e1f4;
+}
+.review-ci-open .review-ci-toggle {
+  border-bottom: 1px solid #2c2a44;
+}
+.review-ci-toggle strong {
+  font-weight: 600;
+}
+.review-ci-toggle[aria-expanded="true"] .review-chevron {
+  transform: rotate(90deg);
+}
+.review-ci-toggle:hover .review-chevron {
+  stroke: #fff;
+}
+.review-ci-toggle:focus-visible {
+  outline: 2px solid var(--review-purple);
+  outline-offset: -2px;
+}
+.review-ci-summary {
+  color: var(--tone, var(--review-muted));
+  font-size: 0.75rem;
+}
+.review-tree .review-ci-toggle .review-count {
+  margin-left: auto;
+}
+.review-ci-list {
+  /* A few rows at least, however many files there are: the files' list gives way first. */
+  min-height: min(70px, 100%);
+  overflow: auto;
+  padding: 0 0 4px 4px;
+  scrollbar-width: thin;
+}
+.review-ci ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+.review-ci ul.review-folder {
+  padding-left: calc(var(--indent) - 12px);
+}
+.review-check a,
+.review-check > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 8px 0 3px;
+  font-size: 0.8rem;
+  line-height: 1.25;
+  color: #dcd9ee;
+  text-decoration: none;
+}
+@media (pointer: coarse) {
+  .review-check a,
+  .review-check > span {
+    min-height: 30px;
+  }
+}
+.review-check a:hover {
+  background: #ffffff0f;
+  color: #fff;
+}
+.review-check a:focus-visible {
+  outline: 2px solid var(--review-purple);
+  outline-offset: -2px;
+}
+.review-check-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-check a:hover .review-check-name {
+  text-decoration: underline;
+  text-decoration-color: #ffffff66;
+}
+.review-check-state {
+  margin-left: auto;
+  padding-left: 6px;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--tone);
+}
+.review-ci-empty {
+  margin: 4px 10px 6px;
+  font-size: 0.8rem;
+  color: var(--review-muted);
+}
+/* On a phone the tree is a short strip over the code; open checks make it taller rather than squeeze both away. */
+@media (max-width: 520px) {
+  .review-tree:has(.review-ci-open) {
+    flex-basis: 300px;
+  }
+  .review-ci-open {
+    max-height: 60%;
+  }
+}
