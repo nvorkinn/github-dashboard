@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 
 /**
  * One line of JSON per request the relay answers and per request it sends, on stdout, where the deploy's log
@@ -45,8 +45,9 @@ export function telemetryEnabled(env: Record<string, string | undefined>): boole
   return !/^(off|false|0|no)$/i.test(env.TELEMETRY?.trim() ?? "");
 }
 
-// The docker health check asks every 30 seconds, which says nothing about reading GitHub.
-const QUIET_PATHS = new Set(["/healthz"]);
+// The docker health check asks every 30 seconds, which says nothing about reading GitHub; the page's own telemetry
+// is logged event by event (see `pageEvents`).
+const QUIET_PATHS = new Set(["/healthz", "/api/telemetry"]);
 
 export function createTelemetry(options: TelemetryOptions = {}): Telemetry {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
@@ -128,4 +129,62 @@ function cleanPath(url: URL): string {
 
 function size(value: string | null): number | undefined {
   return value !== null && /^\d+$/.test(value) ? Number(value) : undefined;
+}
+
+/** The kinds of event a page sends (web/src/telemetry.ts); any other is dropped. */
+const PAGE_KINDS = new Set(["request", "read", "change_shown", "stream", "load", "visibility"]);
+const MAX_PAGE_BODY = 512 * 1024;
+const MAX_PAGE_EVENTS = 1000;
+const MAX_FIELDS = 24;
+const MAX_TEXT = 200;
+const FIELD = /^[a-zA-Z]{1,32}$/;
+const TAB = /^[a-z0-9]{1,16}$/;
+
+/**
+ * `POST /api/telemetry`: a batch of a page's events, `{"tab": "...", "events": [{"kind": "...", "ts": "...", ...}]}`,
+ * each logged as its own line, `"telemetry":"page_<kind>"`, with the tab, the time the page gave as `at`, and its
+ * other fields. A field is kept only if it has a plain name and holds a number, a yes or no, or a short text, so a
+ * page can't make the log say much else; the endpoint sits behind the same sign-in as the page. Without `telemetry`
+ * it answers 404, which tells the page to stop sending.
+ */
+export function pageEvents(telemetry: Telemetry | undefined) {
+  return async (c: Context) => {
+    if (!telemetry) {
+      return c.body(null, 404);
+    }
+    const text = await c.req.text().catch(() => "");
+    if (text.length > MAX_PAGE_BODY) {
+      return c.body(null, 413);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return c.body(null, 400);
+    }
+    const { tab, events } = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+    if (typeof tab !== "string" || !TAB.test(tab) || !Array.isArray(events)) {
+      return c.body(null, 400);
+    }
+    for (const event of events.slice(0, MAX_PAGE_EVENTS)) {
+      if (typeof event !== "object" || event === null) continue;
+      const { kind, ts, ...rest } = event as Record<string, unknown>;
+      if (typeof kind !== "string" || !PAGE_KINDS.has(kind)) continue;
+      const fields: Record<string, unknown> = {
+        tab,
+        at: typeof ts === "string" && ts.length <= 40 ? ts : undefined,
+      };
+      for (const [key, value] of Object.entries(rest).slice(0, MAX_FIELDS)) {
+        if (!FIELD.test(key) || key === "telemetry" || key === "tab" || key === "at") continue;
+        if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
+          fields[key] = value;
+        } else if (typeof value === "string") {
+          fields[key] = value.slice(0, MAX_TEXT);
+        }
+      }
+      telemetry.event(`page_${kind}`, fields);
+    }
+    c.header("Cache-Control", "no-store");
+    return c.body(null, 204);
+  };
 }

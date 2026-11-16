@@ -235,3 +235,43 @@ test("GitHub's webhook deliveries are logged once each, read an hour apart", asy
   expect(lines.map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1", "g-4"]);
   expect(calls).toEqual(["deliveries"]);
 });
+
+test("a page's events are logged one line each, with only plain fields", async () => {
+  const { lines, telemetry } = recorder();
+  const app = createApp({ staticRoot, telemetry });
+  const response = await app.request("/api/telemetry", {
+    method: "POST",
+    body: JSON.stringify({
+      tab: "abc123",
+      events: [
+        { kind: "request", ts: "2026-11-16T07:00:00Z", path: "/user", status: 200, unchanged: true, nested: { a: 1 } },
+        { kind: "read", reason: "x".repeat(500), "bad key": 1, telemetry: "forged" },
+        { kind: "anything_else", path: "/user" },
+        "not an event",
+      ],
+    }),
+  });
+  expect(response.status).toBe(204);
+  expect(lines).toEqual([
+    expect.objectContaining({
+      telemetry: "page_request",
+      tab: "abc123",
+      at: "2026-11-16T07:00:00Z",
+      path: "/user",
+      status: 200,
+      unchanged: true,
+    }),
+    expect.objectContaining({ telemetry: "page_read", tab: "abc123", reason: "x".repeat(200) }),
+  ]);
+  expect(lines[0]).not.toHaveProperty("nested");
+  expect(lines[1]).not.toHaveProperty("bad key");
+});
+
+test("a page's events are refused when malformed, and answered 404 with telemetry off", async () => {
+  const { telemetry } = recorder();
+  const app = createApp({ staticRoot, telemetry });
+  expect((await app.request("/api/telemetry", { method: "POST", body: "not json" })).status).toBe(400);
+  expect((await app.request("/api/telemetry", { method: "POST", body: '{"tab":"A B","events":[]}' })).status).toBe(400);
+  const off = createApp({ staticRoot });
+  expect((await off.request("/api/telemetry", { method: "POST", body: '{"tab":"a","events":[]}' })).status).toBe(404);
+});

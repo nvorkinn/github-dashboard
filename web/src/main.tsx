@@ -2,6 +2,7 @@ import { render } from "preact";
 import { App, type DemoPull } from "./App.tsx";
 import { createAuth } from "./auth.ts";
 import { makeActions, makeDashboard } from "./dashboard_source.ts";
+import { startTelemetry } from "./telemetry.ts";
 import "./style.css";
 import { applyTheme, rememberedTheme } from "./theme.ts";
 
@@ -9,6 +10,11 @@ import { applyTheme, rememberedTheme } from "./theme.ts";
 applyTheme(rememberedTheme());
 
 const auth = createAuth();
+
+// What the page asks GitHub and why, sent to the relay to log (telemetry.ts). Never from the demo.
+if (import.meta.env.MODE !== "demo") {
+  startTelemetry();
+}
 
 const demo = import.meta.env.MODE === "demo";
 if (demo) {

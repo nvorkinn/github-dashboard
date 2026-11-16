@@ -334,6 +334,21 @@ A `webhook` and its `webhook_delivery` share the delivery id, which tells how la
 did; the pages get it too, as `delivery` on the `change` (see "The event stream"). The deliveries are read only with
 the app's key and the webhook secret both set.
 
+The page's own calls don't pass the relay, so the page records them itself (`web/src/telemetry.ts`) and sends them to
+`POST /api/telemetry` every 30 seconds, and what is left when the page is hidden or closed. The relay logs each as a
+line of its own, `"telemetry":"page_<kind>"`, with `tab` (a random id per open tab, so tabs open at once can be
+told apart) and `at` (the page's time for it). It keeps only fields with plain names that hold a number, a yes or
+no, or a short text.
+
+| `telemetry`         | What it says                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `page_request`      | One call to api.github.com: method, path without its query, `purpose` (`read.everything`, `read.changes`, `approvals`, `review`, `review.files`, `review.image`, `action.pull`, `action.run`, `settings`, `secrets`), status, ms, size, rate limit, and `unchanged` when a GET's ETag is the one it had last time (the browser hides GitHub's 304) |
+| `page_read`         | One read: why it ran (`start`, `refresh`, `visible`, `fallback`, `reconnect`, `changes`, `event`, `action`, `settle`), of everything or how many repositories, ms, and how many projects and pull requests it found added, removed or changed; all zero is a read that found nothing new                                                           |
+| `page_change_shown` | A change that came with a webhook's delivery id, once read: `waitedMs` until its read began and `totalMs` until it showed                                                                                                                                                                                                                          |
+| `page_stream`       | The event stream went live or down                                                                                                                                                                                                                                                                                                                 |
+| `page_load`         | The page loaded, and how long until its DOM was ready; its first `page_read` has `sinceLoadMs`                                                                                                                                                                                                                                                     |
+| `page_visibility`   | The tab was shown or hidden                                                                                                                                                                                                                                                                                                                        |
+
 It is on by default; `TELEMETRY=off` turns it off.
 
 ## Telegram
