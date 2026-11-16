@@ -165,31 +165,6 @@
   border-bottom: 1px solid var(--review-border);
   flex-shrink: 0;
 }
-.review-info {
-  border-bottom: 1px solid var(--review-border);
-  background: #15172a;
-  max-height: 28vh;
-  overflow: auto;
-  flex-shrink: 0;
-}
-.review-info > summary {
-  cursor: pointer;
-  padding: 3px 14px;
-  font-size: 0.85rem;
-}
-.review-info > :where(summary) strong {
-  margin: 0 16px 0 6px;
-}
-.review-info > :where(summary) span {
-  font-size: 0.8rem;
-  color: #cecee3;
-}
-.review-info > :not(summary) {
-  margin: 8px 14px;
-}
-.review-description {
-  overflow-wrap: anywhere;
-}
 .review-body {
   display: grid;
   /* The tree takes the width chosen by dragging the divider, or else a share of the window. The divider is the line
@@ -720,7 +695,6 @@
     margin-left: 0;
     gap: 5px;
   }
-  .review-info > :where(summary) span,
   .review-shortcut {
     display: none;
   }

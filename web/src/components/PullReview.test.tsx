@@ -302,3 +302,37 @@ test("orders files as the tree shows them, folders first, so the top file opens 
   fireEvent.click(screen.getByRole("button", { name: "Next file" }));
   expect(document.querySelector('.review-tree [aria-current="true"]')?.getAttribute("title")).toBe("web/b.ts");
 });
+
+test("shows PR information in a popup that Escape closes without closing the review", async () => {
+  const close = vi.fn();
+  const initial = pull({ title: "Add the thing" });
+  render(
+    <ActionsContext.Provider
+      value={{
+        files: async () => ({ files: [file], truncated: false }),
+        review: {
+          read: async () => ({
+            pull: initial,
+            description: "Why this change is needed.",
+            canApprove: true,
+            canMerge: true,
+            reviews: [{ user: { login: "octocat" }, state: "APPROVED", body: "" }],
+          }),
+          approve: async () => {},
+        },
+      }}
+    >
+      <PullReview initial={initial} pulls={[initial]} onClose={close} />
+    </ActionsContext.Provider>,
+  );
+  await screen.findByRole("button", { name: /example.ts/ });
+  expect(document.querySelector(".pull-info")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "PR info" }));
+  const popup = document.querySelector<HTMLDialogElement>(".pull-info");
+  await waitFor(() => expect(popup?.textContent).toContain("Why this change is needed."));
+  expect(popup?.textContent).toContain("octocat");
+  expect(popup?.textContent).toContain("approved");
+  fireEvent(popup as HTMLDialogElement, new Event("cancel", { cancelable: true }));
+  expect(document.querySelector(".pull-info")).toBeNull();
+  expect(close).not.toHaveBeenCalled();
+});
