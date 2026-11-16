@@ -185,7 +185,12 @@ test("the Refresh button reads again and shows it", async () => {
 test("the actions it is given reach the pull requests, and without them there are no buttons", async () => {
   stubBackend(signedIn);
   const dashboard = fakeDashboard(ready({ pulls: [pull({ title: "Ready one" })] }));
-  const pulls = { setAutoMerge: vi.fn(), merge: vi.fn(), updateBranch: vi.fn(async () => {}) };
+  const pulls = {
+    setAutoMerge: vi.fn(),
+    merge: vi.fn(),
+    updateBranch: vi.fn(async () => {}),
+    requestRebase: vi.fn(async () => {}),
+  };
   render(<App auth={createAuth()} dashboard={dashboard} actions={{ pulls }} />);
   fireEvent.click(await screen.findByRole("button", { name: "Merge" }));
   fireEvent.click(screen.getByRole("button", { name: "Confirm merge" }));

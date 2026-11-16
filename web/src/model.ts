@@ -169,7 +169,20 @@ export type PullActions = {
   merge(pull: PullRequest): Promise<void>;
   /** Brings its base's new commits into its branch, if its head is still the one the page showed. */
   updateBranch(pull: PullRequest): Promise<void>;
+  /**
+   * Asks Dependabot to rebase one of its pull requests, by commenting "@dependabot rebase" on it. Dependabot does the
+   * rebase itself, a little later, and pushes it as a new head.
+   */
+  requestRebase(pull: PullRequest): Promise<void>;
 };
+
+/** Dependabot's logins: GitHub's REST API and the page call it `dependabot[bot]`, GraphQL plain `dependabot`. */
+const DEPENDABOT = new Set(["dependabot[bot]", "dependabot"]);
+
+/** Whether Dependabot opened it, and so takes "@dependabot" commands on it. */
+export function isDependabot(pull: Pick<PullRequest, "author">): boolean {
+  return DEPENDABOT.has(pull.author);
+}
 
 /** One file a pull request changes. `status` is GitHub's word: added, modified, removed, renamed and the like. */
 export type ChangedFile = {

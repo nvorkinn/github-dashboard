@@ -1,4 +1,4 @@
-import { AUTO_MERGE_OFF, DRAFT_REFUSED } from "../github/pull_actions.ts";
+import { AUTO_MERGE_OFF, DRAFT_REFUSED, NOT_DEPENDABOT } from "../github/pull_actions.ts";
 import type {
   Dashboard,
   DashboardData,
@@ -8,6 +8,7 @@ import type {
   PullRequest,
   RunActions,
 } from "../model.ts";
+import { isDependabot } from "../model.ts";
 import { applyEdits, clearEdits, createDemoRunActions, forgetRun, noEdits } from "./actions.ts";
 import { demoNotices, FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
 import { withGraphs } from "./graphs.ts";
@@ -31,6 +32,8 @@ export const ACTION_MS = 800;
 export const MERGED_MS = 1500;
 /** How long the checks run after the demo updated a branch. */
 export const UPDATE_CHECKS_MS = 6000;
+/** How long Dependabot takes, after being asked, to push its rebase. */
+export const REBASE_MS = 2500;
 
 // The demo's actions, for `demoPullActions` and `demoRunActions` to find. Kept beside the dashboard, not in its
 // type, so that the rest of the page only ever sees a `Dashboard`.
@@ -133,6 +136,28 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
     return state.status === "ready" ? state.data.projects.find((one) => one.repo === pull.repo) : undefined;
   }
 
+  /** A new head commit, whose checks start over; GitHub works out whether it can be merged once they are done. */
+  function newHead(pull: PullRequest): void {
+    const updatedAt = new Date().toISOString();
+    tweak(pull, (one) => ({
+      ...one,
+      sha: `${one.sha}-updated`,
+      updatedAt,
+      mergeState: "blocked",
+      checks: one.checks.map((check, index) => ({ ...check, state: index === 0 ? "running" : "queued" })),
+    }));
+    later(UPDATE_CHECKS_MS / 2, () =>
+      tweak(pull, (one) => ({ ...one, checks: one.checks.map((check) => ({ ...check, state: "running" })) })),
+    );
+    later(UPDATE_CHECKS_MS, () =>
+      tweak(pull, (one) => ({
+        ...one,
+        mergeState: "clean",
+        checks: one.checks.map((check) => ({ ...check, state: "passed" })),
+      })),
+    );
+  }
+
   const actions: PullActions = {
     async setAutoMerge(pull, enabled) {
       await pause();
@@ -153,25 +178,16 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
 
     async updateBranch(pull) {
       await pause();
-      const updatedAt = new Date().toISOString();
-      // A new head commit, whose checks start over; GitHub works out whether it can be merged once they are done.
-      tweak(pull, (one) => ({
-        ...one,
-        sha: `${one.sha}-updated`,
-        updatedAt,
-        mergeState: "blocked",
-        checks: one.checks.map((check, index) => ({ ...check, state: index === 0 ? "running" : "queued" })),
-      }));
-      later(UPDATE_CHECKS_MS / 2, () =>
-        tweak(pull, (one) => ({ ...one, checks: one.checks.map((check) => ({ ...check, state: "running" })) })),
-      );
-      later(UPDATE_CHECKS_MS, () =>
-        tweak(pull, (one) => ({
-          ...one,
-          mergeState: "clean",
-          checks: one.checks.map((check) => ({ ...check, state: "passed" })),
-        })),
-      );
+      newHead(pull);
+    },
+
+    async requestRebase(pull) {
+      await pause();
+      if (!isDependabot(pull)) {
+        throw new Error(NOT_DEPENDABOT);
+      }
+      // Dependabot takes a moment to read the comment and push the rebase.
+      later(REBASE_MS, () => newHead(pull));
     },
   };
 

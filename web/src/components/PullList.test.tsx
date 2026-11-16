@@ -371,6 +371,7 @@ function fakeActions() {
     setAutoMerge: vi.fn((_pull: PullRequest, _enabled: boolean) => wait<{ merged: boolean }>()),
     merge: vi.fn((_pull: PullRequest) => wait<void>()),
     updateBranch: vi.fn((_pull: PullRequest) => wait<void>()),
+    requestRebase: vi.fn((_pull: PullRequest) => wait<void>()),
   } satisfies PullActions;
   return {
     actions,
@@ -577,6 +578,30 @@ test("updating the branch shows until its head is the new commit", async () => {
   again({ sha: "new", mergeState: "blocked" });
   expect(screen.queryByText("Updating branch")).toBeNull();
   expect(screen.getByText("Blocked")).toBeTruthy();
+});
+
+test("asking Dependabot to rebase, with no page below to run it, shows on the card until its head is new", async () => {
+  const { actions, finish } = fakeActions();
+  const shown = pull({ author: "dependabot[bot]", sha: "old" });
+  const { rerender } = withActions([shown], actions);
+  fireEvent.click(screen.getByRole("button", { name: "Rebase" }));
+  expect(actions.requestRebase).toHaveBeenCalledExactlyOnceWith(shown);
+  expect(buttons()).toEqual(["Merge", "Asking…", "Auto-merge"]);
+  await finish();
+  expect(screen.getByText("Rebase requested")).toBeTruthy();
+  expect(buttons()).toEqual(["Merge", "Auto-merge"]);
+
+  const again = (sha: string) =>
+    rerender(
+      <ActionsContext.Provider value={{ pulls: actions }}>
+        <PullList now={NOW} pulls={[pull({ author: "dependabot[bot]", sha })]} />
+      </ActionsContext.Provider>,
+    );
+  again("old");
+  expect(screen.getByText("Rebase requested")).toBeTruthy();
+  again("rebased");
+  expect(screen.queryByText("Rebase requested")).toBeNull();
+  expect(buttons()).toEqual(["Merge", "Rebase", "Auto-merge"]);
 });
 
 test("an action that fails says why next to its buttons, until the next one starts", async () => {

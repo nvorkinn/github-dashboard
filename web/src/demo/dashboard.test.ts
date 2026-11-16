@@ -8,6 +8,7 @@ import {
   demoPullActions,
   demoRunActions,
   MERGED_MS,
+  REBASE_MS,
   UPDATE_CHECKS_MS,
 } from "./dashboard.ts";
 import { FRAMES, SCRIPTED_RUN } from "./data.ts";
@@ -279,6 +280,23 @@ test("an updated branch runs its checks again, and is then ready to merge", asyn
   vi.advanceTimersByTime(UPDATE_CHECKS_MS);
   expect(get(61).mergeState).toBe("clean");
   expect(summarize(get(61).checks)).toBe("passed");
+  dashboard.stop();
+});
+
+test("Dependabot pushes its rebase a moment after being asked, and refuses anyone else's pull request", async () => {
+  const { dashboard, actions, get } = withActions("offline");
+  const before = get(131);
+  const asking = actions.requestRebase(before);
+  vi.advanceTimersByTime(ACTION_MS);
+  await asking;
+  expect(get(131).sha).toBe(before.sha);
+  vi.advanceTimersByTime(REBASE_MS);
+  expect(get(131).sha).not.toBe(before.sha);
+  expect(summarize(get(131).checks)).toBe("running");
+
+  const refused = actions.requestRebase(get(61));
+  vi.advanceTimersByTime(ACTION_MS);
+  await expect(refused).rejects.toThrow("Only Dependabot's own pull requests can be asked to rebase.");
   dashboard.stop();
 });
 
