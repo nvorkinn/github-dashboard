@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
+import { BackgroundProvider } from "./components/background.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
 import { ExternalLink } from "./components/ExternalLink.tsx";
@@ -324,7 +325,9 @@ function SignedIn({
           <Settings notifier={notifier} laneColumns={laneColumns} onLaneColumns={setLaneColumns} />
         ) : (
           <ActionsContext.Provider value={actions}>
-            <DashboardView state={state} now={now} refresh={refresh} view={view} laneColumns={laneColumns} />
+            <BackgroundProvider>
+              <DashboardView state={state} now={now} refresh={refresh} view={view} laneColumns={laneColumns} />
+            </BackgroundProvider>
           </ActionsContext.Provider>
         )}
       </main>
