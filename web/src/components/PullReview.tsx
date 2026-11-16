@@ -1,6 +1,7 @@
 import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui-slim.js";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { DIFF_FONT_SIZES, type DiffFontSize, rememberDiffFontSize, rememberedDiffFontSize } from "../diff_font.ts";
+import { imageType } from "../github/images.ts";
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
 import { summarize } from "../model.ts";
@@ -11,6 +12,7 @@ import { useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { fileIcon, folderIcon } from "./file_icons.ts";
 import { Icon } from "./Icon.tsx";
+import { BinaryNote, ImageDiff, isBinary } from "./ImageDiff.tsx";
 import { PullInfo } from "./PullInfo.tsx";
 import { ReviewChecks, withWorkflows } from "./ReviewChecks.tsx";
 import "diff2html/bundles/css/diff2html.min.css";
@@ -402,6 +404,8 @@ export function PullReview({
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [split, setSplit] = useState(true);
   const [wrapping, setWrapping] = useState<Record<string, boolean>>({});
+  // Images whose text (an SVG's, say) is shown instead of the picture, by `wrapKey`.
+  const [asCode, setAsCode] = useState<Record<string, boolean>>({});
   const [tree, setTree] = useState(true);
   const [fontSize, setFontSize] = useState<DiffFontSize>(rememberedDiffFontSize);
   const [treeWidth, setTreeWidth] = useState(rememberedTreeWidth);
@@ -421,6 +425,11 @@ export function PullReview({
   const file = ordered[index];
   const wrapKey = `${key}:${file?.path}`;
   const wrap = wrapping[wrapKey] ?? wrapsByDefault(file?.path ?? "");
+  const readImage = actions?.image;
+  const image = Boolean(file && readImage && imageType(file.path));
+  const showsImage = image && !asCode[wrapKey];
+  // A binary file that isn't shown as an image has no sides to set apart.
+  const binary = Boolean(file && !showsImage && isBinary(file));
   const prIndex = pulls.findIndex((p) => p.repo === current.repo && p.number === current.number);
   function moveFile(delta: number) {
     const next = ordered[index + delta];
@@ -724,11 +733,20 @@ export function PullReview({
             <button
               type="button"
               aria-pressed={wrap}
-              disabled={!file}
+              disabled={!file || showsImage || isBinary(file)}
               onClick={() => setWrapping((previous) => ({ ...previous, [wrapKey]: !wrap }))}
             >
               Wrap lines
             </button>
+            {image && file && usablePatch(file) && (
+              <button
+                type="button"
+                aria-pressed={!showsImage}
+                onClick={() => setAsCode((previous) => ({ ...previous, [wrapKey]: showsImage }))}
+              >
+                Show code
+              </button>
+            )}
             <fieldset class="review-view-controls" aria-label="Diff layout">
               <button type="button" aria-pressed={split} onClick={() => setSplit(true)}>
                 Split
@@ -761,18 +779,22 @@ export function PullReview({
             </button>
           </div>
           <div class="review-split-area">
-            <div class={`review-column-headings ${split ? "" : "review-unified-heading"}`}>
-              {split && (
+            <div class={`review-column-headings ${split && !binary ? "" : "review-unified-heading"}`}>
+              {split && !binary && (
                 <span>
                   − Before <span>({pull.base})</span>
                 </span>
               )}
               <span>
-                + {split ? "After" : "Changes"} <span>({pull.head})</span>
+                + {binary ? "Binary file" : split ? "After" : "Changes"} <span>({pull.head})</span>
               </span>
             </div>
             <section class="review-code-scroll" key={`${key}:${file?.path}:${split}`} aria-label="Scrollable code diff">
-              {file ? (
+              {file && showsImage && readImage ? (
+                <ImageDiff pull={current} file={file} split={split} read={readImage} />
+              ) : file && isBinary(file) ? (
+                <BinaryNote pull={current} file={file} />
+              ) : file ? (
                 <FileDiff file={file} split={split} wrap={wrap} fontSize={fontSize} />
               ) : (
                 <p class="empty">
@@ -784,7 +806,9 @@ export function PullReview({
                 </p>
               )}
             </section>
-            {split && file && usablePatch(file) && <SplitDivider share={splitShare} setShare={setSplitShare} />}
+            {split && file && (showsImage || usablePatch(file)) && (
+              <SplitDivider share={splitShare} setShare={setSplitShare} />
+            )}
           </div>
         </section>
       </div>

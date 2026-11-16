@@ -5,6 +5,7 @@ import { createApi } from "./github/api.ts";
 import { createDashboard } from "./github/dashboard.ts";
 import { createFilesReader } from "./github/files.ts";
 import type { Shape } from "./github/graphql.ts";
+import { createImageReader } from "./github/images.ts";
 import { createPullActions } from "./github/pull_actions.ts";
 import { createRepositoryConfig } from "./github/repository_config.ts";
 import { createReviewService } from "./github/review.ts";
@@ -56,9 +57,15 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     const { demoPullActions, demoRunActions } = await import("./demo/dashboard.ts");
     const pulls = demoPullActions(dashboard);
     const runs = demoRunActions(dashboard);
-    const { demoFiles } = await import("./demo/files.ts");
+    const { demoFiles, demoImage } = await import("./demo/files.ts");
     const { demoReview } = await import("./demo/review.ts");
-    return { ...(pulls ? { pulls } : {}), ...(runs ? { runs } : {}), files: demoFiles, review: demoReview };
+    return {
+      ...(pulls ? { pulls } : {}),
+      ...(runs ? { runs } : {}),
+      files: demoFiles,
+      image: demoImage,
+      review: demoReview,
+    };
   }
   return {
     review: createReviewService(auth, dashboard),
@@ -67,5 +74,6 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     pulls: createPullActions(auth, dashboard),
     runs: createRunActions(auth, dashboard),
     files: createFilesReader(createApi(auth)),
+    image: createImageReader(auth),
   };
 }

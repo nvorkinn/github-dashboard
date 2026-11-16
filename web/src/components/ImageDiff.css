@@ -1,0 +1,86 @@
+/* A changed image: before and after side by side, split where the diff's divider is, or one above the other. */
+.review-images {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+}
+.review-images-split {
+  grid-template-columns: var(--split-at) minmax(0, 1fr);
+}
+.review-images-unified {
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+.review-image-pane {
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+}
+.review-images-split > .review-image-pane + .review-image-pane {
+  border-left: 1px solid var(--review-border);
+}
+.review-images-unified > .review-image-pane + .review-image-pane {
+  border-top: 1px solid var(--review-border);
+}
+.review-image-label {
+  align-self: stretch;
+  font-size: 0.78rem;
+  color: var(--review-red);
+}
+.review-image-after .review-image-label {
+  color: var(--review-green);
+}
+/* A checkerboard behind the image, so transparent parts read as transparent, edged in the side's colour. */
+.review-image-frame {
+  max-width: 100%;
+  line-height: 0;
+  border: 1px solid var(--review-red);
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #d9d9e3 25%, transparent 25%), linear-gradient(-45deg, #d9d9e3 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d9d9e3 75%), linear-gradient(-45deg, transparent 75%, #d9d9e3 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+.review-image-after .review-image-frame {
+  border-color: var(--review-green);
+}
+.review-image-frame img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.review-image-meta,
+.review-image-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--review-muted);
+  text-align: center;
+}
+.review-image-note {
+  margin: 24px 0;
+}
+.review-binary {
+  padding: 24px;
+  color: var(--review-muted);
+}
+.review-binary p {
+  margin: 0 0 8px;
+}
+.review-binary strong {
+  color: inherit;
+  font-weight: 600;
+}
+.review-binary a {
+  color: var(--review-purple);
+}
