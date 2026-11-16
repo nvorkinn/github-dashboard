@@ -9,7 +9,8 @@ export function blob(text: string) {
  * A GitHub App client for tests: `routes` says what each path answers, a number being the status it fails with, and
  * can be changed between reads. A path nothing is said of fails with 404. `calls` are the paths read, in order.
  * A GraphQL query is answered by `routes.graphql`, a function of the query and its variables that gives the data or
- * a status to fail with; its call is `graphql`.
+ * a status to fail with; its call is `graphql`. The app's webhook deliveries are `routes.deliveries`: the pages in
+ * order, each a list, the cursor of the next being its index; its call is `deliveries`.
  */
 export function fakeApp(repositories: { repo: string; defaultBranch?: string }[], routes: Record<string, unknown>) {
   const calls: string[] = [];
@@ -37,6 +38,12 @@ export function fakeApp(repositories: { repo: string; defaultBranch?: string }[]
         throw new AppError(found, `HTTP ${found}`);
       }
       return { data: found as Record<string, unknown>, errors: [] };
+    },
+    deliveries: async (cursor?: string) => {
+      calls.push("deliveries");
+      const pages = (routes.deliveries as unknown[][] | undefined) ?? [];
+      const index = cursor === undefined ? 0 : Number(cursor);
+      return { deliveries: pages[index] ?? [], next: index + 1 < pages.length ? String(index + 1) : undefined };
     },
   };
   return { app, calls, routes, repositories };

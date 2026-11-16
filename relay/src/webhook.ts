@@ -4,6 +4,7 @@ import { validWebhookSignature } from "./crypto.ts";
 import type { Change, Hub } from "./events.ts";
 import { type IsRelease, noticeFrom, pageNotice } from "./notices.ts";
 import { commit, isRecord, pullNumbers, record, text, wholeNumber } from "./payload.ts";
+import type { Telemetry } from "./telemetry.ts";
 
 /** What may look at a signed webhook's whole payload besides `changeFrom` (see `webhookRoutes`). */
 export type OnWebhook = (
@@ -41,6 +42,8 @@ export function webhookRoutes(options: {
   onWebhook?: OnWebhook | undefined;
   /** Which workflows are releases, for the notices, where the relay reads them. */
   isRelease?: IsRelease | undefined;
+  /** Logs each signed webhook: its kind, delivery id, size and what the pages were told (telemetry.ts). */
+  telemetry?: Telemetry | undefined;
 }) {
   const routes = new Hono();
   const { secret, hub } = options;
@@ -84,16 +87,30 @@ export function webhookRoutes(options: {
     if (!isRecord(payload)) {
       return refuse(400, "body is not a JSON object");
     }
-    hub.publish(changeFrom(kind, payload));
-
     const id = c.req.header("X-GitHub-Delivery") ?? "";
     const delivery = DELIVERY.test(id) ? id : undefined;
+    // The delivery id goes along, so that what a page reads because of this webhook can be traced back to it.
+    const change = { ...changeFrom(kind, payload), ...(delivery ? { delivery } : {}) };
+    hub.publish(change);
+
     // What needs attention also goes to the open pages as a notice, for their desktop notifications. The pages tell
     // repeats apart themselves, so the relay remembers nothing for this.
     const notice = noticeFrom(kind, payload, delivery, undefined, options.isRelease);
     if (notice) {
       hub.announce(pageNotice(notice));
     }
+    options.telemetry?.event("webhook", {
+      kind,
+      action: change.action,
+      delivery,
+      bytes: body.length,
+      repo: change.repo,
+      pull: change.pull,
+      sha: change.sha,
+      run: change.run,
+      pages: hub.listeners(),
+      notice: notice?.type,
+    });
 
     const { onWebhook } = options;
     if (onWebhook) {

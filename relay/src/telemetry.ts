@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { MiddlewareHandler } from "hono";
 
 /**
@@ -12,9 +13,26 @@ import type { MiddlewareHandler } from "hono";
 export type Telemetry = {
   /** Logs each request the relay answers, other than the health check. */
   inbound: MiddlewareHandler;
-  /** `fetch` that logs each request it sends. */
+  /** `fetch` that logs each request it sends, with the purpose it was sent for (see `withPurpose`). */
   outbound(fetcher: typeof fetch): typeof fetch;
+  /** Logs one event of `kind`, such as a webhook arriving; fields that are undefined are left out. */
+  event(kind: string, fields: Record<string, unknown>): void;
 };
+
+const purposes = new AsyncLocalStorage<string>();
+
+/**
+ * Runs `work` with every request it sends, also later on in promises it starts, logged as being for `purpose`, such
+ * as `runs.recheck`: what made the relay ask, which the path alone doesn't say. The innermost purpose counts.
+ */
+export function withPurpose<T>(purpose: string, work: () => T): T {
+  return purposes.run(purpose, work);
+}
+
+/** The purpose that the requests sent from here are for, if any. */
+export function currentPurpose(): string | undefined {
+  return purposes.getStore();
+}
 
 export type TelemetryOptions = {
   /** Where a line goes; stdout by default. */
@@ -73,7 +91,7 @@ export function createTelemetry(options: TelemetryOptions = {}): Telemetry {
         const url = new URL(input instanceof Request ? input.url : input);
         const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
         const started = now();
-        const fields = { method, host: url.host, path: cleanPath(url) };
+        const fields = { method, host: url.host, path: cleanPath(url), purpose: purposes.getStore() };
         let response: Response;
         try {
           response = await fetcher(input, init);
@@ -98,6 +116,8 @@ export function createTelemetry(options: TelemetryOptions = {}): Telemetry {
         return response;
       };
     },
+
+    event: log,
   };
 }
 

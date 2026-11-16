@@ -1,12 +1,22 @@
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { createApp } from "./app.ts";
-import { createTelemetry, telemetryEnabled } from "./telemetry.ts";
+import { webhookSignature } from "./crypto.ts";
+import { logDeliveries } from "./deliveries.ts";
+import { type Change, createHub } from "./events.ts";
+import { createGitHubApp } from "./github_app.ts";
+import { createTelemetry, telemetryEnabled, withPurpose } from "./telemetry.ts";
+import { fakeApp, settle } from "./testing.ts";
 
 const staticRoot = mkdtempSync(join(tmpdir(), "relay-static-"));
 writeFileSync(join(staticRoot, "index.html"), "<!doctype html><title>page</title>");
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function recorder() {
   const lines: Record<string, unknown>[] = [];
@@ -102,4 +112,126 @@ test("the relay's own calls go through the logging fetch", async () => {
     ["http_out", "www.githubstatus.com"],
     ["http_in", "/api/github/status"],
   ]);
+});
+
+test("a request sent under a purpose is logged with it, also after awaiting", async () => {
+  const { lines, telemetry } = recorder();
+  const fetcher = telemetry.outbound(async () => new Response("{}"));
+  await withPurpose("runs.recheck", async () => {
+    await Promise.resolve();
+    await fetcher("https://api.github.com/repos/o/n/actions/runs/1");
+    await withPurpose("runs.workflow_job", () => fetcher("https://api.github.com/repos/o/n/actions/runs/1/jobs"));
+  });
+  await fetcher("https://api.github.com/user");
+  expect(lines.map((line) => line.purpose)).toEqual(["runs.recheck", "runs.workflow_job", undefined]);
+});
+
+test("a relay query's cost is logged with its purpose and taken out of the answer", async () => {
+  const { lines, telemetry } = recorder();
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const fetcher = (async (url: string | URL | Request) =>
+    /access_tokens$/.test(String(url))
+      ? Response.json({ token: "ghs_x", expires_at: new Date(Date.now() + 3_600_000).toISOString() })
+      : Response.json({ data: { rateLimit: { cost: 1, remaining: 4999 }, repository: { id: "R" } } })) as typeof fetch;
+  const app = createGitHubApp({
+    config: { appId: "1", privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString() },
+    fetch: fetcher,
+    telemetry,
+  });
+  const answer = await withPurpose("merge_states.push", () => app.query(7, "query { rateLimit { cost remaining } }"));
+  expect(answer.data).toEqual({ repository: { id: "R" } });
+  expect(lines).toEqual([
+    expect.objectContaining({ telemetry: "graphql_cost", purpose: "merge_states.push", cost: 1, remaining: 4999 }),
+  ]);
+});
+
+test("a signed webhook is logged with its delivery id, which also goes to the pages", async () => {
+  const { lines, telemetry } = recorder();
+  const hub = createHub();
+  const published: Change[] = [];
+  hub.subscribe((change) => published.push(change));
+  const app = createApp({ staticRoot, webhookSecret: "s", hub, telemetry });
+  const body = JSON.stringify({
+    action: "opened",
+    repository: { full_name: "o/n" },
+    pull_request: { number: 7, title: "stays out" },
+  });
+  await app.request("/api/github/webhook", {
+    method: "POST",
+    headers: {
+      "X-GitHub-Event": "pull_request",
+      "X-GitHub-Delivery": "d-1",
+      "X-Hub-Signature-256": webhookSignature("s", Buffer.from(body)),
+    },
+    body,
+  });
+  expect(published).toEqual([{ kind: "pull_request", repo: "o/n", action: "opened", pull: 7, delivery: "d-1" }]);
+  expect(lines.find((line) => line.telemetry === "webhook")).toEqual(
+    expect.objectContaining({
+      kind: "pull_request",
+      action: "opened",
+      delivery: "d-1",
+      bytes: body.length,
+      repo: "o/n",
+      pull: 7,
+      pages: 1,
+    }),
+  );
+  expect(JSON.stringify(lines)).not.toContain("stays out");
+});
+
+test("an event stream is logged when it opens and closes, with what it carried", async () => {
+  const { lines, telemetry } = recorder();
+  const hub = createHub();
+  const response = await createApp({ staticRoot, hub, telemetry }).request("/api/events");
+  const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+  await reader.read();
+  hub.publish({ kind: "push" });
+  await reader.read();
+  await reader.cancel();
+  const events = lines.filter((line) => String(line.telemetry).startsWith("stream_"));
+  expect(events).toEqual([
+    expect.objectContaining({ telemetry: "stream_opened", pages: 1 }),
+    expect.objectContaining({
+      telemetry: "stream_closed",
+      pages: 0,
+      sent: {
+        hello: { count: 1, bytes: 23 },
+        releases: expect.objectContaining({ count: 1 }),
+        change: { count: 1, bytes: 37 },
+      },
+    }),
+  ]);
+});
+
+test("GitHub's webhook deliveries are logged once each, read an hour apart", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  const { lines, telemetry } = recorder();
+  const delivery = (id: number) => ({
+    id,
+    guid: `g-${id}`,
+    event: "push",
+    action: null,
+    delivered_at: "2026-11-16T07:00:00Z",
+    duration: 0.25,
+    status_code: 204,
+    redelivery: id === 3,
+  });
+  const { app, routes, calls } = fakeApp([], { deliveries: [[delivery(3), delivery(2)], [delivery(1)]] });
+  logDeliveries({ app, telemetry });
+  await vi.advanceTimersByTimeAsync(60_000);
+  await settle();
+  expect(lines.map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1"]);
+  expect(lines[0]).toEqual(
+    expect.objectContaining({ telemetry: "webhook_delivery", kind: "push", ms: 250, status: 204, redelivery: true }),
+  );
+  expect(lines[1]).not.toHaveProperty("redelivery");
+
+  // The next read stops at the first one it already logged.
+  routes.deliveries = [[delivery(4), delivery(3)], [delivery(2)]];
+  calls.length = 0;
+  await vi.advanceTimersByTimeAsync(60 * 60_000);
+  await settle();
+  expect(lines.map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1", "g-4"]);
+  expect(calls).toEqual(["deliveries"]);
 });
