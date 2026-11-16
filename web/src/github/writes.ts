@@ -4,9 +4,13 @@ import { describe } from "./dashboard.ts";
 
 /** An action that didn't go through. Its message is for the user as it is. */
 export class ActionError extends Error {
-  constructor(message: string) {
+  /** The HTTP status GitHub refused a write with, where it did. */
+  status: number | undefined;
+
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "ActionError";
+    this.status = status;
   }
 }
 
@@ -45,7 +49,7 @@ export async function send(auth: Auth, path: string, method: string, body: unkno
     if (retry === undefined && response.status >= 500) {
       throw new Uncertain(new GitHubError(path, response.status, undefined));
     }
-    throw new ActionError(await refusal(path, response, retry, needs));
+    throw new ActionError(await refusal(path, response, retry, needs), response.status);
   }
   return response;
 }

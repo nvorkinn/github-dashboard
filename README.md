@@ -79,7 +79,9 @@ The GitHub App (Settings, Developer settings, GitHub Apps):
   workflow files. The page acts as the signed-in user, so the user needs the same access to the repository.
   Copying secrets additionally needs Secrets write access (see "Copying secrets").
   Repository configuration additionally needs Administration write access; accept the changed permissions on the
-  installation after updating the GitHub App. Repository configuration is read only for non-administrators.
+  installation after updating the GitHub App. Repository configuration is read only for non-administrators. This
+  includes "Allow GitHub Actions to create and approve pull requests", which an organization can forbid for its
+  repositories.
 
 What each write is for (reading needs only read access to the same):
 
