@@ -112,7 +112,8 @@ export function createAuth(): Auth {
   function send(path: string, init: RequestInit | undefined, accessToken: string): Promise<Response> {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${accessToken}`);
-    headers.set("Accept", "application/vnd.github+json");
+    // A caller may ask for another media type, such as a file's raw bytes.
+    if (!headers.has("Accept")) headers.set("Accept", "application/vnd.github+json");
     headers.set("X-GitHub-Api-Version", GITHUB_API_VERSION);
     return fetch(new URL(path, "https://api.github.com/"), { ...init, headers });
   }

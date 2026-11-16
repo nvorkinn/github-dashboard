@@ -192,6 +192,15 @@ export type PullFiles = {
 /** Reads the files a pull request changes, rejecting with an `Error` if GitHub wouldn't say. */
 export type ReadFiles = (pull: PullRequest) => Promise<PullFiles>;
 
+/** A changed file as it was before the pull request, or as the pull request leaves it. */
+export type FileSide = "before" | "after";
+
+/** One side of a changed image: a `data:` address an `<img>` may show, and how many bytes the file has. */
+export type FileImage = { url: string; bytes: number };
+
+/** Reads one side of a changed image, rejecting with an `Error` if GitHub wouldn't give it or it is too large. */
+export type ReadImage = (pull: PullRequest, file: ChangedFile, side: FileSide) => Promise<FileImage>;
+
 /** A pull request's checks in one word: the worst that is true of them. `none` when it has no checks. */
 export function summarize(checks: Check[]): "none" | "failed" | "waiting" | "running" | "passed" {
   if (checks.length === 0) {

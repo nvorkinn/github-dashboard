@@ -336,3 +336,70 @@ test("shows PR information in a popup that Escape closes without closing the rev
   expect(document.querySelector(".pull-info")).toBeNull();
   expect(close).not.toHaveBeenCalled();
 });
+
+test("shows a changed image before beside after, and an added one with no before", async () => {
+  const png: ChangedFile = {
+    path: "docs/chart.png",
+    previousPath: undefined,
+    status: "modified",
+    additions: 0,
+    deletions: 0,
+  };
+  const icon: ChangedFile = { ...png, path: "icons/new.png", status: "added" };
+  const image = vi.fn(async (_pull, changed: ChangedFile, side: string) => ({
+    url: `data:image/png;base64,${btoa(`${changed.path}:${side}`)}`,
+    bytes: 2048,
+  }));
+  const { container } = render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [png, icon], truncated: false }), image }}>
+      <PullReview initial={pull()} pulls={[pull()]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await waitFor(() => expect(container.querySelectorAll(".review-image-frame img")).toHaveLength(2));
+  expect(screen.getByRole("figure", { name: "Before image" }).textContent).toContain("2.0 KB");
+  expect(container.querySelector(".review-images-split")).not.toBeNull();
+  expect(container.querySelector(".review-split-divider")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Wrap lines" })).toHaveProperty("disabled", true);
+
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  await waitFor(() => expect(container.querySelectorAll(".review-image-frame img")).toHaveLength(1));
+  expect(screen.getByRole("figure", { name: "Before image" }).textContent).toContain("adds it");
+  expect(image).not.toHaveBeenCalledWith(expect.anything(), icon, "before");
+
+  fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+  await waitFor(() => expect(container.querySelector(".review-images-unified")).not.toBeNull());
+  expect(screen.getByText("+ After")).not.toBeNull();
+});
+
+test("says a binary file that isn't an image changed, with a link to GitHub", async () => {
+  const binary: ChangedFile = {
+    path: "data/model.bin",
+    previousPath: undefined,
+    status: "modified",
+    additions: 0,
+    deletions: 0,
+  };
+  render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [binary], truncated: false }), image: vi.fn() }}>
+      <PullReview initial={pull()} pulls={[pull()]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await screen.findByText("Binary file changed.");
+  expect(screen.getByRole("link", { name: /files on GitHub/ }).getAttribute("href")).toBe(
+    "https://github.com/octocat/weather-station/pull/1/files",
+  );
+});
+
+test("shows an SVG as a picture, with its code a click away", async () => {
+  const svg: ChangedFile = { ...file, path: "icons/logo.svg", patch: "@@ -1 +1 @@\n-<svg/>\n+<svg></svg>" };
+  const image = vi.fn(async () => ({ url: "data:image/svg+xml;base64,PHN2Zy8+", bytes: 6 }));
+  const { container } = render(
+    <ActionsContext.Provider value={{ files: async () => ({ files: [svg], truncated: false }), image }}>
+      <PullReview initial={pull()} pulls={[pull()]} onClose={() => {}} />
+    </ActionsContext.Provider>,
+  );
+  await waitFor(() => expect(container.querySelectorAll(".review-image-frame img")).toHaveLength(2));
+  fireEvent.click(screen.getByRole("button", { name: "Show code" }));
+  await waitFor(() => expect(container.querySelector(".review-images")).toBeNull());
+  expect(screen.getByRole("button", { name: "Show code" }).getAttribute("aria-pressed")).toBe("true");
+});
