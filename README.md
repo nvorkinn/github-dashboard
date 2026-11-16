@@ -351,6 +351,16 @@ no, or a short text.
 
 It is on by default; `TELEMETRY=off` turns it off.
 
+To see what it says, export the lines from the log store and run the analysis on them, which prints Markdown tables:
+calls and rate limit by purpose, reads that found nothing new, how late changes show, lost webhooks, tabs, requests
+by shape and how bursts of webhooks would read with other waits (`scripts/analyse.ts`). From VictoriaLogs, for the
+last two days:
+
+```sh
+curl -s http://<victorialogs>:9428/select/logsql/query --data-urlencode 'query=_time:2d telemetry:*' > telemetry.ndjson
+npm run analyse -- telemetry.ndjson
+```
+
 ## Telegram
 
 When nobody is looking at the dashboard, the relay sends a short message to a Telegram chat about the webhooks that
