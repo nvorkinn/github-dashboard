@@ -48,6 +48,15 @@ const PULL_STEPS: Step[] = [
   { name: "Global PR Status", from: 10, to: 11 },
 ];
 
+/** The workflow a sample check belongs to, as GitHub would say; none for a commit status such as Global PR Status. */
+function workflowOf(check: string): string | undefined {
+  if (/^(lint|typecheck|unit|build|migrations|test$)/.test(check)) return "CI";
+  if (check.startsWith("e2e")) return "End-to-end";
+  if (/preview/.test(check)) return "Preview";
+  if (check === "bundle size" || check === "licence scan") return "Housekeeping";
+  return undefined;
+}
+
 const RELEASE_STEPS: Step[] = [
   { name: "version", from: 0, to: 1 },
   { name: "build (amd64)", from: 1, to: 3 },
@@ -203,13 +212,19 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
   }
 
   const checksOf = (repo: string, number: number, states: [string, CheckState][]): Check[] =>
-    states.map(([name, state]) => ({ name, state, url: github(`${repo}/pull/${number}/checks`) }));
+    states.map(([name, state]) => ({
+      name,
+      state,
+      url: github(`${repo}/pull/${number}/checks`),
+      ...(workflowOf(name) ? { workflow: workflowOf(name) } : {}),
+    }));
   const passed = (...names: string[]): [string, CheckState][] => names.map((name) => [name, "passed"]);
 
   const scriptedChecks = PULL_STEPS.map((step) => ({
     name: step.name,
     state: stepState(step, frame),
     url: github("weather-station/pull/128/checks"),
+    ...(workflowOf(step.name) ? { workflow: workflowOf(step.name) } : {}),
   }));
   const scriptedDone = scriptedChecks.every((check) => check.state === "passed");
 
