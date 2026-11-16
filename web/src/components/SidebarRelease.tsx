@@ -82,15 +82,20 @@ export function SidebarReleaseToggle({
   );
 }
 
-/** A repository's release controls, unfolded under its sidebar row: what waits to go out, Release and Promote. */
+/**
+ * A repository's release controls, unfolded under its sidebar row: what waits to go out, Release and Promote.
+ * `onStarted` hears when a release or promotion has started, so the drawer can fold away: the run shows on the page.
+ */
 export function SidebarReleaseDrawer({
   id,
   project,
   actions,
+  onStarted,
 }: {
   id: string;
   project: Project;
   actions: RunActions | undefined;
+  onStarted?: () => void;
 }) {
   const count = waiting(project);
   const release = project.latestRelease;
@@ -132,7 +137,7 @@ export function SidebarReleaseDrawer({
       </p>
       {actions && (
         <div class="actions workspace-release-actions">
-          <ProjectActions project={project} actions={actions} />
+          <ProjectActions project={project} actions={actions} onStarted={onStarted} />
         </div>
       )}
     </section>
