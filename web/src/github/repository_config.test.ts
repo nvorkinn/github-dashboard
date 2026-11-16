@@ -422,3 +422,66 @@ test("another administrator changing a later target rule during copying stops it
   expect(results[1]?.message).toContain("changed during copying");
   expect(mutations(requests)).toHaveLength(1);
 });
+
+const WORKFLOW = `repos/${TARGET}/actions/permissions/workflow`;
+
+test("reads whether Actions may create and approve pull requests", async () => {
+  const { config } = setup(snap(), snap(), {
+    [WORKFLOW]: { default_workflow_permissions: "write", can_approve_pull_request_reviews: true },
+  });
+  expect(await config.workflow(TARGET)).toEqual({
+    default_workflow_permissions: "write",
+    can_approve_pull_request_reviews: true,
+  });
+});
+
+test("an Actions permission GitHub won't show, or shows in part, is explained", async () => {
+  for (const answer of [
+    () => Response.json({ message: "Resource not accessible by integration" }, { status: 403 }),
+    () => Response.json({ message: "Not Found" }, { status: 404 }),
+    { default_workflow_permissions: "read" },
+  ]) {
+    const { config } = setup(snap(), snap(), { [WORKFLOW]: answer });
+    await expect(config.workflow(TARGET)).rejects.toThrow(/Actions permissions/);
+  }
+});
+
+test("saving the Actions permission keeps the default token permission and writes once", async () => {
+  const { config, requests, dashboard } = setup(snap(), snap(), {
+    [WORKFLOW]: { default_workflow_permissions: "write", can_approve_pull_request_reviews: false },
+    [`PUT ${WORKFLOW}`]: () => new Response(null, { status: 204 }),
+  });
+  await config.saveWorkflow(TARGET, true, false);
+  expect(mutations(requests)).toEqual([
+    {
+      method: "PUT",
+      path: WORKFLOW,
+      body: { default_workflow_permissions: "write", can_approve_pull_request_reviews: true },
+    },
+  ]);
+  expect(dashboard.refresh).not.toHaveBeenCalled();
+});
+
+test("the Actions permission needs an administrator and an unchanged value before writing", async () => {
+  for (const [more, current] of [
+    [{ permissions: { admin: false } }, false],
+    [{ archived: true }, false],
+    [{}, true],
+  ] as const) {
+    const { config, requests } = setup(snap(), snap(), {
+      [`repos/${TARGET}`]: repository(TARGET, more),
+      [WORKFLOW]: { default_workflow_permissions: "read", can_approve_pull_request_reviews: current },
+    });
+    await expect(config.saveWorkflow(TARGET, true, false)).rejects.toThrow();
+    expect(mutations(requests)).toEqual([]);
+  }
+});
+
+test("an organization policy refusal says where the setting is decided", async () => {
+  const { config, requests } = setup(snap(), snap(), {
+    [WORKFLOW]: { default_workflow_permissions: "read", can_approve_pull_request_reviews: false },
+    [`PUT ${WORKFLOW}`]: () => Response.json({ message: "Conflict" }, { status: 409 }),
+  });
+  await expect(config.saveWorkflow(TARGET, true, false)).rejects.toThrow(/organization's Actions settings/);
+  expect(mutations(requests)).toHaveLength(1);
+});

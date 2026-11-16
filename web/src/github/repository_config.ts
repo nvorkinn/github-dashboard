@@ -11,6 +11,11 @@ export const REPOSITORY_SETTINGS = {
   allow_rebase_merge: "Allow rebase merging",
 } as const;
 export type Setting = keyof typeof REPOSITORY_SETTINGS;
+/** The repository's GitHub Actions workflow permissions: GET/PUT repos/{repo}/actions/permissions/workflow. */
+export type WorkflowPermissions = {
+  default_workflow_permissions: "read" | "write";
+  can_approve_pull_request_reviews: boolean;
+};
 export type Repository = Partial<Record<Setting, boolean>> & {
   full_name: string;
   node_id: string;
@@ -68,6 +73,10 @@ export type RepositoryConfig = {
   repositories(): Promise<Repository[]>;
   read(repo: string): Promise<Repository>;
   save(repo: string, setting: Setting, value: boolean, previous: boolean): Promise<void>;
+  /** Reads whether GitHub Actions may create and approve pull requests. */
+  workflow(repo: string): Promise<WorkflowPermissions>;
+  /** Allows or stops GitHub Actions creating and approving pull requests. */
+  saveWorkflow(repo: string, value: boolean, previous: boolean): Promise<void>;
   preview(source: string, target: string, mapDefault: boolean): Promise<CopyPreview>;
   apply(preview: CopyPreview, selected: string[]): Promise<CopyResult[]>;
 };
@@ -399,6 +408,24 @@ export function compareRules(
 export function createRepositoryConfig(auth: Auth, dashboard: Dashboard): RepositoryConfig {
   const api = createApi(auth);
   const read = (repo: string) => api.get<Repository>(`repos/${repo}`);
+  async function workflow(repo: string): Promise<WorkflowPermissions> {
+    let value: Partial<WorkflowPermissions>;
+    try {
+      value = await api.get<Partial<WorkflowPermissions>>(`repos/${repo}/actions/permissions/workflow`);
+    } catch (error) {
+      if (error instanceof GitHubError && (error.status === 403 || error.status === 404))
+        throw new ActionError(
+          "GitHub didn't disclose the Actions permissions. You need repository administrator access, and the GitHub App needs Administration read access.",
+        );
+      throw error;
+    }
+    if (
+      typeof value.can_approve_pull_request_reviews !== "boolean" ||
+      (value.default_workflow_permissions !== "read" && value.default_workflow_permissions !== "write")
+    )
+      throw new ActionError("GitHub returned incomplete Actions permissions.");
+    return value as WorkflowPermissions;
+  }
   let applying = false;
   const issued = new WeakMap<CopyPreview, string>();
   async function preview(sourceName: string, targetName: string, mapDefault: boolean): Promise<CopyPreview> {
@@ -539,6 +566,38 @@ export function createRepositoryConfig(auth: Auth, dashboard: Dashboard): Reposi
           await send(auth, `repos/${repo}`, "PATCH", { [setting]: value }, "Administration");
         } finally {
           void dashboard.refresh();
+        }
+      }),
+    workflow: (repo) => worded(() => workflow(repo)),
+    saveWorkflow: (repo, value, previous) =>
+      worded(async () => {
+        if (typeof value !== "boolean") throw new ActionError("Unknown Actions setting.");
+        const [repository, current] = await Promise.all([read(repo), workflow(repo)]);
+        if (!repository.permissions?.admin || repository.archived)
+          throw new ActionError(
+            "Repository administrator access and GitHub App Administration write access are required.",
+          );
+        if (current.can_approve_pull_request_reviews !== previous)
+          throw new ActionError("This setting changed on GitHub. Refresh before saving.");
+        try {
+          // The default token permission goes back unchanged, so this write can only change the one switch.
+          await send(
+            auth,
+            `repos/${repo}/actions/permissions/workflow`,
+            "PUT",
+            {
+              default_workflow_permissions: current.default_workflow_permissions,
+              can_approve_pull_request_reviews: value,
+            },
+            "Administration",
+          );
+        } catch (error) {
+          // An organization or enterprise policy that forbids it answers 409 in GitHub's own words; say where to look.
+          if (error instanceof ActionError && error.status === 409)
+            throw new ActionError(
+              `${error.message} The organization's Actions settings decide whether repositories may allow this.`,
+            );
+          throw error;
         }
       }),
     preview: (source, target, mapDefault) => worded(() => preview(source, target, mapDefault)),

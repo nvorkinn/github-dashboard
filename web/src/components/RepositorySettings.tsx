@@ -7,12 +7,15 @@ import {
   type RepositoryConfig,
   type RuleChange,
   type Setting,
+  type WorkflowPermissions,
 } from "../github/repository_config.ts";
 import type { SecretCopy } from "../github/secret_copy.ts";
 import { ConfirmButton, reasonOf, useAction } from "./actions.tsx";
 import { Icon, type IconName } from "./Icon.tsx";
 import { SecretCopyCard } from "./SecretCopy.tsx";
 import "./RepositorySettings.css";
+
+const ACTIONS_PULLS_LABEL = "Allow GitHub Actions to create and approve pull requests";
 
 const SETTING_DETAILS: Record<Setting, { icon: IconName; description: string }> = {
   delete_branch_on_merge: {
@@ -42,6 +45,8 @@ export function RepositorySettings({
   const [current, setCurrent] = useState<Repository>();
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [readProblem, setReadProblem] = useState("");
+  const [workflow, setWorkflow] = useState<WorkflowPermissions>();
+  const [workflowProblem, setWorkflowProblem] = useState("");
   const [listProblem, setListProblem] = useState("");
   const [source, setSource] = useState("");
   const [mapDefault, setMapDefault] = useState(false);
@@ -54,6 +59,23 @@ export function RepositorySettings({
   const canEdit = current?.permissions?.admin === true && !current.archived;
 
   async function refresh() {
+    await Promise.all([refreshRepository(), refreshWorkflow()]);
+  }
+  async function refreshWorkflow() {
+    try {
+      const value = await service.workflow(repo);
+      if (mounted.current) {
+        setWorkflow(value);
+        setWorkflowProblem("");
+      }
+    } catch (error) {
+      if (mounted.current) {
+        setWorkflow(undefined);
+        setWorkflowProblem(reasonOf(error));
+      }
+    }
+  }
+  async function refreshRepository() {
     try {
       const value = await service.read(repo);
       if (mounted.current) {
@@ -175,6 +197,50 @@ export function RepositorySettings({
                   </label>
                 ))}
               </fieldset>
+              <section class="repository-actions-permissions" aria-labelledby="actions-settings-heading">
+                <h4 id="actions-settings-heading">GitHub Actions</h4>
+                {workflowProblem && (
+                  <p role="alert" class="problem">
+                    {workflowProblem}
+                  </p>
+                )}
+                {!workflow && !workflowProblem && <p class="quiet">Loading Actions permissions…</p>}
+                {workflow && (
+                  <fieldset disabled={!canEdit || !!action.busy}>
+                    <legend class="visually-hidden">GitHub Actions</legend>
+                    <label class="repository-toggle-row">
+                      <Icon name="workflow" size={25} />
+                      <span class="repository-toggle-copy">
+                        <strong>{ACTIONS_PULLS_LABEL}</strong>
+                        <span id="description-actions-pulls">
+                          Lets workflows using the GITHUB_TOKEN open pull requests and approve them.
+                        </span>
+                      </span>
+                      <input
+                        role="switch"
+                        aria-checked={workflow.can_approve_pull_request_reviews}
+                        aria-label={ACTIONS_PULLS_LABEL}
+                        aria-describedby="description-actions-pulls"
+                        type="checkbox"
+                        checked={workflow.can_approve_pull_request_reviews}
+                        onChange={() =>
+                          action.run("actions-pulls", async () => {
+                            setMessage("");
+                            setPreview(undefined);
+                            const previous = workflow.can_approve_pull_request_reviews;
+                            try {
+                              await service.saveWorkflow(repo, !previous, previous);
+                              if (mounted.current) setMessage(`${ACTIONS_PULLS_LABEL}: saved.`);
+                            } finally {
+                              await refreshWorkflow();
+                            }
+                          })
+                        }
+                      />
+                    </label>
+                  </fieldset>
+                )}
+              </section>
             </>
           )}
         </section>

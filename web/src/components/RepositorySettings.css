@@ -93,6 +93,22 @@
   padding: 0 0.2rem;
   border: 0;
 }
+.repository-actions-permissions {
+  margin-top: 0.6rem;
+  padding: 1rem 0 0;
+  border-top: 1px solid #3a4058;
+}
+.repository-actions-permissions h4 {
+  margin: 0 0.4rem 0.2rem;
+  color: var(--quiet);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.repository-actions-permissions > p {
+  margin: 0.5rem 0.4rem;
+}
 .repository-toggle-row {
   display: grid;
   grid-template-columns: 2.1rem minmax(0, 1fr) auto;

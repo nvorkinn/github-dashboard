@@ -65,6 +65,11 @@ function service() {
     read: vi.fn(async () => repo()),
     repositories: vi.fn(async () => [repo(), repo(source)]),
     save: vi.fn(async () => {}),
+    workflow: vi.fn(async () => ({
+      default_workflow_permissions: "read" as const,
+      can_approve_pull_request_reviews: false,
+    })),
+    saveWorkflow: vi.fn(async () => {}),
     preview: vi.fn(async () => plan()),
     apply: vi.fn(
       async (): Promise<CopyResult[]> => [
@@ -168,6 +173,48 @@ test("save refusals retain server values and expose the error", async () => {
   fireEvent.click(await screen.findByRole("switch", { name: "Allow auto-merge" }));
   expect((await screen.findByRole("alert")).textContent).toContain("Administration permission");
   expect((screen.getByRole("switch", { name: "Allow auto-merge" }) as HTMLInputElement).checked).toBe(false);
+});
+
+const ACTIONS_PULLS = "Allow GitHub Actions to create and approve pull requests";
+
+test("shows whether Actions may create and approve pull requests, saves it and reads it again", async () => {
+  const config = service();
+  render(<RepositorySettings repo={target} service={config} />);
+  const toggle = (await screen.findByRole("switch", { name: ACTIONS_PULLS })) as HTMLInputElement;
+  expect(toggle.checked).toBe(false);
+  config.workflow.mockResolvedValue({ default_workflow_permissions: "read", can_approve_pull_request_reviews: true });
+  fireEvent.click(toggle);
+  await waitFor(() => expect(config.saveWorkflow).toHaveBeenCalledWith(target, true, false));
+  await waitFor(() => expect(config.workflow).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(toggle.checked).toBe(true));
+  expect((await screen.findByRole("status")).textContent).toContain(`${ACTIONS_PULLS}: saved.`);
+  expect(config.save).not.toHaveBeenCalled();
+});
+
+test("Actions permission refusals keep GitHub's value and say why", async () => {
+  const config = service();
+  config.saveWorkflow.mockRejectedValue(new Error("GitHub refused: the organization doesn't allow this."));
+  render(<RepositorySettings repo={target} service={config} />);
+  fireEvent.click(await screen.findByRole("switch", { name: ACTIONS_PULLS }));
+  expect((await screen.findByRole("alert")).textContent).toContain("organization");
+  expect((screen.getByRole("switch", { name: ACTIONS_PULLS }) as HTMLInputElement).checked).toBe(false);
+});
+
+test("an unreadable Actions permission is explained without hiding the merge settings", async () => {
+  const config = service();
+  config.workflow.mockRejectedValue(new Error("GitHub didn't disclose the Actions permissions."));
+  render(<RepositorySettings repo={target} service={config} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("Actions permissions");
+  expect(screen.queryByRole("switch", { name: ACTIONS_PULLS })).toBeNull();
+  expect(screen.getByRole("switch", { name: "Allow auto-merge" })).toBeTruthy();
+});
+
+test("read-only users see the Actions permission but cannot change it", async () => {
+  const config = service();
+  config.read.mockResolvedValue(repo(target, { permissions: { admin: false } }));
+  render(<RepositorySettings repo={target} service={config} />);
+  const toggle = await screen.findByRole("switch", { name: ACTIONS_PULLS });
+  expect(toggle.closest("fieldset")?.disabled).toBe(true);
 });
 
 test("workspace integrates settings only for the selected repository, separately from pull review", async () => {
