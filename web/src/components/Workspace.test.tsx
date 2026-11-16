@@ -224,10 +224,15 @@ test("keeps release control in the sidebar, not on the overview", async () => {
   expect(drawer.textContent).toContain("2 pull requests on main since");
   fireEvent.click(within(drawer).getByRole("button", { name: /Release .*weather-station/ }));
   await waitFor(() => expect(actions.release).toHaveBeenCalledOnce());
+  // Once the release has started the drawer folds away by itself; the run shows on the page instead.
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: "Release controls for weather-station" })).toBeNull(),
+  );
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
   // Still the overview: release control doesn't change what is selected.
   expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
   fireEvent.click(toggle);
-  expect(screen.queryByRole("region", { name: "Release controls for weather-station" })).toBeNull();
+  expect(screen.getByRole("region", { name: "Release controls for weather-station" })).toBeTruthy();
 });
 
 test("accepts repository and section navigation from application commands", () => {

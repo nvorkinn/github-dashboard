@@ -111,8 +111,17 @@ export function ProjectList({
 /**
  * Release, which publishes the next minor version at once, and Promote, which starts the project's Promote workflow
  * for its latest release. Release goes at once; Promote, which deploys to production, asks first, naming the tag.
+ * `onStarted` hears when either has gone through, so whatever holds the buttons can put them away.
  */
-export function ProjectActions({ project, actions }: { project: Project; actions: RunActions }) {
+export function ProjectActions({
+  project,
+  actions,
+  onStarted,
+}: {
+  project: Project;
+  actions: RunActions;
+  onStarted?: (() => void) | undefined;
+}) {
   const promote = promoteTag(project);
   return (
     <>
@@ -124,6 +133,7 @@ export function ProjectActions({ project, actions }: { project: Project; actions
         prepare={() => actions.nextRelease(project)}
         run={async (tag) => {
           await actions.release(project, tag);
+          onStarted?.();
           return `Released ${project.repo} as ${tag}.`;
         }}
       />
@@ -136,6 +146,7 @@ export function ProjectActions({ project, actions }: { project: Project; actions
           ask={() => `Promote ${project.repo} ${promote} to production?`}
           run={async () => {
             await actions.promote(project, promote);
+            onStarted?.();
             return `Promotion of ${project.repo} ${promote} to production started.`;
           }}
         />

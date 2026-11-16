@@ -170,6 +170,15 @@ export function Workspace({
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   // The repository whose release controls are unfolded in the sidebar; one at a time.
   const [releaseOpen, setReleaseOpen] = useState<string | undefined>(undefined);
+  // Once a release or promotion has started, its drawer folds away; the focus, if it was in there, goes back to the
+  // drawer's toggle rather than being lost with the drawer.
+  const closeReleaseDrawer = (repo: string, drawer: string) => {
+    const wasInside = document.getElementById(drawer)?.contains(document.activeElement) ?? false;
+    setReleaseOpen((current) => (current === repo ? undefined : current));
+    if (wasInside) {
+      setTimeout(() => document.querySelector<HTMLElement>(`[aria-controls="${drawer}"]`)?.focus());
+    }
+  };
   useHeaderHeight();
   const repositoryConfig = useActions()?.repositories;
   const secretCopy = useActions()?.secrets;
@@ -333,7 +342,14 @@ export function Workspace({
                     onToggle={() => setReleaseOpen(open ? undefined : project.repo)}
                   />
                 </div>
-                {open && <SidebarReleaseDrawer id={drawer} project={project} actions={actions} />}
+                {open && (
+                  <SidebarReleaseDrawer
+                    id={drawer}
+                    project={project}
+                    actions={actions}
+                    onStarted={() => closeReleaseDrawer(project.repo, drawer)}
+                  />
+                )}
               </div>
             );
           })}
