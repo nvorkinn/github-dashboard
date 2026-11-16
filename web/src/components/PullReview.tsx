@@ -7,6 +7,7 @@ import { summarize } from "../model.ts";
 import { clampSplitShare, rememberedSplitShare, rememberSplitShare } from "../split_share.ts";
 import { clampTreeWidth, MIN_TREE_WIDTH, rememberedTreeWidth, rememberTreeWidth } from "../tree_width.ts";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
+import { useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { fileIcon, folderIcon } from "./file_icons.ts";
 import { Icon } from "./Icon.tsx";
@@ -389,6 +390,7 @@ export function PullReview({
   onClose: () => void;
 }) {
   const actions = useActions();
+  const background = useBackground();
   const dialog = useRef<HTMLDialogElement>(null);
   const [selected, select] = useState(initial);
   const current = pulls.find((p) => p.repo === selected.repo && p.number === selected.number) ?? selected;
@@ -553,11 +555,20 @@ export function PullReview({
               actions={actions.pulls}
               busy={action.busy === "autoMerge"}
               disabled={!fresh || action.busy !== undefined || done === "Merged"}
-              run={action.run}
+              run={(name, task) => {
+                const pulls = actions.pulls;
+                // Nothing is left to do here once the PR merges, or will merge, by itself, so the review closes at
+                // once and the page below says how turning it on went.
+                if (background && pulls && !pull.autoMerge) {
+                  background.start(pull, "autoMerge", () => pulls.setAutoMerge(pull, true));
+                  onClose();
+                  return;
+                }
+                action.run(name, task);
+              }}
               onDone={({ enabled, merged }) => {
                 setAutoMerge(enabled);
                 if (merged) setDone("Merged");
-                // Nothing is left to do here once the PR merges, or will merge, by itself.
                 if (enabled) onClose();
               }}
             />
@@ -576,19 +587,31 @@ export function PullReview({
                 done === "Merged" ||
                 !["passed", "none"].includes(summarize(pull.checks))
               }
-              onConfirm={() =>
-                action.run("merge", async () => {
+              onConfirm={() => {
+                const merge = async () => {
                   const latest = await actions?.review?.read(pull);
                   if (
                     !latest?.canMerge ||
                     latest.pull.sha !== pull.sha ||
                     !["passed", "none"].includes(summarize(latest.pull.checks))
                   )
-                    throw new Error("Merge eligibility changed. Refresh this review.");
+                    throw new Error("Merge eligibility changed. Refresh and review it again.");
                   await actions?.pulls?.merge(pull);
+                };
+                // The review closes at once; the page below says how the merge went.
+                if (background) {
+                  background.start(pull, "merge", async () => {
+                    await merge();
+                    return { merged: true };
+                  });
+                  onClose();
+                  return;
+                }
+                action.run("merge", async () => {
+                  await merge();
                   setDone("Merged");
-                })
-              }
+                });
+              }}
             />
           </span>
         </div>

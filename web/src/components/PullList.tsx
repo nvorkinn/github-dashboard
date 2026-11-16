@@ -1,8 +1,9 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
 import { summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
+import { type BackgroundEntry, keyOf, useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { PullReview } from "./PullReview.tsx";
 import type { Tone } from "./state.tsx";
@@ -363,7 +364,14 @@ export function shortName(repo: string): string {
  * long as what was read doesn't say otherwise: auto-merge until the pull request is read again, a merge until its
  * row goes, and an update of the branch until its head is the new commit.
  */
-type Done = { of: PullRequest; what: "autoMergeOn" | "autoMergeOff" | "merged" | "updated" };
+type Done = { of: PullRequest; what: "autoMergeOn" | "autoMergeOff" | "merged" | "merging" | "updated" };
+
+/** What an action left running or done by a review that closed shows on the card, as though done on the card. */
+function doneInBackground(entry: BackgroundEntry | undefined, of: PullRequest): Done | undefined {
+  if (!entry || entry.status === "failed") return undefined;
+  if (entry.status === "done" && entry.merged) return { of, what: "merged" };
+  return { of, what: entry.what === "merge" ? "merging" : "autoMergeOn" };
+}
 
 function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined {
   switch (done?.what) {
@@ -399,8 +407,25 @@ export function PullRow({
   const folded = foldable && !unfolded;
   const actions = useActions()?.pulls;
   const readFiles = useActions()?.files;
-  const [doneState, setDone] = useState<Done | undefined>(undefined);
-  const done = stillShown(doneState, read);
+  const [doneState, setDoneState] = useState<Done | undefined>(undefined);
+  const background = useBackground();
+  const inBackground = background?.latest.get(keyOf(read));
+  // The pull request as read when the review's action started, so that auto-merge turned on there holds until it is
+  // read again, as one turned on here does.
+  const startedOn = useRef<{ id: number; of: PullRequest }>(undefined);
+  if (inBackground && startedOn.current?.id !== inBackground.id) {
+    startedOn.current = { id: inBackground.id, of: read };
+  }
+  // What was done on the card, or what the review that closed did, whichever came last: one done on the card
+  // forgets the other.
+  const done = stillShown(
+    (startedOn.current && doneInBackground(inBackground, startedOn.current.of)) ?? doneState,
+    read,
+  );
+  const setDone = (next: Done) => {
+    background?.forget(read);
+    setDoneState(next);
+  };
   const pull =
     done?.what === "autoMergeOn" || done?.what === "autoMergeOff"
       ? { ...read, autoMerge: done.what === "autoMergeOn" }
@@ -470,6 +495,11 @@ export function PullRow({
             <ToneIcon tone="done" />
             Merged
           </span>
+        ) : done?.what === "merging" ? (
+          <span class="chip tone-running">
+            <ToneIcon tone="running" />
+            Merging
+          </span>
         ) : done?.what === "updated" ? (
           <span class="chip tone-running">
             <ToneIcon tone="running" />
@@ -484,8 +514,11 @@ export function PullRow({
       <Checks checks={pull.checks} folded={folded} />
       <PullButtons
         pull={pull}
-        actions={done?.what === "merged" ? undefined : actions}
+        actions={done?.what === "merged" || inBackground?.status === "running" ? undefined : actions}
         updated={done?.what === "updated"}
+        backgroundProblem={
+          inBackground?.status === "failed" && !inBackground.dismissed ? noticeProblem(inBackground) : undefined
+        }
         onDone={setDone}
         onReview={readFiles && (() => setReviewOpen(true))}
       />
@@ -507,12 +540,15 @@ function PullButtons({
   updated,
   onDone,
   onReview,
+  backgroundProblem,
 }: {
   pull: PullRequest;
   actions: PullActions | undefined;
   updated: boolean;
   onDone: (done: Done) => void;
   onReview: (() => void) | undefined;
+  /** Why what the review started for it, before it closed, didn't work. */
+  backgroundProblem?: string | undefined;
 }) {
   const { busy, problem, run } = useAction();
   const canMerge = actions !== undefined && pull.mergeState === "clean" && !pull.draft;
@@ -574,10 +610,13 @@ function PullButtons({
           />
         )}
       </div>
-      {problem && (
+      {problem ? (
         <p class="action-problem" role="alert">
           {problem}
         </p>
+      ) : (
+        // The corner of the page has already said it out loud.
+        backgroundProblem && <p class="action-problem">{backgroundProblem}</p>
       )}
     </div>
   );
@@ -768,4 +807,8 @@ function Checks({ checks, folded }: { checks: Check[]; folded: boolean }) {
       </ul>
     </details>
   );
+}
+
+function noticeProblem(entry: BackgroundEntry & { status: "failed" }): string {
+  return entry.what === "merge" ? `Merge failed: ${entry.problem}` : `Auto-merge failed: ${entry.problem}`;
 }
