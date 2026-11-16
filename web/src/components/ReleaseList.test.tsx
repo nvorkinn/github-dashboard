@@ -150,7 +150,7 @@ function withActions(runs: ReleaseRun[], actions = fakeRunActions()) {
 
 const production: Approval = { environmentId: 70, environment: "production", canApprove: true };
 
-test("a waiting run offers Approve and Reject for each environment its user may approve, each asking first", async () => {
+test("a waiting run offers Approve and Reject for each environment its user may approve; only approving production asks", async () => {
   const waiting = run({
     state: "waiting",
     finishedAt: undefined,
@@ -169,9 +169,23 @@ test("a waiting run offers Approve and Reject for each environment its user may 
   expect((await screen.findByRole("status")).textContent).toBe("Approved production.");
 
   fireEvent.click(screen.getByRole("button", { name: "Reject production" }));
-  expect(screen.getByText("Reject production?")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
   expect(actions.review).toHaveBeenLastCalledWith(waiting, production, "rejected");
+});
+
+test("approving an environment that isn't production goes at once", async () => {
+  const staging: Approval = { environmentId: 72, environment: "staging", canApprove: true };
+  const waiting = run({
+    state: "waiting",
+    finishedAt: undefined,
+    jobs: [job({ id: 1, name: "approve-staging", state: "waiting" })],
+    approvals: [staging],
+  });
+  const { actions } = withActions([waiting]);
+  fireEvent.click(screen.getByRole("button", { name: "Approve staging" }));
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  expect(actions.review).toHaveBeenCalledWith(waiting, staging, "approved");
+  expect((await screen.findByRole("status")).textContent).toBe("Approved staging.");
 });
 
 test("a finished run that failed offers to re-run its failed jobs, and each failed or cancelled job alone", async () => {

@@ -186,9 +186,14 @@ function Leaving({ end, took, now }: { end: number; took: number; now: number })
   );
 }
 
+/** Production, by its environment's name: approving a deploy there is what asks first. */
+function isProduction(environment: string): boolean {
+  return /^prod/i.test(environment);
+}
+
 /**
- * Approve and Reject for one environment the run waits for, each asking first: a deploy that goes ahead can't be
- * taken back. Only for a required reviewer; anyone else is told who it waits for.
+ * Approve and Reject for one environment the run waits for. Approving production asks first, as that deploy can't be
+ * taken back; anything else goes at once. Only for a required reviewer; anyone else is told who it waits for.
  */
 function ApprovalActions({
   run,
@@ -209,7 +214,7 @@ function ApprovalActions({
         label={`Approve ${environment}`}
         title={`Let the run deploy to ${environment}`}
         busy="Approving…"
-        ask={() => `Approve ${environment}?`}
+        {...(isProduction(environment) ? { ask: () => `Approve ${environment}?` } : {})}
         run={async () => {
           await actions.review(run, approval, "approved");
           return `Approved ${environment}.`;
@@ -221,7 +226,6 @@ function ApprovalActions({
         title={`Stop the run from deploying to ${environment}`}
         busy="Rejecting…"
         secondary
-        ask={() => `Reject ${environment}?`}
         run={async () => {
           await actions.review(run, approval, "rejected");
           return `Rejected ${environment}.`;

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { ActionsContext } from "./actions.tsx";
 import { DashboardView } from "./DashboardView.tsx";
@@ -78,7 +78,7 @@ test("hides the selected repository, returns to overview, and refreshes when sho
   expect(screen.getByText("Weather change")).toBeTruthy();
 });
 
-test("keeps repository release confirmations connected to the selected project", async () => {
+test("releases the selected project from its header", async () => {
   const actions = fakeRunActions();
   render(
     <ActionsContext.Provider value={{ runs: actions }}>
@@ -89,10 +89,7 @@ test("keeps repository release confirmations connected to the selected project",
   const header = screen.getByRole("link", { name: "Open on GitHub" }).parentElement;
   expect(header).toBeTruthy();
   fireEvent.click(within(header as HTMLElement).getByRole("button", { name: /Release .*weather-station/ }));
-  expect(await screen.findByText("Release octocat/weather-station as v1.3.0 from its default branch?")).toBeTruthy();
-  expect(actions.release).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
-  expect(actions.release).toHaveBeenCalledWith(project(), "v1.3.0");
+  await waitFor(() => expect(actions.release).toHaveBeenCalledWith(project(), "v1.3.0"));
 });
 
 test("shows honest job inspection and log links, plus approval and failed workflow attention", () => {
@@ -226,9 +223,7 @@ test("keeps release control in the sidebar, not on the overview", async () => {
   const drawer = screen.getByRole("region", { name: "Release controls for weather-station" });
   expect(drawer.textContent).toContain("2 pull requests on main since");
   fireEvent.click(within(drawer).getByRole("button", { name: /Release .*weather-station/ }));
-  expect(await screen.findByText("Release octocat/weather-station as v1.3.0 from its default branch?")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
-  expect(actions.release).toHaveBeenCalledOnce();
+  await waitFor(() => expect(actions.release).toHaveBeenCalledOnce());
   // Still the overview: release control doesn't change what is selected.
   expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
   fireEvent.click(toggle);

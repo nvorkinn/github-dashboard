@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, expect, test } from "vitest";
 import type { Project } from "../model.ts";
 import { ActionsContext } from "./actions.tsx";
@@ -23,15 +23,13 @@ const released = (tag: string) => ({
   publishedAt: before(86_400_000),
 });
 
-test("Release works out the tag, asks naming it, and releases it on Confirm", async () => {
+test("Release works out the tag and releases it at once, without asking", async () => {
   const one = project({ latestRelease: released("v1.2.3") });
   const actions = withActions([one]);
   fireEvent.click(screen.getByRole("button", { name: "Release octocat/weather-station" }));
   expect(actions.nextRelease).toHaveBeenCalledWith(one);
-  expect(await screen.findByText("Release octocat/weather-station as v1.3.0 from its default branch?")).toBeTruthy();
-  expect(actions.release).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
-  expect(actions.release).toHaveBeenCalledWith(one, "v1.3.0");
+  await waitFor(() => expect(actions.release).toHaveBeenCalledWith(one, "v1.3.0"));
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
   expect((await screen.findByRole("status")).textContent).toBe("Released octocat/weather-station as v1.3.0.");
 });
 
