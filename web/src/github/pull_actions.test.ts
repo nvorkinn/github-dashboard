@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { fakeDashboard, project, pull, ready } from "../components/testing.ts";
 import type { MergeMethod, PullRequest } from "../model.ts";
-import { ActionError, AUTO_MERGE_OFF, createPullActions, DRAFT_REFUSED } from "./pull_actions.ts";
+import { ActionError, AUTO_MERGE_OFF, createPullActions, DRAFT_REFUSED, NOT_DEPENDABOT } from "./pull_actions.ts";
 import { answerQuery, fakeGitHub, type Routes, withPull } from "./testing.ts";
 
 const REPO = "octocat/weather-station";
@@ -222,4 +222,30 @@ test.each<[string, () => Response | Promise<Response>, string]>([
   const failed = actions.updateBranch(pull() as PullRequest);
   await expect(failed).rejects.toBeInstanceOf(ActionError);
   await expect(failed).rejects.toThrow(words);
+});
+
+test("asking Dependabot to rebase comments its command on the pull request's conversation", async () => {
+  const { actions, requests } = setUp({
+    [`POST repos/${REPO}/issues/1/comments`]: () => Response.json({ id: 1 }, { status: 201 }),
+  });
+  await actions.requestRebase(pull({ author: "dependabot[bot]" }));
+  expect(requests).toEqual([
+    { method: "POST", path: `repos/${REPO}/issues/1/comments`, body: { body: "@dependabot rebase" } },
+  ]);
+});
+
+test("only Dependabot's own pull requests are asked to rebase", async () => {
+  const { actions, requests } = setUp({});
+  await expect(actions.requestRebase(pull({ author: "monalisa" }))).rejects.toThrow(NOT_DEPENDABOT);
+  expect(requests).toEqual([]);
+});
+
+test("a rebase request GitHub refuses says why", async () => {
+  const { actions } = setUp({
+    [`POST repos/${REPO}/issues/1/comments`]: () =>
+      Response.json({ message: "Resource not accessible by integration" }, { status: 403 }),
+  });
+  await expect(actions.requestRebase(pull({ author: "dependabot[bot]" }))).rejects.toThrow(
+    "The GitHub App isn't allowed to do this.",
+  );
 });

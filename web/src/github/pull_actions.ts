@@ -1,6 +1,6 @@
 import type { Auth } from "../auth.ts";
 import type { Dashboard, MergeMethod, Project, PullActions, PullRequest } from "../model.ts";
-import { summarize } from "../model.ts";
+import { isDependabot, summarize } from "../model.ts";
 import { createApi } from "./api.ts";
 import { pullRequest } from "./read.ts";
 import { ActionError, refusedWith, send as sendWrite, worded } from "./writes.ts";
@@ -19,6 +19,9 @@ const DISABLE_AUTO_MERGE = `mutation($id: ID!) {
 
 // What is said when auto-merge can't be turned on, before asking GitHub.
 export const DRAFT_REFUSED = "Mark the pull request ready for review before turning on auto-merge.";
+export const NOT_DEPENDABOT = "Only Dependabot's own pull requests can be asked to rebase.";
+/** The comment that asks Dependabot to rebase a pull request of its own. */
+export const REBASE_COMMAND = "@dependabot rebase";
 export const AUTO_MERGE_OFF = "Auto-merge is off for this repository. Turn on Allow auto-merge in its settings.";
 
 /**
@@ -98,6 +101,16 @@ export function createPullActions(auth: Auth, dashboard: Dashboard): PullActions
         });
         // GitHub updates the branch in the background; the push it makes is an event of its own as well.
         dashboard.changed({ kind: "pull_request", repo: pull.repo, pull: pull.number });
+      }),
+
+    requestRebase: (pull) =>
+      worded(async () => {
+        if (!isDependabot(pull)) {
+          throw new ActionError(NOT_DEPENDABOT);
+        }
+        // A pull request's conversation is its issue's. Dependabot reads the comment and pushes the rebase itself,
+        // which comes back as an event of its own; nothing here changes until then.
+        await send(`repos/${pull.repo}/issues/${pull.number}/comments`, "POST", { body: REBASE_COMMAND });
       }),
   };
 }

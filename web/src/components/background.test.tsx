@@ -23,10 +23,12 @@ function pending<T>() {
 function setUp(shown: PullRequest = pull()) {
   const merging = pending<void>();
   const turningOn = pending<{ merged: boolean }>();
+  const rebasing = pending<void>();
   const pulls = {
     setAutoMerge: vi.fn((_pull: PullRequest, _enabled: boolean) => turningOn.promise),
     merge: vi.fn((_pull: PullRequest) => merging.promise),
     updateBranch: vi.fn(async (_pull: PullRequest) => {}),
+    requestRebase: vi.fn((_pull: PullRequest) => rebasing.promise),
   };
   const review = {
     read: vi.fn(async () => ({ pull: shown, description: "", canApprove: true, canMerge: true, reviews: [] })),
@@ -41,7 +43,7 @@ function setUp(shown: PullRequest = pull()) {
       </BackgroundProvider>
     </ActionsContext.Provider>,
   );
-  return { pulls, merging, turningOn };
+  return { pulls, merging, turningOn, rebasing };
 }
 
 async function openReview() {
@@ -112,4 +114,40 @@ test("an action on the card replaces what the review left", async () => {
   fireEvent.click(cancel);
   await screen.findByRole("button", { name: "Auto-merge" });
   expect(document.querySelector(".pull-badges")?.textContent).not.toContain("Auto-merge");
+});
+
+test("asks Dependabot to rebase from the card, and says on the page how it went", async () => {
+  const { pulls, rebasing } = setUp(pull({ author: "dependabot[bot]" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rebase" }));
+  expect(await screen.findByText("Asking Dependabot to rebase #1 in weather-station…")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Asking…" }) as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect(pulls.requestRebase).toHaveBeenCalledOnce());
+  rebasing.resolve();
+  expect(await screen.findByText("Asked Dependabot to rebase #1 in weather-station")).toBeTruthy();
+  expect(document.querySelector(".pull-badges")?.textContent).toContain("Rebase requested");
+  // Asked once is enough until Dependabot pushes the rebase.
+  expect(screen.queryByRole("button", { name: "Rebase" })).toBeNull();
+});
+
+test("closes the review when Dependabot is asked to rebase, and keeps a failure on the page", async () => {
+  const { pulls, rebasing } = setUp(pull({ author: "dependabot[bot]" }));
+  const review = await openReview();
+  fireEvent.click(review.getByRole("button", { name: "Rebase" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(pulls.requestRebase).toHaveBeenCalledWith(expect.objectContaining({ number: 1 })));
+  rebasing.reject(new Error("GitHub refused: Issue is locked."));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't ask Dependabot to rebase #1 in weather-station: GitHub refused: Issue is locked.",
+  );
+  expect(document.querySelector(".action-problem")?.textContent).toBe(
+    "Rebase request failed: GitHub refused: Issue is locked.",
+  );
+  expect(screen.getByRole("button", { name: "Rebase" })).toBeTruthy();
+});
+
+test("offers a rebase only on Dependabot's pull requests", async () => {
+  setUp(pull({ author: "monalisa" }));
+  expect(screen.queryByRole("button", { name: "Rebase" })).toBeNull();
+  const review = await openReview();
+  expect(review.queryByRole("button", { name: "Rebase" })).toBeNull();
 });

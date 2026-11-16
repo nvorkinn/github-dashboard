@@ -3,8 +3,11 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "p
 import type { PullRequest } from "../model.ts";
 import { reasonOf } from "./actions.tsx";
 
-/** The pull request actions that carry on after the review that started them closes. */
-export type BackgroundWhat = "merge" | "autoMerge";
+/**
+ * The pull request actions that carry on after the review or the card that started them: `rebase` asks Dependabot
+ * to rebase one of its pull requests.
+ */
+export type BackgroundWhat = "merge" | "autoMerge" | "rebase";
 
 /**
  * One such action: under way, gone through (`merged` when the pull request merged, which turning auto-merge on does
@@ -89,16 +92,29 @@ function subjectOf(pull: PullRequest): string {
 /** What the corner says of an action. */
 export function noticeOf(entry: BackgroundEntry): string {
   const subject = subjectOf(entry.pull);
-  if (entry.status === "running") {
-    return entry.what === "merge" ? `Merging ${subject}…` : `Turning on auto-merge for ${subject}…`;
-  }
-  if (entry.status === "done") {
-    return entry.merged ? `Merged ${subject}` : `Auto-merge is on for ${subject}`;
-  }
-  return entry.what === "merge"
-    ? `Couldn't merge ${subject}: ${entry.problem}`
-    : `Couldn't turn on auto-merge for ${subject}: ${entry.problem}`;
+  const words = WORDS[entry.what];
+  if (entry.status === "running") return `${words.running(subject)}…`;
+  if (entry.status === "done") return entry.merged ? `Merged ${subject}` : words.done(subject);
+  return `${words.failed(subject)}: ${entry.problem}`;
 }
+
+const WORDS: Record<BackgroundWhat, Record<"running" | "done" | "failed", (subject: string) => string>> = {
+  merge: {
+    running: (subject) => `Merging ${subject}`,
+    done: (subject) => `Merged ${subject}`,
+    failed: (subject) => `Couldn't merge ${subject}`,
+  },
+  autoMerge: {
+    running: (subject) => `Turning on auto-merge for ${subject}`,
+    done: (subject) => `Auto-merge is on for ${subject}`,
+    failed: (subject) => `Couldn't turn on auto-merge for ${subject}`,
+  },
+  rebase: {
+    running: (subject) => `Asking Dependabot to rebase ${subject}`,
+    done: (subject) => `Asked Dependabot to rebase ${subject}`,
+    failed: (subject) => `Couldn't ask Dependabot to rebase ${subject}`,
+  },
+};
 
 function BackgroundNotices({ entries, onDismiss }: { entries: BackgroundEntry[]; onDismiss: (id: number) => void }) {
   return (

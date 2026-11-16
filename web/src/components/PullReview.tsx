@@ -4,7 +4,7 @@ import { DIFF_FONT_SIZES, type DiffFontSize, rememberDiffFontSize, rememberedDif
 import { imageType } from "../github/images.ts";
 import type { ReviewInfo } from "../github/review.ts";
 import type { ChangedFile, PullFiles, PullRequest } from "../model.ts";
-import { summarize } from "../model.ts";
+import { isDependabot, summarize } from "../model.ts";
 import { clampSplitShare, rememberedSplitShare, rememberSplitShare } from "../split_share.ts";
 import { clampTreeWidth, MIN_TREE_WIDTH, rememberedTreeWidth, rememberTreeWidth } from "../tree_width.ts";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
@@ -568,6 +568,33 @@ export function PullReview({
           >
             <Icon name="check" /> Approve
           </button>
+          {actions?.pulls && isDependabot(pull) && (
+            <button
+              type="button"
+              title="Comment “@dependabot rebase” so Dependabot rebases it onto its base"
+              disabled={action.busy !== undefined || !!done}
+              onClick={() => {
+                const pulls = actions.pulls;
+                if (!pulls) return;
+                // Dependabot pushes a new head, so what is shown here is about to be out of date: the review closes
+                // at once and the page below says how asking went.
+                if (background) {
+                  background.start(pull, "rebase", async () => {
+                    await pulls.requestRebase(pull);
+                    return { merged: false };
+                  });
+                  onClose();
+                  return;
+                }
+                action.run("rebase", async () => {
+                  await pulls.requestRebase(pull);
+                  setDone("Asked Dependabot to rebase");
+                });
+              }}
+            >
+              <Icon name="refresh" /> {action.busy === "rebase" ? "Asking…" : "Rebase"}
+            </button>
+          )}
           {actions?.pulls && (pull.autoMerge || !pull.draft) && (
             <AutoMergeButton
               pull={pull}

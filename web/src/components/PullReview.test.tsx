@@ -157,7 +157,7 @@ test("turns auto-merge on and off from the review, like the board, closing it wh
       value={{
         files: async () => ({ files: [file], truncated: false }),
         review,
-        pulls: { setAutoMerge, merge: vi.fn(), updateBranch: vi.fn() },
+        pulls: { setAutoMerge, merge: vi.fn(), updateBranch: vi.fn(), requestRebase: vi.fn() },
       }}
     >
       <PullReview initial={initial} pulls={[initial]} onClose={close} />
@@ -187,7 +187,12 @@ test("says merged when turning auto-merge on merges at once", async () => {
           read: async () => ({ pull: initial, description: "", canApprove: true, canMerge: true, reviews: [] }),
           approve: async () => {},
         },
-        pulls: { setAutoMerge: async () => ({ merged: true }), merge: vi.fn(), updateBranch: vi.fn() },
+        pulls: {
+          setAutoMerge: async () => ({ merged: true }),
+          merge: vi.fn(),
+          updateBranch: vi.fn(),
+          requestRebase: vi.fn(),
+        },
       }}
     >
       <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />
@@ -205,7 +210,7 @@ test("offers no auto-merge for a draft", async () => {
     <ActionsContext.Provider
       value={{
         files: async () => ({ files: [file], truncated: false }),
-        pulls: { setAutoMerge: vi.fn(), merge: vi.fn(), updateBranch: vi.fn() },
+        pulls: { setAutoMerge: vi.fn(), merge: vi.fn(), updateBranch: vi.fn(), requestRebase: vi.fn() },
       }}
     >
       <PullReview initial={initial} pulls={[initial]} onClose={() => {}} />

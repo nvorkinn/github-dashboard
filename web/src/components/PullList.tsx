@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
-import { summarize } from "../model.ts";
+import { isDependabot, summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
-import { type BackgroundEntry, keyOf, useBackground } from "./background.tsx";
+import { type BackgroundEntry, type BackgroundWhat, keyOf, useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { PullReview } from "./PullReview.tsx";
 import type { Tone } from "./state.tsx";
@@ -362,13 +362,17 @@ export function shortName(repo: string): string {
 /**
  * What an action that went through changed, shown at once rather than when GitHub is read again. Each holds only as
  * long as what was read doesn't say otherwise: auto-merge until the pull request is read again, a merge until its
- * row goes, and an update of the branch until its head is the new commit.
+ * row goes, and an update of the branch, or a rebase asked of Dependabot, until its head is a new commit.
  */
-type Done = { of: PullRequest; what: "autoMergeOn" | "autoMergeOff" | "merged" | "merging" | "updated" };
+type Done = {
+  of: PullRequest;
+  what: "autoMergeOn" | "autoMergeOff" | "merged" | "merging" | "updated" | "rebaseAsked";
+};
 
 /** What an action left running or done by a review that closed shows on the card, as though done on the card. */
 function doneInBackground(entry: BackgroundEntry | undefined, of: PullRequest): Done | undefined {
   if (!entry || entry.status === "failed") return undefined;
+  if (entry.what === "rebase") return entry.status === "done" ? { of, what: "rebaseAsked" } : undefined;
   if (entry.status === "done" && entry.merged) return { of, what: "merged" };
   return { of, what: entry.what === "merge" ? "merging" : "autoMergeOn" };
 }
@@ -379,6 +383,7 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
     case "autoMergeOff":
       return done.of === pull ? done : undefined;
     case "updated":
+    case "rebaseAsked":
       return done.of.sha === pull.sha ? done : undefined;
     default:
       return done;
@@ -509,13 +514,36 @@ export function PullRow({
           <MergeState pull={pull} />
         )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
+        {done?.what === "rebaseAsked" && <span class="badge">Rebase requested</span>}
       </div>
       {reviewOpen && <PullReview initial={pull} pulls={reviewPulls ?? [pull]} onClose={() => setReviewOpen(false)} />}
       <Checks checks={pull.checks} folded={folded} />
       <PullButtons
         pull={pull}
-        actions={done?.what === "merged" || inBackground?.status === "running" ? undefined : actions}
+        actions={
+          done?.what === "merged" || (inBackground?.status === "running" && inBackground.what !== "rebase")
+            ? undefined
+            : actions
+        }
         updated={done?.what === "updated"}
+        rebaseAsked={done?.what === "rebaseAsked"}
+        running={inBackground?.status === "running" ? inBackground.what : undefined}
+        onRebase={
+          actions &&
+          ((shown: PullRequest) => {
+            if (background) {
+              background.start(shown, "rebase", async () => {
+                await actions.requestRebase(shown);
+                return { merged: false };
+              });
+              return undefined;
+            }
+            return async () => {
+              await actions.requestRebase(shown);
+              setDone({ of: shown, what: "rebaseAsked" });
+            };
+          })
+        }
         backgroundProblem={
           inBackground?.status === "failed" && !inBackground.dismissed ? noticeProblem(inBackground) : undefined
         }
@@ -531,30 +559,45 @@ export function PullRow({
  * The buttons for what can be done to a pull request now, and why the last one didn't work. Its changes can be
  * reviewed when the files can be read (`onReview`). With `actions`: auto-merge can be turned on for one that isn't a
  * draft, and off for any; a pull request that is ready can be merged, after a confirmation as that can't be undone;
- * one that is behind its base can have its branch updated. They all sit in the one group, which wraps as a whole
- * rather than letting a button land on the states or checks beside it.
+ * one that is behind its base can have its branch updated; Dependabot can be asked to rebase one of its own. They all
+ * sit in the one group, which wraps as a whole rather than letting a button land on the states or checks beside it.
  */
 function PullButtons({
   pull,
   actions,
   updated,
+  rebaseAsked = false,
+  running,
   onDone,
+  onRebase,
   onReview,
   backgroundProblem,
 }: {
   pull: PullRequest;
   actions: PullActions | undefined;
   updated: boolean;
+  /** Dependabot was asked to rebase it, and hasn't pushed the rebase yet. */
+  rebaseAsked?: boolean;
+  /** What the page is doing for it in the background, which holds the buttons until it is through. */
+  running?: BackgroundWhat | undefined;
   onDone: (done: Done) => void;
+  /**
+   * Asks Dependabot to rebase it: in the background, saying how it went in the corner of the page and on the card,
+   * or else gives the task to run here.
+   */
+  onRebase?: ((pull: PullRequest) => (() => Promise<void>) | undefined) | undefined;
   onReview: (() => void) | undefined;
   /** Why what the review started for it, before it closed, didn't work. */
   backgroundProblem?: string | undefined;
 }) {
-  const { busy, problem, run } = useAction();
+  const action = useAction();
+  const { problem, run } = action;
+  const busy = action.busy ?? running;
   const canMerge = actions !== undefined && pull.mergeState === "clean" && !pull.draft;
   const canUpdate = actions !== undefined && pull.mergeState === "behind" && !updated;
   const canAutoMerge = actions !== undefined && (pull.autoMerge || !pull.draft);
-  if (!onReview && !canMerge && !canUpdate && !canAutoMerge) {
+  const canRebase = actions !== undefined && onRebase !== undefined && isDependabot(pull) && !rebaseAsked;
+  if (!onReview && !canMerge && !canUpdate && !canAutoMerge && !canRebase) {
     return null;
   }
   const subject = `#${pull.number} in ${shortName(pull.repo)}`;
@@ -595,6 +638,20 @@ function PullButtons({
             }
           >
             {busy === "update" ? "Updating…" : "Update branch"}
+          </button>
+        )}
+        {canRebase && (
+          <button
+            type="button"
+            class="action"
+            title="Comment “@dependabot rebase” so Dependabot rebases it onto its base"
+            disabled={busy !== undefined}
+            onClick={() => {
+              const task = onRebase(pull);
+              if (task) run("rebase", task);
+            }}
+          >
+            {busy === "rebase" ? "Asking…" : "Rebase"}
           </button>
         )}
         {actions && canAutoMerge && (
@@ -810,5 +867,6 @@ function Checks({ checks, folded }: { checks: Check[]; folded: boolean }) {
 }
 
 function noticeProblem(entry: BackgroundEntry & { status: "failed" }): string {
+  if (entry.what === "rebase") return `Rebase request failed: ${entry.problem}`;
   return entry.what === "merge" ? `Merge failed: ${entry.problem}` : `Auto-merge failed: ${entry.problem}`;
 }
