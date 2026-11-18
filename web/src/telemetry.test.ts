@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Auth } from "./auth.ts";
+import { sendQuery, withCost } from "./github/api.ts";
 import { CHANGE_WAIT_MS, createDashboard, differences } from "./github/dashboard.ts";
 import { account, fakeGitHub, fakeStreams, withPull } from "./github/testing.ts";
 import type { DashboardData } from "./model.ts";
@@ -88,6 +89,48 @@ test("a request is recorded with its purpose, its path without the query, and wh
     expect.objectContaining({ purpose: "review", unchanged: true }),
     expect.not.objectContaining({ purpose: expect.anything() }),
   ]);
+});
+
+test("a next page's whole address is recorded as its path", async () => {
+  const { sent } = started();
+  const auth = {
+    github: (path: string, init?: RequestInit) => recorded(path, init, async () => Response.json([])),
+  } as Auth;
+  await auth.github("https://api.github.com/repositories/12/releases?per_page=100&page=2");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(sent.find((event) => event.kind === "request")).toEqual(
+    expect.objectContaining({ path: "/repositories/12/releases" }),
+  );
+});
+
+test("a GraphQL query asks its cost while recording, which is recorded and left out of the answer", async () => {
+  const asked: string[] = [];
+  const auth = {
+    github: (path: string, init?: RequestInit) =>
+      recorded(path, init, async () => {
+        asked.push(JSON.parse(String(init?.body)).query);
+        return Response.json({ data: { rateLimit: { cost: 3 }, viewer: { login: "me" } } });
+      }),
+  } as Auth;
+  // Not recording: the query goes as it is.
+  expect((await sendQuery(auth, "query { viewer { login } }", undefined)).data).toEqual({ viewer: { login: "me" } });
+  expect(asked[0]).toBe("query { viewer { login } }");
+
+  const { sent } = started();
+  const answer = await sendQuery(labelled(auth, "read.changes"), "query { viewer { login } }", undefined);
+  expect(answer.data).toEqual({ viewer: { login: "me" } });
+  expect(asked[1]).toBe("query {\n  rateLimit { cost } viewer { login } }");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(sent.find((event) => event.kind === "request")).toEqual(
+    expect.objectContaining({ path: "/graphql", purpose: "read.changes", cost: 3 }),
+  );
+});
+
+test("only a query is asked its cost, as a mutation can't be", () => {
+  expect(withCost("query($a: Int) {\n  x\n}\nfragment F on T { y }")).toBe(
+    "query($a: Int) {\n  rateLimit { cost }\n  x\n}\nfragment F on T { y }",
+  );
+  expect(withCost("mutation { x }")).toBe("mutation { x }");
 });
 
 test("differences counts what a read found that the page didn't show", () => {

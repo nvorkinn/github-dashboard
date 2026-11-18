@@ -207,8 +207,9 @@ test("an event stream is logged when it opens and closes, with what it carried",
 test("GitHub's webhook deliveries are logged once each, read an hour apart", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   const { lines, telemetry } = recorder();
+  // GitHub's ids are past Number.MAX_SAFE_INTEGER, so JSON gives them back rounded.
   const delivery = (id: number) => ({
-    id,
+    id: 2 ** 60 + id,
     guid: `g-${id}`,
     event: "push",
     action: null,

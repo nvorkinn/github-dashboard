@@ -24,7 +24,11 @@ const sample = [
     _msg: line(1, { telemetry: "webhook", kind: "pull_request", delivery: "d-1", repo: "o/n", pull: 1 }),
   }),
   line(2, { telemetry: "webhook_delivery", delivery: "d-1", deliveredAt: at(0), ms: 30, status: 204 }),
-  line(3, { telemetry: "webhook_delivery", delivery: "d-2", deliveredAt: at(0), ms: 0, status: 502 }),
+  line(3, { telemetry: "webhook_delivery", delivery: "d-2", deliveredAt: at(2), ms: 0, status: 502 }),
+  // Read again after the relay restarted: counted once.
+  line(3, { telemetry: "webhook_delivery", delivery: "d-2", deliveredAt: at(2), ms: 0, status: 502 }),
+  // Sent before the first webhook line, so maybe before the export began: not counted as lost.
+  line(3, { telemetry: "webhook_delivery", delivery: "d-0", deliveredAt: at(-60), ms: 20, status: 204 }),
   line(4, {
     telemetry: "page_read",
     tab: "t1",
@@ -48,6 +52,8 @@ const sample = [
     pullsChanged: 1,
   }),
   line(6, { telemetry: "page_change_shown", tab: "t1", delivery: "d-1", waitedMs: 1000, totalMs: 1300 }),
+  line(7, { telemetry: "page_request", tab: "t1", method: "POST", path: "/graphql", purpose: "read.changes", cost: 2 }),
+  line(7, { telemetry: "page_request", tab: "t1", method: "POST", path: "/graphql", purpose: "read.changes", cost: 3 }),
   line(7, {
     telemetry: "page_request",
     tab: "t1",
@@ -67,8 +73,9 @@ const sample = [
     status: 200,
     ms: 95,
   }),
-  // As VictoriaLogs exports it with the JSON parsed into fields, every value as text.
+  // As VictoriaLogs exports it with the JSON parsed into fields, every value as text, and a note of its own as `_msg`.
   JSON.stringify({
+    _msg: "missing _msg field; see https://docs.victoriametrics.com/victorialogs/keyconcepts/#message-field",
     _time: at(9),
     ts: at(9),
     telemetry: "page_read",
@@ -89,9 +96,13 @@ test("reads the relay's lines, as printed or as a log store exports them", () =>
     "webhook",
     "webhook_delivery",
     "webhook_delivery",
+    "webhook_delivery",
+    "webhook_delivery",
     "page_read",
     "page_read",
     "page_change_shown",
+    "page_request",
+    "page_request",
     "page_request",
     "page_request",
     "page_read",
@@ -116,10 +127,11 @@ test("counts reads of a burst for a given wait, no later than the most after its
 test("prints the tables the plan asks for", () => {
   const report = analyse(parseLines(sample));
   expect(report).toContain("| relay | runs.recheck | 1 |");
+  expect(report).toMatch(/\| page \| read\.changes \| 2 \| [\d.]+ \| 2 \| 5 \|/);
   expect(report).toContain("| fallback (everything) | 1 |");
   expect(report).toContain("1 of 1");
   expect(report).toContain(
-    "GitHub's log has 2 deliveries: 1 with no webhook line in the relay's log (1 failed on GitHub's side)",
+    "GitHub's log has 3 deliveries: 1 with no webhook line in the relay's log (1 failed on GitHub's side)",
   );
   expect(report).toContain("| Change came → shown | 1 | 1300 | 1300 | 1300 |");
   expect(report).toContain("2 tabs in all");

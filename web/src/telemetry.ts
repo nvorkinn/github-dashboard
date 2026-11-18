@@ -19,6 +19,11 @@ const ENDPOINT = "api/telemetry";
 type Sink = (kind: string, fields: TelemetryFields) => void;
 let sink: Sink | undefined;
 
+/** Whether events are recorded: the telemetry was started, and the relay takes them. */
+export function recording(): boolean {
+  return sink !== undefined;
+}
+
 /** Records one event, if the telemetry was started. */
 export function record(kind: string, fields: TelemetryFields): void {
   sink?.(kind, fields);
@@ -151,7 +156,8 @@ export async function recorded(
   if (!sink) return send();
   const method = (init?.method ?? "GET").toUpperCase();
   const purpose = (init as Labelled | undefined)?.[PURPOSE];
-  const clean = `/${(path.split("?")[0] ?? "").replace(/^\//, "")}`;
+  // A next page's address comes whole from GitHub's `Link` header: only its path is kept.
+  const clean = new URL(path, "https://api.github.com/").pathname;
   const started = performance.now();
   let response: Response;
   try {
@@ -181,6 +187,7 @@ export async function recorded(
     path: clean,
     purpose,
     status: response.status,
+    cost: clean === "/graphql" && response.ok ? await queryCost(response) : undefined,
     ms: Math.round(performance.now() - started),
     bytes: number(headers.get("content-length")),
     rateResource: headers.get("x-ratelimit-resource") ?? undefined,
@@ -189,6 +196,20 @@ export async function recorded(
     unchanged,
   });
   return response;
+}
+
+/**
+ * What a GraphQL query cost in points of the rate limit, if it asked (`sendQuery` asks while recording): GitHub counts
+ * a query by what it asks for, not one per call, so the calls alone don't say what the reads spend.
+ */
+async function queryCost(response: Response): Promise<number | undefined> {
+  try {
+    const body = (await response.clone().json()) as { data?: { rateLimit?: { cost?: unknown } } } | null;
+    const cost = body?.data?.rateLimit?.cost;
+    return typeof cost === "number" ? cost : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function number(value: string | null): number | undefined {

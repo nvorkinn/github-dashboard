@@ -7,7 +7,7 @@ export const DELIVERIES_MS = 60 * 60_000;
 export const FIRST_READ_MS = 60_000;
 // GitHub keeps deliveries for a few days; more than this many pages back at a time isn't read.
 const MAX_PAGES = 10;
-// How many delivery ids are remembered as already logged.
+// How many deliveries are remembered as already logged.
 const REMEMBERED = 5000;
 
 /**
@@ -18,7 +18,8 @@ const REMEMBERED = 5000;
  */
 export function logDeliveries(options: { app: GitHubApp; telemetry: Telemetry; closing?: AbortSignal | undefined }) {
   const { app, telemetry } = options;
-  const logged = new Set<number>();
+  // Known by their guid: GitHub's numeric `id` has outgrown what a JSON number holds exactly, so no number is kept.
+  const logged = new Set<string>();
 
   async function read(): Promise<void> {
     let cursor: string | undefined;
@@ -26,15 +27,15 @@ export function logDeliveries(options: { app: GitHubApp; telemetry: Telemetry; c
       const { deliveries, next } = await app.deliveries(cursor);
       let reachedLogged = false;
       for (const raw of deliveries) {
-        const id = isRecord(raw) ? wholeNumber(raw.id) : undefined;
-        if (!isRecord(raw) || id === undefined) continue;
-        if (logged.has(id)) {
+        const guid = isRecord(raw) ? text(raw.guid) : undefined;
+        if (!isRecord(raw) || guid === undefined) continue;
+        if (logged.has(guid)) {
           reachedLogged = true;
           continue;
         }
-        remember(id);
+        remember(guid);
         telemetry.event("webhook_delivery", {
-          delivery: text(raw.guid),
+          delivery: guid,
           kind: text(raw.event),
           action: text(raw.action),
           deliveredAt: text(raw.delivered_at),
@@ -49,8 +50,8 @@ export function logDeliveries(options: { app: GitHubApp; telemetry: Telemetry; c
     }
   }
 
-  function remember(id: number): void {
-    logged.add(id);
+  function remember(guid: string): void {
+    logged.add(guid);
     if (logged.size > REMEMBERED) {
       const oldest = logged.values().next().value;
       if (oldest !== undefined) logged.delete(oldest);
