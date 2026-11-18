@@ -18,7 +18,7 @@ const data = () =>
   });
 
 function dashboard(state = data(), refresh = vi.fn()) {
-  return render(<DashboardView state={state} now={NOW} refresh={refresh} view="workspace" />);
+  return render(<DashboardView state={state} now={NOW} refresh={refresh} />);
 }
 
 function select(name: string | RegExp) {
@@ -82,7 +82,7 @@ test("releases the selected project from its header", async () => {
   const actions = fakeRunActions();
   render(
     <ActionsContext.Provider value={{ runs: actions }}>
-      <DashboardView state={data()} now={NOW} refresh={() => {}} view="workspace" />
+      <DashboardView state={data()} now={NOW} refresh={() => {}} />
     </ActionsContext.Provider>,
   );
   select(/weather-station/);
@@ -209,7 +209,6 @@ test("keeps release control in the sidebar, not on the overview", async () => {
         })}
         now={NOW}
         refresh={() => {}}
-        view="workspace"
       />
     </ActionsContext.Provider>,
   );
@@ -279,7 +278,7 @@ test("ignores command navigation to unknown or hidden repositories", () => {
 test("handles no repositories and a removed selection without leaking stale context", () => {
   const view = dashboard();
   select(/weather-station/);
-  view.rerender(<DashboardView state={ready()} now={NOW} refresh={() => {}} view="workspace" />);
+  view.rerender(<DashboardView state={ready()} now={NOW} refresh={() => {}} />);
   expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
   expect(screen.getByText("No open pull requests")).toBeTruthy();
   expect(screen.getByText("Nothing running")).toBeTruthy();

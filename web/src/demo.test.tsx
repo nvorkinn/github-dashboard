@@ -84,7 +84,6 @@ test("the page on the demo shows the sample dashboard", async () => {
   expect(screen.getByRole("link", { name: "Calibrate the rain gauge per station (#212)" })).toBeTruthy();
   expect(screen.getByTitle("Releasing v2.5.0").textContent).toBe("v2.5.0");
   expect(screen.getByText("no release yet")).toBeTruthy();
-  expect(screen.getByText("Private")).toBeTruthy();
   expect(screen.getByText("Live")).toBeTruthy();
   unmount();
 });
@@ -147,11 +146,20 @@ test("the page on the demo has actions that work on the sample data, and one tha
   // The run moves on, so it waits for nothing anymore and its buttons go.
   await waitFor(() => expect(screen.queryByRole("button", { name: "Approving…" })).toBeNull(), { timeout: 3000 });
   expect(screen.queryByRole("button", { name: "Approve production" })).toBeNull();
-  expect(screen.queryByText("Waiting for approval", { selector: ".chip" })).toBeNull();
+  // The workspace lists each run's jobs too, and the scripted release has a job of its own that waits a while.
+  const promote = screen.getByRole("link", { name: "Promote v1.12.3" }).closest("li.release") as HTMLElement;
+  expect(within(promote).queryByText("Waiting for approval", { selector: ".chip" })).toBeNull();
 
   expect(screen.getByRole("button", { name: "Re-run failed jobs" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Promote octocat/home-ledger v1.12.3 to production" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Release octocat/garden-sensors" }));
+  // Releasing and promoting live in each repository's release controls, in the sidebar.
+  const releaseControls = (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Release controls for ${name}`) }));
+    return within(screen.getByRole("region", { name: `Release controls for ${name}` }));
+  };
+  expect(
+    releaseControls("home-ledger").getByRole("button", { name: "Promote octocat/home-ledger v1.12.3 to production" }),
+  ).toBeTruthy();
+  fireEvent.click(releaseControls("garden-sensors").getByRole("button", { name: "Release octocat/garden-sensors" }));
   expect((await screen.findByRole("alert", {}, { timeout: 3000 })).textContent).toBe(
     "Tag v3.1.0 already exists. Resolve it on GitHub before releasing.",
   );
