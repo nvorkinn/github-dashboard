@@ -31,8 +31,8 @@ test("folds a run that just finished, with its jobs behind Jobs, and counts down
       runs={[
         run({
           title: "v2.4.1",
-          startedAt: before(360_000),
-          finishedAt: before(108_000),
+          startedAt: before(312_000),
+          finishedAt: before(60_000),
           jobs: [job({ id: 1, name: "build" })],
         }),
       ]}
@@ -45,16 +45,16 @@ test("folds a run that just finished, with its jobs behind Jobs, and counts down
     "https://github.com/octocat/weather-station/actions/runs/1",
   );
   expect(card.querySelector(".chip")?.textContent).toBe("Done");
-  expect(card.querySelector(".meta")?.textContent).toBe("took 4m 12sleaves in 3:12");
+  expect(card.querySelector(".meta")?.textContent).toBe("took 4m 12sleaves in 1:00");
   const bar = card.querySelector("progress") as HTMLProgressElement;
-  expect([bar.value, bar.max]).toEqual([192_000, KEEP_FINISHED_MS]);
+  expect([bar.value, bar.max]).toEqual([60_000, KEEP_FINISHED_MS]);
   const jobs = card.querySelector("details") as HTMLDetailsElement;
   expect(jobs.open).toBe(false);
   expect(jobs.querySelector("summary")?.textContent).toBe("Jobs");
   expect(jobs.querySelector(".job")?.textContent).toBe("build: Done");
 });
 
-test("shows runs still going and those that finished within five minutes, failed ones too", () => {
+test("shows runs still going and those that finished within two minutes, failed ones too", () => {
   const runs = [
     run({ id: 1, state: "running", startedAt: before(7_200_000), finishedAt: undefined }),
     run({ id: 2, state: "waiting", finishedAt: undefined }),

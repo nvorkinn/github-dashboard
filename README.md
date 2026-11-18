@@ -295,7 +295,7 @@ runs in the relay") the page reads every open pull request again after a push in
 
 Release runs aren't read by the page at all. The relay sends every one it knows of when the page connects to its
 event stream, and each run whole as it changes (see "Release runs in the relay"); the page shows what the relay last
-said, of the projects it shows. A run is on the page while it is going and for five minutes after it finished, then
+said, of the projects it shows. A run is on the page while it is going and for two minutes after it finished, then
 without its jobs and with a link to it on GitHub. While the stream is down the runs stay as they were last told, and
 the relay tells all of them again on reconnecting. The one thing the page asks GitHub about a run is whether the
 signed-in user may approve the deployment it waits for: one request per waiting run, again after someone reviews it.
