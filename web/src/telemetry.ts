@@ -151,7 +151,7 @@ export async function recorded(
   if (!sink) return send();
   const method = (init?.method ?? "GET").toUpperCase();
   const purpose = (init as Labelled | undefined)?.[PURPOSE];
-  const clean = `/${(path.split("?")[0] ?? "").replace(/^\//, "")}`;
+  const clean = cleanPath(path);
   const started = performance.now();
   let response: Response;
   try {
@@ -193,4 +193,10 @@ export async function recorded(
 
 function number(value: string | null): number | undefined {
   return value !== null && /^\d+$/.test(value) ? Number(value) : undefined;
+}
+
+/** The path without its query; a full URL, such as a `next` link of a paged read, counts by its path alone. */
+export function cleanPath(path: string): string {
+  if (/^https?:\/\//.test(path)) return new URL(path).pathname;
+  return `/${(path.split("?")[0] ?? "").replace(/^\//, "")}`;
 }

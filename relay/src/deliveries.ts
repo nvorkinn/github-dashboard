@@ -18,39 +18,52 @@ const REMEMBERED = 5000;
  */
 export function logDeliveries(options: { app: GitHubApp; telemetry: Telemetry; closing?: AbortSignal | undefined }) {
   const { app, telemetry } = options;
-  const logged = new Set<number>();
+  const logged = new Set<string>();
 
   async function read(): Promise<void> {
-    let cursor: string | undefined;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const { deliveries, next } = await app.deliveries(cursor);
-      let reachedLogged = false;
-      for (const raw of deliveries) {
-        const id = isRecord(raw) ? wholeNumber(raw.id) : undefined;
-        if (!isRecord(raw) || id === undefined) continue;
-        if (logged.has(id)) {
-          reachedLogged = true;
-          continue;
+    // What each read saw, logged once at its end (`webhook_deliveries_read`), so a read that logs nothing says why.
+    const seen = { pages: 0, items: 0, logged: 0, skipped: 0, reachedLogged: false };
+    try {
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const { deliveries, next } = await app.deliveries(cursor);
+        seen.pages++;
+        seen.items += deliveries.length;
+        for (const raw of deliveries) {
+          // The guid is what the relay's own `webhook` line carries, and it is text, which a large id might not
+          // survive as.
+          const guid = isRecord(raw) ? text(raw.guid) : undefined;
+          if (!isRecord(raw) || guid === undefined) {
+            seen.skipped++;
+            continue;
+          }
+          if (logged.has(guid)) {
+            seen.reachedLogged = true;
+            continue;
+          }
+          remember(guid);
+          seen.logged++;
+          telemetry.event("webhook_delivery", {
+            delivery: guid,
+            kind: text(raw.event),
+            action: text(raw.action),
+            deliveredAt: text(raw.delivered_at),
+            // GitHub gives it in seconds.
+            ms: typeof raw.duration === "number" ? Math.round(raw.duration * 1000) : undefined,
+            status: wholeNumber(raw.status_code),
+            redelivery: raw.redelivery === true || undefined,
+          });
         }
-        remember(id);
-        telemetry.event("webhook_delivery", {
-          delivery: text(raw.guid),
-          kind: text(raw.event),
-          action: text(raw.action),
-          deliveredAt: text(raw.delivered_at),
-          // GitHub gives it in seconds.
-          ms: typeof raw.duration === "number" ? Math.round(raw.duration * 1000) : undefined,
-          status: wholeNumber(raw.status_code),
-          redelivery: raw.redelivery === true || undefined,
-        });
+        if (seen.reachedLogged || !next) return;
+        cursor = next;
       }
-      if (reachedLogged || !next) return;
-      cursor = next;
+    } finally {
+      telemetry.event("webhook_deliveries_read", { ...seen, reachedLogged: seen.reachedLogged || undefined });
     }
   }
 
-  function remember(id: number): void {
-    logged.add(id);
+  function remember(guid: string): void {
+    logged.add(guid);
     if (logged.size > REMEMBERED) {
       const oldest = logged.values().next().value;
       if (oldest !== undefined) logged.delete(oldest);
