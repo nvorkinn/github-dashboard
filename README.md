@@ -245,8 +245,9 @@ without each page asking GitHub. It reads GitHub as the GitHub App, not as a use
 - After each of these the run goes to the open pages whole: its state, its jobs and the workflow's jobs with the
   run's jobs placed on them (see "The event stream"). Per workflow the runs still going are kept, and the last one
   that finished, without its jobs.
-- In case a webhook never came, the runs still going are read again every three minutes and the workflow folders
-  every hour.
+- In case a webhook never came, the runs still going are read again every three minutes, and every hour the workflow
+  folders of the repositories that GitHub says were pushed to since; once a day all of them, for what no push says,
+  such as a workflow being disabled.
 
 All of it is in memory only: a restart reads it again. The relay only reads; approving, re-running and the like
 stay with the page, as the signed-in user. Whether the signed-in user may approve a waiting deployment is theirs to
@@ -320,8 +321,8 @@ bot token is cut out of its path. The health check isn't logged. For `/api/event
 took to open. The page's own calls go from the browser to api.github.com and are not in these lines.
 
 A request the relay sends also says what it was for, as `purpose`, where that is more than its path says:
-`workflows.start`, `workflows.hourly` and `workflows.push` for the workflow files, `runs.recheck`, `runs.reconcile` and
-`runs.<webhook>` for release runs, `merge_states.push` for merge states, and `deliveries.hourly` (below). Besides the
+`workflows.start`, `workflows.hourly`, `workflows.daily` and `workflows.push` for the workflow files, `runs.recheck`,
+`runs.reconcile` and `runs.<webhook>` for release runs, `merge_states.push` for merge states, and `deliveries.hourly` (below). Besides the
 requests there are these lines:
 
 | `telemetry`               | When                                        | What it says                                                                                                                                     |

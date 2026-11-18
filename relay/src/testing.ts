@@ -12,7 +12,10 @@ export function blob(text: string) {
  * a status to fail with; its call is `graphql`. The app's webhook deliveries are `routes.deliveries`: the pages in
  * order, each a list, the cursor of the next being its index; its call is `deliveries`.
  */
-export function fakeApp(repositories: { repo: string; defaultBranch?: string }[], routes: Record<string, unknown>) {
+export function fakeApp(
+  repositories: { repo: string; defaultBranch?: string; pushedAt?: string }[],
+  routes: Record<string, unknown>,
+) {
   const calls: string[] = [];
   function answer(path: string): unknown {
     calls.push(path);
@@ -24,7 +27,12 @@ export function fakeApp(repositories: { repo: string; defaultBranch?: string }[]
   }
   const app: GitHubApp = {
     repositories: async () =>
-      repositories.map((one) => ({ repo: one.repo, installation: 1, defaultBranch: one.defaultBranch ?? "main" })),
+      repositories.map((one) => ({
+        repo: one.repo,
+        installation: 1,
+        defaultBranch: one.defaultBranch ?? "main",
+        pushedAt: one.pushedAt,
+      })),
     get: async <T>(_installation: number, path: string) => answer(path) as T,
     list: async <T>(_installation: number, path: string, key?: string) => {
       const found = answer(path);
