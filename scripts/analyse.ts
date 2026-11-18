@@ -7,7 +7,9 @@
  *   node scripts/analyse.ts export.ndjson [more.ndjson ...]   (or the lines on stdin)
  *
  * A line is the relay's JSON as it printed it, a log store's record of it with that JSON as `_msg`, or one with its
- * fields parsed out as text (VictoriaLogs' export, either way); anything else is skipped.
+ * fields parsed out as text (VictoriaLogs' export, either way: when the relay's JSON had no `_msg` of its own,
+ * VictoriaLogs fills it with a note that isn't JSON, and the record's own fields are the line); anything else is
+ * skipped.
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -138,21 +140,35 @@ export function analyse(lines: Line[]): string {
 
   // 1. What is spent, on what.
   const all = calls(lines);
+  // GraphQL points: the page puts a query's cost on its request, the relay logs it as a line of its own.
+  const relayPoints = new Map<string, number>();
+  for (const line of lines.filter((one) => one.telemetry === "graphql_cost")) {
+    const purpose = str(line.purpose) ?? "(none)";
+    relayPoints.set(purpose, (relayPoints.get(purpose) ?? 0) + (num(line.cost) ?? 0));
+  }
   out.push("## Calls to GitHub by purpose\n");
   out.push(
     table(
-      ["From", "Purpose", "Calls", "Per hour", "GraphQL", "p50 ms", "p95 ms", "Avg KB"],
+      ["From", "Purpose", "Calls", "Per hour", "GraphQL", "Points", "p50 ms", "p95 ms", "Avg KB"],
       [...group(all, (call) => `${call.from}\t${call.purpose}`)]
         .map(([key, items]) => {
           const [from, purpose] = key.split("\t");
           const ms = items.map((call) => num(call.line.ms)).filter((v): v is number => v !== undefined);
           const kb = items.map((call) => num(call.line.bytes)).filter((v): v is number => v !== undefined);
+          const costs = items.map((call) => num(call.line.cost)).filter((v): v is number => v !== undefined);
+          const points =
+            from === "relay"
+              ? relayPoints.get(purpose ?? "")
+              : costs.length
+                ? costs.reduce((a, b) => a + b, 0)
+                : undefined;
           return [
             from,
             purpose,
             items.length,
             (items.length / hours).toFixed(1),
             items.filter((call) => call.path === "/graphql").length,
+            points,
             percentile(ms, 50),
             percentile(ms, 95),
             kb.length ? (kb.reduce((a, b) => a + b, 0) / kb.length / 1024).toFixed(1) : undefined,
@@ -230,7 +246,14 @@ export function analyse(lines: Line[]): string {
   const webhooks = new Map(
     lines.filter((line) => line.telemetry === "webhook").map((line) => [str(line.delivery), line] as const),
   );
-  const deliveries = lines.filter((line) => line.telemetry === "webhook_delivery");
+  // The relay logs the deliveries it reads again after a restart, so each counts once.
+  const deliveries = [
+    ...new Map(
+      lines.filter((line) => line.telemetry === "webhook_delivery").map((line) => [str(line.delivery), line] as const),
+    ).values(),
+  ];
+  // A delivery from before the first webhook line may have come before the export began.
+  const firstWebhook = Math.min(...[...webhooks.values()].map(time));
   const lag = deliveries
     .map((line) => {
       const arrived = webhooks.get(str(line.delivery));
@@ -238,7 +261,9 @@ export function analyse(lines: Line[]): string {
       return arrived && Number.isFinite(sent) ? time(arrived) - sent : undefined;
     })
     .filter((v): v is number => v !== undefined);
-  const lost = deliveries.filter((line) => !webhooks.has(str(line.delivery)));
+  const lost = deliveries.filter(
+    (line) => !webhooks.has(str(line.delivery)) && !(Date.parse(str(line.deliveredAt) ?? "") < firstWebhook),
+  );
   const failedDeliveries = deliveries.filter((line) => (num(line.status) ?? 0) >= 300 || line.status === undefined);
   out.push(
     table(

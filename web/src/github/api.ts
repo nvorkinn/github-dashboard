@@ -1,4 +1,5 @@
 import type { Auth } from "../auth.ts";
+import { recording } from "../telemetry.ts";
 
 const API_ORIGIN = "https://api.github.com";
 const PAGE_SIZE = 100;
@@ -94,7 +95,7 @@ export async function sendQuery(auth: Auth, query: string, signal: AbortSignal |
   const response = await auth.github("graphql", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query: recording() ? withCost(query) : query }),
     ...(signal ? { signal } : {}),
   });
   if (!response.ok) {
@@ -112,7 +113,14 @@ export async function sendQuery(auth: Auth, query: string, signal: AbortSignal |
   if (typeof data !== "object" || data === null) {
     throw new GitHubError("graphql", 502, undefined);
   }
-  return { data: data as Record<string, unknown>, errors };
+  // Asked only for the telemetry, which has read it (telemetry.ts): it is no part of the answer.
+  const { rateLimit: _, ...rest } = data as Record<string, unknown>;
+  return { data: rest, errors };
+}
+
+/** `query` asking for its own cost too, for the telemetry. A mutation can't: `rateLimit` is a field of a query. */
+export function withCost(query: string): string {
+  return /^\s*query\b/.test(query) ? query.replace("{", "{\n  rateLimit { cost }") : query;
 }
 
 function withParam(path: string, name: string, value: string): string {
