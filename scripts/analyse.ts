@@ -20,6 +20,7 @@ export function parseLines(text: string): Line[] {
   const lines: Line[] = [];
   for (const raw of text.split("\n")) {
     const one = tryJson(raw.trim());
+    // VictoriaLogs keeps a JSON line as fields of its own and puts a placeholder in `_msg`.
     const line = (typeof one?._msg === "string" ? tryJson(one._msg) : undefined) ?? one;
     if (line && typeof line.telemetry === "string" && typeof line.ts === "string") {
       lines.push(typed(line) as Line);

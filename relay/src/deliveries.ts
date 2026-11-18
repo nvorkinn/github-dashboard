@@ -7,7 +7,7 @@ export const DELIVERIES_MS = 60 * 60_000;
 export const FIRST_READ_MS = 60_000;
 // GitHub keeps deliveries for a few days; more than this many pages back at a time isn't read.
 const MAX_PAGES = 10;
-// How many deliveries are remembered as already logged.
+// How many delivery ids are remembered as already logged.
 const REMEMBERED = 5000;
 
 /**
@@ -18,35 +18,47 @@ const REMEMBERED = 5000;
  */
 export function logDeliveries(options: { app: GitHubApp; telemetry: Telemetry; closing?: AbortSignal | undefined }) {
   const { app, telemetry } = options;
-  // Known by their guid: GitHub's numeric `id` has outgrown what a JSON number holds exactly, so no number is kept.
   const logged = new Set<string>();
 
   async function read(): Promise<void> {
-    let cursor: string | undefined;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const { deliveries, next } = await app.deliveries(cursor);
-      let reachedLogged = false;
-      for (const raw of deliveries) {
-        const guid = isRecord(raw) ? text(raw.guid) : undefined;
-        if (!isRecord(raw) || guid === undefined) continue;
-        if (logged.has(guid)) {
-          reachedLogged = true;
-          continue;
+    // What each read saw, logged once at its end (`webhook_deliveries_read`), so a read that logs nothing says why.
+    const seen = { pages: 0, items: 0, logged: 0, skipped: 0, reachedLogged: false };
+    try {
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const { deliveries, next } = await app.deliveries(cursor);
+        seen.pages++;
+        seen.items += deliveries.length;
+        for (const raw of deliveries) {
+          // The guid is what the relay's own `webhook` line carries, and it is text, which a large id might not
+          // survive as.
+          const guid = isRecord(raw) ? text(raw.guid) : undefined;
+          if (!isRecord(raw) || guid === undefined) {
+            seen.skipped++;
+            continue;
+          }
+          if (logged.has(guid)) {
+            seen.reachedLogged = true;
+            continue;
+          }
+          remember(guid);
+          seen.logged++;
+          telemetry.event("webhook_delivery", {
+            delivery: guid,
+            kind: text(raw.event),
+            action: text(raw.action),
+            deliveredAt: text(raw.delivered_at),
+            // GitHub gives it in seconds.
+            ms: typeof raw.duration === "number" ? Math.round(raw.duration * 1000) : undefined,
+            status: wholeNumber(raw.status_code),
+            redelivery: raw.redelivery === true || undefined,
+          });
         }
-        remember(guid);
-        telemetry.event("webhook_delivery", {
-          delivery: guid,
-          kind: text(raw.event),
-          action: text(raw.action),
-          deliveredAt: text(raw.delivered_at),
-          // GitHub gives it in seconds.
-          ms: typeof raw.duration === "number" ? Math.round(raw.duration * 1000) : undefined,
-          status: wholeNumber(raw.status_code),
-          redelivery: raw.redelivery === true || undefined,
-        });
+        if (seen.reachedLogged || !next) return;
+        cursor = next;
       }
-      if (reachedLogged || !next) return;
-      cursor = next;
+    } finally {
+      telemetry.event("webhook_deliveries_read", { ...seen, reachedLogged: seen.reachedLogged || undefined });
     }
   }
 

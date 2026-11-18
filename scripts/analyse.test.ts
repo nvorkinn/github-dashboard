@@ -137,3 +137,18 @@ test("prints the tables the plan asks for", () => {
   expect(report).toContain("2 tabs in all");
   expect(report).toContain("1 of 2 page GETs repeated another tab's within a minute. 1 came back unchanged by ETag.");
 });
+
+test("reads a VictoriaLogs record whose fields were parsed out and whose _msg is a placeholder", () => {
+  const record = JSON.stringify({
+    _msg: "missing _msg field; see https://docs.victoriametrics.com/victorialogs/keyconcepts/#message-field",
+    _time: at(0),
+    ts: at(0),
+    telemetry: "http_out",
+    path: "/app/hook/deliveries",
+    status: "200",
+    ms: "285",
+  });
+  expect(parseLines(record)).toEqual([
+    expect.objectContaining({ telemetry: "http_out", path: "/app/hook/deliveries", status: 200, ms: 285 }),
+  ]);
+});

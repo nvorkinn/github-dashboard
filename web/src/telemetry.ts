@@ -156,8 +156,7 @@ export async function recorded(
   if (!sink) return send();
   const method = (init?.method ?? "GET").toUpperCase();
   const purpose = (init as Labelled | undefined)?.[PURPOSE];
-  // A next page's address comes whole from GitHub's `Link` header: only its path is kept.
-  const clean = new URL(path, "https://api.github.com/").pathname;
+  const clean = cleanPath(path);
   const started = performance.now();
   let response: Response;
   try {
@@ -214,4 +213,10 @@ async function queryCost(response: Response): Promise<number | undefined> {
 
 function number(value: string | null): number | undefined {
   return value !== null && /^\d+$/.test(value) ? Number(value) : undefined;
+}
+
+/** The path without its query; a full URL, such as a `next` link of a paged read, counts by its path alone. */
+export function cleanPath(path: string): string {
+  if (/^https?:\/\//.test(path)) return new URL(path).pathname;
+  return `/${(path.split("?")[0] ?? "").replace(/^\//, "")}`;
 }

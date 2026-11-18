@@ -207,9 +207,9 @@ test("an event stream is logged when it opens and closes, with what it carried",
 test("GitHub's webhook deliveries are logged once each, read an hour apart", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   const { lines, telemetry } = recorder();
-  // GitHub's ids are past Number.MAX_SAFE_INTEGER, so JSON gives them back rounded.
   const delivery = (id: number) => ({
-    id: 2 ** 60 + id,
+    // An id too large for a JavaScript number is still logged: deliveries are told apart by their guid.
+    id: id === 2 ? 2 ** 60 : id,
     guid: `g-${id}`,
     event: "push",
     action: null,
@@ -222,7 +222,11 @@ test("GitHub's webhook deliveries are logged once each, read an hour apart", asy
   logDeliveries({ app, telemetry });
   await vi.advanceTimersByTimeAsync(60_000);
   await settle();
-  expect(lines.map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1"]);
+  const deliveries = () => lines.filter((line) => line.telemetry === "webhook_delivery");
+  expect(deliveries().map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1"]);
+  expect(lines.at(-1)).toEqual(
+    expect.objectContaining({ telemetry: "webhook_deliveries_read", pages: 2, items: 3, logged: 3, skipped: 0 }),
+  );
   expect(lines[0]).toEqual(
     expect.objectContaining({ telemetry: "webhook_delivery", kind: "push", ms: 250, status: 204, redelivery: true }),
   );
@@ -233,7 +237,8 @@ test("GitHub's webhook deliveries are logged once each, read an hour apart", asy
   calls.length = 0;
   await vi.advanceTimersByTimeAsync(60 * 60_000);
   await settle();
-  expect(lines.map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1", "g-4"]);
+  expect(deliveries().map((line) => line.delivery)).toEqual(["g-3", "g-2", "g-1", "g-4"]);
+  expect(lines.at(-1)).toEqual(expect.objectContaining({ pages: 1, logged: 1, reachedLogged: true }));
   expect(calls).toEqual(["deliveries"]);
 });
 
