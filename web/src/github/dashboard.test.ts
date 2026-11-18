@@ -944,7 +944,7 @@ test("with the relay reading GitHub as the app, a push reads no pull request; wi
   stream.emit("releases", snapshot());
   stream.change({ kind: "push", repo: "octo/app", sha: "main2" });
   await pass(CHANGE_WAIT_MS);
-  expect(calls).toContain("repos/octo/app/releases/latest");
+  expect(calls).not.toContain("repos/octo/app/releases/latest");
   expect(calls.filter((call) => readsPull(call))).toEqual([]);
   dashboard.stop();
 });

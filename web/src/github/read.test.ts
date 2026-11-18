@@ -246,13 +246,14 @@ const known: DashboardData = {
 };
 
 /** A plan, spelled with only what it reads. */
-function plan(repos: Record<string, { pulls?: "all" | number[]; latestRelease?: true }>): Plan {
+function plan(repos: Record<string, { pulls?: "all" | number[]; latestRelease?: true; release?: true }>): Plan {
   return new Map(
     Object.entries(repos).map(([name, wanted]) => [
       name,
       {
         pulls: wanted.pulls === "all" ? "all" : new Set(wanted.pulls ?? []),
         latestRelease: wanted.latestRelease ?? false,
+        ...(wanted.release ? { release: true } : {}),
       },
     ]),
   );
@@ -301,7 +302,7 @@ test.each<[string, Change[], Plan]>([
     [{ kind: "push", repo: "octo/app", sha: "main2" }],
     plan({ "octo/app": { pulls: "all", latestRelease: true } }),
   ],
-  ["a release", [{ kind: "release", repo: "octo/lib" }], plan({ "octo/lib": { latestRelease: true } })],
+  ["a release", [{ kind: "release", repo: "octo/lib" }], plan({ "octo/lib": { latestRelease: true, release: true } })],
   [
     "a burst",
     [
@@ -312,7 +313,7 @@ test.each<[string, Change[], Plan]>([
       { kind: "workflow_job", repo: "octo/lib", sha: "sha1" },
       { kind: "check_run", repo: "octo/lib", sha: "main1" },
     ],
-    plan({ "octo/app": { pulls: [1, 2], latestRelease: true }, "octo/lib": { pulls: [5] } }),
+    plan({ "octo/app": { pulls: [1, 2], latestRelease: true, release: true }, "octo/lib": { pulls: [5] } }),
   ],
   [
     "a push among checks",
@@ -510,7 +511,7 @@ test("a push reads every pull request of the repository, as their base may have 
   expect(data.projects[0]?.unreleased).toEqual({ commits: 2, pulls: 1 });
   expect(calls).toEqual(
     [
-      "repos/octo/app/releases/latest",
+      // The release shown is compared with the moved branch again, without asking which release is the latest.
       "graphql",
       "repos/octo/app/pulls?state=open&per_page=100",
       ...pullCalls("octo/app", 1),
