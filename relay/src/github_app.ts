@@ -26,7 +26,13 @@ export function reasonOf(error: unknown): string {
 }
 
 /** A repository an installation of the app reaches. */
-export type InstalledRepo = { repo: string; installation: number; defaultBranch: string | undefined };
+export type InstalledRepo = {
+  repo: string;
+  installation: number;
+  defaultBranch: string | undefined;
+  /** When anything was last pushed to it, to any branch. */
+  pushedAt?: string | undefined;
+};
 
 /**
  * Reads api.github.com as the GitHub App: as one of its installations, with that installation's token. Octokit
@@ -228,7 +234,7 @@ export function createGitHubApp(options: {
         for (const raw of repos) {
           const repo = isRecord(raw) ? text(raw.full_name) : undefined;
           if (repo !== undefined && isRecord(raw) && raw.archived !== true) {
-            found.push({ repo, installation, defaultBranch: text(raw.default_branch) });
+            found.push({ repo, installation, defaultBranch: text(raw.default_branch), pushedAt: text(raw.pushed_at) });
           }
         }
       }

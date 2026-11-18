@@ -59,8 +59,13 @@ export type ReadResult = {
 export type RepoPlan = {
   /** `all`: the list of open pull requests and each one on it. Otherwise only the ones with these numbers. */
   pulls: "all" | Set<number>;
-  /** The latest release, and what the default branch has that it hasn't. */
+  /** What the default branch has that the latest release hasn't, and with `release` the latest release too. */
   latestRelease: boolean;
+  /**
+   * Whether the latest release itself may have changed: only a `release` says so. A push only moves the branch, so
+   * the release already shown is compared with it again, without asking GitHub which release is the latest.
+   */
+  release?: boolean;
 };
 
 /** What to read again: everything, or these parts of these repositories (`owner/name`). */
@@ -91,9 +96,10 @@ const SHOWN = new Set([
  *   pull request it is about, with its checks.
  * - `workflow_run`, `workflow_job`: the pull request it is about, with its checks. How a release run stands isn't
  *   read: the relay says (see dashboard.ts).
- * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged; and the
- *   latest release, as the default branch may have moved past it. With `mergeStatesFromRelay` only the latest
- *   release: the relay then tells the merge states itself (relay/src/merge_states.ts), so the page reads none.
+ * - `push`: every pull request of the repository, as a base that moved changes whether they can be merged; and what
+ *   the default branch now has that the release shown hasn't (a push moves no release, so which is the latest isn't
+ *   asked again). With `mergeStatesFromRelay` only that: the relay then tells the merge states itself
+ *   (relay/src/merge_states.ts), so the page reads none.
  * - `release`: the repository's latest release.
  *
  * The pull request a change is about is the one it numbers, or else the ones whose head is its commit: none for a
@@ -151,6 +157,7 @@ export function planFor(
         break;
       case "release":
         repo.latestRelease = true;
+        repo.release = true;
         break;
     }
   }
@@ -234,9 +241,10 @@ async function readRepo(
   previous: DashboardData | undefined,
   failed: Set<string>,
 ): Promise<RepoParts> {
+  const known = previous?.projects.find(of(repo));
   const was: RepoParts = {
-    latestRelease: previous?.projects.find(of(repo))?.latestRelease,
-    unreleased: previous?.projects.find(of(repo))?.unreleased,
+    latestRelease: known?.latestRelease,
+    unreleased: known?.unreleased,
     pulls: previous?.pulls.filter(of(repo)) ?? [],
   };
 
@@ -261,7 +269,7 @@ async function readRepo(
     part(
       wanted.latestRelease,
       async () => {
-        const found = await latest(api, repo);
+        const found = wanted.release || !known ? await latest(api, repo) : was.latestRelease;
         return { latestRelease: found, unreleased: await unreleasedOf(api, repo, found?.tag, branch) };
       },
       { latestRelease: was.latestRelease, unreleased: was.unreleased },

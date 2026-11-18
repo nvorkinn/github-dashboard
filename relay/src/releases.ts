@@ -6,6 +6,7 @@ import { createDefinitions } from "./workflows.ts";
 
 /** How often every repository's workflow files are looked at again, in case a push's webhook never came. */
 export const DEFINITIONS_MS = 60 * 60_000;
+const CHECKS_A_DAY = 24;
 /** How often the runs still going are read again, in case one of their webhooks never came. */
 export const RUNS_MS = 3 * 60_000;
 
@@ -83,7 +84,13 @@ export function createReleases(options: {
 
   const ready = withPurpose("workflows.start", () => definitions.load());
   if (!options.closing?.aborted) {
-    const again = setInterval(() => void withPurpose("workflows.hourly", () => definitions.load()), DEFINITIONS_MS);
+    let checks = 0;
+    const again = setInterval(() => {
+      // Once a day all of them, for what no push says, such as a workflow being disabled.
+      checks = (checks + 1) % CHECKS_A_DAY;
+      const daily = checks === 0;
+      void withPurpose(daily ? "workflows.daily" : "workflows.hourly", () => definitions.load({ onlyPushed: !daily }));
+    }, DEFINITIONS_MS);
     const recheck = setInterval(() => void withPurpose("runs.recheck", () => runs.recheck()), RUNS_MS);
     // Neither keeps the relay from stopping.
     again.unref();

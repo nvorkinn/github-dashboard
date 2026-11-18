@@ -24,16 +24,17 @@ export type ReleaseWorkflow = { id: number; path: string };
  * Every repository's workflow files as they are on its default branch, read as the GitHub App and kept in memory:
  * which of them are release workflows (see `releasePaths`), their jobs, and the repository's Promote workflow.
  *
- * They are read when the relay starts, again for a repository when something is pushed to its default branch, and
- * all of them every so often in case a webhook never came. A file is fetched only when its content changed. Nothing
+ * They are read when the relay starts, again for a repository when something is pushed to its default branch, every
+ * so often those that GitHub says were pushed to since, in case a webhook never came, and once a day all of them. A file is fetched only when its content changed. Nothing
  * is written anywhere: a restart reads them again.
  */
 export type Definitions = {
   /**
    * Reads every repository the app reaches, and forgets the ones it no longer does. A repository that can't be read
-   * stays as it was.
+   * stays as it was. With `onlyPushed`, a repository already read is read again only when something was pushed to it
+   * since: what can change otherwise, such as a workflow being disabled, waits for a load without it.
    */
-  load(): Promise<void>;
+  load(options?: { onlyPushed?: boolean }): Promise<void>;
   /** Takes in a webhook: a push to a default branch, or a change to which repositories there are. */
   onWebhook(kind: string, payload: Record<string, unknown>): void;
   /** Resolves once whatever is being read of `repo` right now is in. */
@@ -55,6 +56,8 @@ export type Definitions = {
 type Repo = {
   installation: number;
   defaultBranch: string | undefined;
+  /** When something was last pushed to it, as the list of repositories said when it was read. */
+  pushedAt: string | undefined;
   /** The YAML files directly in the workflows folder, by path. */
   files: Map<string, { sha: string; blob: WorkflowBlob }>;
   /** The paths of the release workflows among them. */
@@ -88,7 +91,12 @@ export function createDefinitions(options: {
     return next;
   }
 
-  async function read(repo: string, installation: number, defaultBranch: string | undefined): Promise<void> {
+  async function read(
+    repo: string,
+    installation: number,
+    defaultBranch: string | undefined,
+    pushedAt?: string,
+  ): Promise<void> {
     const before = repos.get(repo);
     const [listing, workflows] = await Promise.all([
       // Without the folder there are no workflow files.
@@ -123,6 +131,7 @@ export function createDefinitions(options: {
     repos.set(repo, {
       installation,
       defaultBranch: defaultBranch ?? before?.defaultBranch,
+      pushedAt: pushedAt ?? before?.pushedAt,
       files,
       releases: new Set(releasePaths([...files].map(([path, file]) => ({ path, blob: file.blob })))),
       workflows: workflows.flatMap((raw) => {
@@ -137,7 +146,7 @@ export function createDefinitions(options: {
     options.onChange?.(repo);
   }
 
-  function load(): Promise<void> {
+  function load(how: { onlyPushed?: boolean } = {}): Promise<void> {
     // Callers that arrive during a load share it.
     loading ??= (async () => {
       const found = await app.repositories();
@@ -148,7 +157,19 @@ export function createDefinitions(options: {
           options.onChange?.(repo);
         }
       }
-      await Promise.all(found.map((one) => queue(one.repo, () => read(one.repo, one.installation, one.defaultBranch))));
+      const stale = found.filter((one) => {
+        const known = repos.get(one.repo);
+        return (
+          !how.onlyPushed ||
+          !known ||
+          one.pushedAt === undefined ||
+          known.pushedAt !== one.pushedAt ||
+          known.defaultBranch !== one.defaultBranch
+        );
+      });
+      await Promise.all(
+        stale.map((one) => queue(one.repo, () => read(one.repo, one.installation, one.defaultBranch, one.pushedAt))),
+      );
     })()
       .catch((error: unknown) => {
         console.warn(`repositories not read: ${reasonOf(error)}`);
@@ -165,7 +186,7 @@ export function createDefinitions(options: {
     onWebhook(kind, payload) {
       if (kind === "repository" || kind === "installation" || kind === "installation_repositories") {
         // Rare, and any of them can add, remove or rename repositories: everything is looked at again.
-        void (loading ?? Promise.resolve()).then(load);
+        void (loading ?? Promise.resolve()).then(() => load());
         return;
       }
       if (kind !== "push") {

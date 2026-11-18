@@ -140,3 +140,23 @@ test("a change to which repositories there are reads them all again, and forgets
   expect(definitions.isRelease(REPO, ".github/workflows/release.yml")).toBeUndefined();
   expect(changed).toEqual([REPO, "nvorkinn/other"]);
 });
+
+test("a load of only what was pushed to reads a repository again only when GitHub says it was", async () => {
+  const github = countdown();
+  github.repositories[0] = { repo: REPO, pushedAt: "2026-11-18T10:00:00Z" };
+  const definitions = createDefinitions({ app: github.app });
+  await definitions.load();
+
+  github.calls.length = 0;
+  await definitions.load({ onlyPushed: true });
+  expect(github.calls).toEqual([]);
+
+  github.repositories[0] = { repo: REPO, pushedAt: "2026-11-18T11:00:00Z" };
+  await definitions.load({ onlyPushed: true });
+  expect(github.calls.sort()).toEqual([`repos/${REPO}/actions/workflows`, FOLDER]);
+
+  // A load of all of them reads it anyway, for what no push says.
+  github.calls.length = 0;
+  await definitions.load();
+  expect(github.calls.sort()).toEqual([`repos/${REPO}/actions/workflows`, FOLDER]);
+});
