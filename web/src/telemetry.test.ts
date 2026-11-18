@@ -4,7 +4,7 @@ import type { Auth } from "./auth.ts";
 import { CHANGE_WAIT_MS, createDashboard, differences } from "./github/dashboard.ts";
 import { account, fakeGitHub, fakeStreams, withPull } from "./github/testing.ts";
 import type { DashboardData } from "./model.ts";
-import { labelled, record, recorded, startTelemetry } from "./telemetry.ts";
+import { cleanPath, labelled, record, recorded, startTelemetry } from "./telemetry.ts";
 
 let stop: (() => void) | undefined;
 
@@ -122,4 +122,9 @@ test("each read is recorded with why it ran, and a webhook's change with how lon
   expect(sent.filter((event) => event.kind === "change_shown")).toEqual([
     expect.objectContaining({ delivery: "d-1", change: "pull_request", waitedMs: CHANGE_WAIT_MS }),
   ]);
+});
+
+test("a path is recorded without its query, and a full URL by its path", () => {
+  expect(cleanPath("repos/o/n/pulls?state=open")).toBe("/repos/o/n/pulls");
+  expect(cleanPath("https://api.github.com/repositories/1/releases?page=2")).toBe("/repositories/1/releases");
 });
