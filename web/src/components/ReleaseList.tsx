@@ -14,14 +14,14 @@ const ACTIVE: CheckState[] = ["running", "waiting", "queued"];
 const RERUNNABLE: CheckState[] = ["failed", "cancelled"];
 
 /** How long a run that finished stays on the page, folded, before it leaves. */
-export const KEEP_FINISHED_MS = 5 * 60_000;
+export const KEEP_FINISHED_MS = 2 * 60_000;
 
 /** When a run ended, for one that is over; undefined while it goes on. */
 function endOf(run: ReleaseRun): number | undefined {
   return run.finishedAt !== undefined && !ACTIVE.includes(run.state) ? Date.parse(run.finishedAt) : undefined;
 }
 
-/** The runs the page shows: those still going, and for five minutes those that just finished. */
+/** The runs the page shows: those still going, and for two minutes those that just finished. */
 export function shownRuns(runs: ReleaseRun[], now: number): ReleaseRun[] {
   return runs.filter((run) => {
     const end = endOf(run);
