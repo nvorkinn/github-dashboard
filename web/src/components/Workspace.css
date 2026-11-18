@@ -165,13 +165,6 @@ body:has(.workspace) {
   gap: 0.45rem;
 }
 
-.command-top .view-switch {
-  padding: 0.15rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.55rem;
-}
-
 .command-top .freshness {
   flex-wrap: nowrap;
 }

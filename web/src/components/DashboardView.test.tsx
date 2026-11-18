@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import type { DashboardState } from "../model.ts";
 import { DashboardView, Freshness, useRefresh } from "./DashboardView.tsx";
@@ -25,7 +25,7 @@ test("says why the read failed and offers another try", () => {
   expect(refresh).toHaveBeenCalledOnce();
 });
 
-test("draws the three lists", () => {
+test("draws the workspace: the repositories, their pull requests and their runs", () => {
   render(
     <DashboardView
       state={ready({ pulls: [pull()], releases: [run()], projects: [project()] })}
@@ -33,11 +33,10 @@ test("draws the three lists", () => {
       refresh={() => {}}
     />,
   );
-  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
-    "Pull requests 1",
-    "Running now 1",
-    "Projects & releases 1",
-  ]);
+  expect(screen.getByRole("heading", { level: 2, name: "Open pull requests 1" })).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 2, name: "Workflow activity 1" })).toBeTruthy();
+  const repositories = screen.getByRole("navigation", { name: "Repositories" });
+  expect(within(repositories).getByRole("button", { name: /^weather-station/ })).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
@@ -45,7 +44,7 @@ test("says what there is none of", () => {
   render(<DashboardView state={ready()} now={NOW} refresh={() => {}} />);
   expect(screen.getByText("No open pull requests")).toBeTruthy();
   expect(screen.getByText("Nothing running")).toBeTruthy();
-  expect(screen.getByText("No projects")).toBeTruthy();
+  expect(screen.getByText("No repositories")).toBeTruthy();
 });
 
 test("keeps the data up under a problem", () => {
@@ -68,10 +67,9 @@ test("without actions it only shows, and lets a project be hidden", () => {
       refresh={() => {}}
     />,
   );
-  expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
-    "Details of #1 in weather-station",
-    "Hide weather-station",
-  ]);
+  expect(screen.queryByRole("button", { name: /^Merge/ })).toBeNull();
+  expect(screen.getByRole("button", { name: "Details of #1 in weather-station" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Hide weather-station" })).toBeTruthy();
 });
 
 test("a hidden project takes its pull requests and runs off the page, until it is shown again", () => {
@@ -86,11 +84,8 @@ test("a hidden project takes its pull requests and runs off the page, until it i
   expect(screen.queryByText("Goes")).toBeNull();
   expect(screen.queryByRole("link", { name: "v9.9.9" })).toBeNull();
   expect(screen.getByText("Stays")).toBeTruthy();
-  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
-    "Pull requests 1",
-    "Running now 1",
-    "Projects & releases 1",
-  ]);
+  expect(screen.getByRole("heading", { level: 2, name: "Open pull requests 1" })).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 2, name: "Workflow activity 1" })).toBeTruthy();
   expect(JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "")).toEqual([ledger]);
 
   // The browser remembers it for the next visit.
@@ -107,7 +102,8 @@ test("a hidden project takes its pull requests and runs off the page, until it i
 test("what is kept under the key but is no list of names hides nothing", () => {
   localStorage.setItem(HIDDEN_PROJECTS_KEY, "{not json");
   render(<DashboardView state={ready({ projects: [project()] })} now={NOW} refresh={() => {}} />);
-  expect(screen.getByRole("link", { name: "weather-station" })).toBeTruthy();
+  const repositories = screen.getByRole("navigation", { name: "Repositories" });
+  expect(within(repositories).getByRole("button", { name: /^weather-station/ })).toBeTruthy();
 });
 
 function freshness(state: DashboardState, pending = false) {
@@ -193,7 +189,7 @@ test("opens every link in a new tab, so the dashboard stays open", () => {
     />,
   );
   const links = screen.getAllByRole("link");
-  expect(links.length).toBeGreaterThan(2);
+  expect(links.length).toBeGreaterThan(1);
   for (const link of links) {
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");

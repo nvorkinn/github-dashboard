@@ -52,27 +52,6 @@ test("says how to unblock notifications, or that the browser has none", () => {
   expect(screen.getByText("This browser can't show notifications.")).toBeTruthy();
 });
 
-test("asks how many columns the lanes take on a wide screen, where that can be chosen", () => {
-  const chosen: number[] = [];
-  render(
-    <Settings
-      notifier={notifier()}
-      current={() => "granted"}
-      laneColumns={2}
-      onLaneColumns={(columns) => chosen.push(columns)}
-    />,
-  );
-  expect((screen.getByRole("radio", { name: "Two columns" }) as HTMLInputElement).checked).toBe(true);
-  fireEvent.click(screen.getByRole("radio", { name: "One column, each lane the full width" }));
-  expect(chosen).toEqual([1]);
-});
-
-test("without a way to choose, the lanes' columns aren't asked", () => {
-  render(<Settings notifier={notifier()} current={() => "granted"} />);
-  expect(screen.queryByRole("group", { name: "Lanes on a wide screen" })).toBeNull();
-  expect(screen.queryByRole("radio", { name: "Two columns" })).toBeNull();
-});
-
 test("offers auto, light and dark, starting on auto, and applies the one chosen", () => {
   render(<Settings notifier={notifier()} current={() => "granted"} />);
   const auto = screen.getByRole("radio", { name: /Auto/ }) as HTMLInputElement;

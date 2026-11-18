@@ -11,33 +11,21 @@ import {
   writeSettings,
 } from "../notifications.ts";
 import { chooseTheme, rememberedTheme, THEMES, type Theme } from "../theme.ts";
-import type { LaneColumns } from "./ViewSwitch.tsx";
-
-const LANE_COLUMNS: { value: LaneColumns; label: string }[] = [
-  { value: 2, label: "Two columns" },
-  { value: 1, label: "One column, each lane the full width" },
-];
 
 /**
  * The settings page: which things that need attention show as desktop notifications while the dashboard is open, the
- * browser's permission to show them at all, light or dark or following the system, and how the Lanes view uses a wide
- * screen.
+ * browser's permission to show them at all, and light or dark or following the system.
  */
 export function Settings({
   notifier,
   ask = askPermission,
   current = permission,
-  laneColumns = 2,
-  onLaneColumns,
   safariTab = isSafariTab(),
 }: {
   notifier: Notifier;
   /** How to ask for the browser's permission, and read it; tests pass their own. */
   ask?: () => Promise<Permission>;
   current?: () => Permission;
-  /** How many lanes stand side by side on a wide screen, and how to choose; without `onLaneColumns` it isn't asked. */
-  laneColumns?: LaneColumns | undefined;
-  onLaneColumns?: ((columns: LaneColumns) => void) | undefined;
   /** Whether the page is open in a Safari tab, rather than as a web app in the Dock; tests pass their own. */
   safariTab?: boolean;
 }) {
@@ -138,30 +126,6 @@ export function Settings({
           <p class="quiet">Kept in this browser. The Workspace view and the review overlay are always dark.</p>
         </div>
       </section>
-      {onLaneColumns && (
-        <section class="panel settings" aria-labelledby="layout-heading">
-          <div class="panel-heading">
-            <h2 id="layout-heading">Layout</h2>
-          </div>
-          <div class="settings-body">
-            <fieldset>
-              <legend>Lanes on a wide screen</legend>
-              {LANE_COLUMNS.map(({ value, label }) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name="lane-columns"
-                    checked={laneColumns === value}
-                    onChange={() => onLaneColumns(value)}
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <p class="quiet">Kept in this browser. A window narrower than 1600 pixels always shows one column.</p>
-          </div>
-        </section>
-      )}
     </>
   );
 }

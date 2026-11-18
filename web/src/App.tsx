@@ -11,7 +11,6 @@ import { Icon, type IconName } from "./components/Icon.tsx";
 import { NotificationCentre } from "./components/NotificationCentre.tsx";
 import { ServiceStatus, useServiceStatus } from "./components/ServiceStatus.tsx";
 import { Settings } from "./components/Settings.tsx";
-import { useLaneColumns, useView, ViewSwitch } from "./components/ViewSwitch.tsx";
 import { navigateWorkspace, type WorkspaceDestination } from "./components/Workspace.tsx";
 import { type Dashboard, type DashboardState, summarize } from "./model.ts";
 import {
@@ -157,12 +156,9 @@ function SignedIn({
     [dashboard, notifier],
   );
 
-  const [view, setView] = useView();
-  const [laneColumns, setLaneColumns] = useLaneColumns();
-  const commandCentre = view === "workspace" && page === "dashboard";
+  const commandCentre = page === "dashboard";
   const hiddenRepositories = readHidden();
   const openWorkspace = (destination?: WorkspaceDestination) => {
-    setView("workspace");
     if (destination) {
       setPendingWorkspace(destination);
     }
@@ -175,24 +171,6 @@ function SignedIn({
       group: "Views",
       keywords: ["command centre", "dashboard"],
       run: () => openWorkspace(),
-    },
-    {
-      id: "view:stage",
-      label: "Open Stage",
-      group: "Views",
-      run: () => {
-        setView("stage");
-        location.hash = "#dashboard";
-      },
-    },
-    {
-      id: "view:lanes",
-      label: "Open Lanes",
-      group: "Views",
-      run: () => {
-        setView("lanes");
-        location.hash = "#dashboard";
-      },
     },
     {
       id: "action:refresh",
@@ -225,7 +203,7 @@ function SignedIn({
   ];
 
   useEffect(() => {
-    if (view !== "workspace" || !pendingWorkspace) {
+    if (!pendingWorkspace) {
       return;
     }
     const timer = setTimeout(() => {
@@ -233,7 +211,7 @@ function SignedIn({
       setPendingWorkspace(undefined);
     }, 0);
     return () => clearTimeout(timer);
-  }, [view, pendingWorkspace]);
+  }, [pendingWorkspace]);
 
   useEffect(() => {
     const open = (event: KeyboardEvent) => {
@@ -276,16 +254,6 @@ function SignedIn({
         {commandCentre && <CommandSummary state={state} />}
         <div class="top-controls">
           <ServiceStatus state={status} open={statusOpen} onOpen={openStatus} onClose={closeStatus} />
-          <ViewSwitch
-            view={view}
-            onChange={(next) => {
-              setView(next);
-              // Picking a view from the settings page goes to it.
-              if (page === "settings") {
-                location.hash = "#dashboard";
-              }
-            }}
-          />
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
           <button
             type="button"
@@ -322,11 +290,11 @@ function SignedIn({
       </header>
       <main class={commandCentre ? "command-main" : undefined}>
         {page === "settings" ? (
-          <Settings notifier={notifier} laneColumns={laneColumns} onLaneColumns={setLaneColumns} />
+          <Settings notifier={notifier} />
         ) : (
           <ActionsContext.Provider value={actions}>
             <BackgroundProvider>
-              <DashboardView state={state} now={now} refresh={refresh} view={view} laneColumns={laneColumns} />
+              <DashboardView state={state} now={now} refresh={refresh} />
             </BackgroundProvider>
           </ActionsContext.Provider>
         )}

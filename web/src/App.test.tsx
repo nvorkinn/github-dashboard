@@ -215,15 +215,6 @@ test("the settings page is a link away, and back", async () => {
   history.replaceState(null, "", "/#dashboard");
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   expect(await screen.findByText("Somebody's work")).toBeTruthy();
-
-  // Picking a view from the settings page goes back to the dashboard.
-  history.replaceState(null, "", "/#settings");
-  window.dispatchEvent(new HashChangeEvent("hashchange"));
-  await screen.findByRole("heading", { name: "Notifications" });
-  fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
-  window.dispatchEvent(new HashChangeEvent("hashchange"));
-  await waitFor(() => expect(screen.queryByRole("heading", { name: "Notifications" })).toBeNull());
-  localStorage.clear();
 });
 
 test("a notice from the dashboard goes to the notifier while signed in", async () => {
@@ -284,19 +275,5 @@ test("opens the command palette by keyboard and can enter a repository workspace
   fireEvent.click(screen.getByRole("option", { name: "Open weather-station" }));
 
   expect(await screen.findByRole("heading", { name: "weather-station" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Workspace" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
-});
-
-test("the header's switch shows the projects as lanes, and back", async () => {
-  stubBackend(signedIn);
-  const dashboard = fakeDashboard(ready({ pulls: [pull({ title: "First" })], projects: [project()] }));
-  render(<App auth={createAuth()} dashboard={dashboard} />);
-  expect(await screen.findByRole("heading", { level: 2, name: "Pull requests 1" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
-  expect(screen.queryByRole("heading", { level: 2, name: "Pull requests 1" })).toBeNull();
-  expect(screen.getByRole("heading", { name: "weather-station" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Stage" }));
-  expect(screen.getByRole("heading", { level: 2, name: "Pull requests 1" })).toBeTruthy();
-  localStorage.clear();
 });

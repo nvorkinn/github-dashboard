@@ -2,11 +2,6 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
-import { LanesView } from "./LanesView.tsx";
-import { ProjectList } from "./ProjectList.tsx";
-import { PullList } from "./PullList.tsx";
-import { ReleaseList } from "./ReleaseList.tsx";
-import type { LaneColumns, View } from "./ViewSwitch.tsx";
 import { Workspace } from "./Workspace.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
@@ -76,19 +71,7 @@ function Liveness({ live }: { live: boolean }) {
 }
 
 /** The dashboard itself: drawn from the state, less the projects the user has hidden. */
-export function DashboardView({
-  state,
-  now,
-  refresh,
-  view = "stage",
-  laneColumns,
-}: {
-  state: DashboardState;
-  now: number;
-  refresh: () => void;
-  view?: View;
-  laneColumns?: LaneColumns | undefined;
-}) {
+export function DashboardView({ state, now, refresh }: { state: DashboardState; now: number; refresh: () => void }) {
   const { hidden, toggle } = useHiddenProjects();
   // Nothing of a hidden project is read but its row, so one that is shown again has to be read.
   const wasHidden = useRef(hidden);
@@ -125,25 +108,7 @@ export function DashboardView({
           {state.problem}
         </p>
       )}
-      {view === "workspace" ? (
-        <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
-      ) : view === "lanes" ? (
-        <LanesView
-          projects={data.projects}
-          pulls={pulls}
-          runs={releases}
-          now={now}
-          hidden={hidden}
-          onToggle={toggle}
-          columns={laneColumns}
-        />
-      ) : (
-        <div class="stage">
-          <PullList pulls={pulls} now={now} />
-          <ReleaseList runs={releases} now={now} />
-          <ProjectList projects={data.projects} now={now} hidden={hidden} onToggle={toggle} />
-        </div>
-      )}
+      <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
     </>
   );
 }
