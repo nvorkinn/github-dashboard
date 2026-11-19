@@ -114,6 +114,17 @@ h1 {
   letter-spacing: -0.01em;
 }
 
+.title-with-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.logo {
+  flex: none;
+  display: block;
+}
+
 .top-controls {
   display: flex;
   flex-wrap: wrap;

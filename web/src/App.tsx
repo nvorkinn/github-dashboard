@@ -7,6 +7,7 @@ import { DashboardView, Freshness, useRefresh } from "./components/DashboardView
 import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Icon, type IconName } from "./components/Icon.tsx";
+import { Logo } from "./components/Logo.tsx";
 import { NotificationCentre } from "./components/NotificationCentre.tsx";
 import { ServiceStatus, useServiceStatus } from "./components/ServiceStatus.tsx";
 import { Settings } from "./components/Settings.tsx";
@@ -84,7 +85,10 @@ export function App({
       ) : (
         <>
           <header class="top">
-            <h1>GitHub dashboard</h1>
+            <h1 class="title-with-logo">
+              <Logo size={24} />
+              GitHub dashboard
+            </h1>
           </header>
           <main>
             {state.status === "loading" && <p class="quiet">Loading…</p>}
@@ -161,13 +165,10 @@ function SignedIn({
       )}
       <header class={commandCentre ? "top command-top" : "top"}>
         <div class={commandCentre ? "command-brand" : undefined}>
-          {commandCentre && (
-            <span class="command-mark">
-              <Icon name="command" size={22} />
-            </span>
-          )}
+          {commandCentre && <Logo class="command-mark" size={40} />}
           <h1>
-            <a class="home" href="#dashboard">
+            <a class={commandCentre ? "home" : "home title-with-logo"} href="#dashboard">
+              {!commandCentre && <Logo size={24} />}
               {commandCentre ? "GitHub Command Centre" : "GitHub dashboard"}
             </a>
           </h1>

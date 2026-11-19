@@ -44,9 +44,19 @@ test("shows who is signed in", async () => {
   stubBackend(signedIn);
   const { container } = render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
   expect(await screen.findByText("octocat")).toBeTruthy();
-  expect(container.querySelector("img")?.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/583231");
+  expect(container.querySelector("img.avatar")?.getAttribute("src")).toBe(
+    "https://avatars.githubusercontent.com/u/583231",
+  );
+  // The same logo as the favicon and notifications, not a glyph of its own.
+  expect(container.querySelector("header img.logo")?.getAttribute("src")).toBe("/favicon.svg");
   expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).toBeNull();
+});
+
+test("shows the favicon as the logo in the header when signed out", () => {
+  stubBackend(signedOut);
+  const { container } = render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
+  expect(container.querySelector("header img.logo")?.getAttribute("src")).toBe("/favicon.svg");
 });
 
 test("signs out", async () => {

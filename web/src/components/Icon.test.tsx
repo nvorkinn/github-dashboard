@@ -19,16 +19,7 @@ test("can be named when the icon carries meaning by itself", () => {
 });
 
 test("supports every command-centre icon with a stable class and size", () => {
-  const names: IconName[] = [
-    "attention",
-    "check",
-    "command",
-    "overview",
-    "pull-request",
-    "release",
-    "search",
-    "workflow",
-  ];
+  const names: IconName[] = ["attention", "check", "overview", "pull-request", "release", "search", "workflow"];
   const { container } = render(names.map((name) => <Icon key={name} name={name} size={20} class="toolbar-icon" />));
   const icons = [...container.querySelectorAll("svg")];
   expect(icons).toHaveLength(names.length);
