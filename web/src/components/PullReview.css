@@ -911,4 +911,8 @@
     min-height: 2.5rem;
     overflow-y: auto;
   }
+  /* A phone's list is short enough to scroll, and the filter's height is better spent on the diff. */
+  .review-search {
+    display: none;
+  }
 }
