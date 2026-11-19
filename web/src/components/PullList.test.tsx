@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
+import type { Check, CheckState, PullActions, PullRequest } from "../model.ts";
 import { ActionsContext, CONFIRM_MS } from "./actions.tsx";
 import { columnOf, PullList, sortChecks, sortPulls } from "./PullList.tsx";
 import { before, NOW, pull } from "./testing.ts";
@@ -54,12 +54,13 @@ test("draws a pull request", () => {
   const link = within(row).getByRole("link", { name: "#42 Show wind gusts" });
   expect(link.getAttribute("href")).toBe("https://github.com/octocat/weather-station/pull/1");
   expect(within(row).getByText("weather-station")).toBeTruthy();
-  expect(within(row).getByText("monalisa")).toBeTruthy();
+  // Unfolded, the author gives way to the branches and when it was opened.
+  expect(within(row).queryByText("monalisa")).toBeNull();
   expect(within(row).getByText("monalisa/wind-gusts")).toBeTruthy();
   expect(within(row).getByText("main")).toBeTruthy();
   expect(row.textContent).toContain("opened 3d ago");
   expect(row.textContent).toContain("updated 2h ago");
-  expect(row.querySelector("img")?.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/1");
+  expect(row.querySelector("img, .avatar")).toBeNull();
   expect(within(row).getByText("Ready to merge")).toBeTruthy();
   expect(within(row).getByText("No checks")).toBeTruthy();
   expect(within(row).queryByText("Draft")).toBeNull();
@@ -85,17 +86,22 @@ test("starts folded, down to the project, number, title, states and buttons, and
   expect(within(row).getByText("Ready to merge")).toBeTruthy();
   expect(row.querySelector(".checks .chip")?.textContent).toBe("Checks: Failed");
   expect(buttons()).toEqual(["Review changes", "Merge", "Cancel auto-merge"]);
-  // Nothing else: no author or picture, no branches or times, no list of checks, no files.
+  // One line under the title: branch, author and when it was updated. No picture, no list of checks, no files.
+  expect(row.querySelector(".pull-compact-meta")?.textContent).toBe("monalisa/changemonalisaupdated 1m ago");
   expect(row.querySelector("img, .avatar, details")).toBeNull();
-  expect(row.querySelector(".meta")).toBeNull();
   expect(container.querySelector(".check-list")).toBeNull();
+  const folded = row.className;
 
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(row.querySelector(".meta")?.textContent).toContain("monalisa");
-  expect(row.querySelector("img")).toBeTruthy();
+  // The same row, the same line under the title, now with the base branch and when it was opened.
+  expect(row.className).toBe(`${folded.replace("pull-folded", "pull-folded pull-unfolded")}`);
+  expect(row.querySelector(".pull-compact-meta")?.textContent).toContain("into");
+  expect(row.querySelector(".pull-compact-meta")?.textContent).not.toContain("monalisaupdated");
+  expect(row.querySelector("img, .avatar, details")).toBeNull();
+  expect(row.querySelector(".checks .chip")?.textContent).toBe("Checks: Failed");
   expect(container.querySelectorAll(".check-list li")).toHaveLength(2);
-  expect(within(row).getByText("Files changed")).toBeTruthy();
+  expect(within(row).queryByText(/^Files changed/)).toBeNull();
 
   fireEvent.click(toggle);
   expect(container.querySelector(".check-list")).toBeNull();
@@ -148,7 +154,7 @@ test("says how the merge stands", () => {
   expect(screen.getByText("Conflicts")).toBeTruthy();
 });
 
-test("sums the checks up in one word, with each of them behind it", () => {
+test("sums the checks up in one word, with each of them listed when unfolded", () => {
   const cases: [CheckState[], string, string][] = [
     [["passed", "failed", "running"], "Failed", "1 failed, 1 running, 1 done"],
     [["passed", "cancelled"], "Failed", "1 cancelled, 1 done"],
@@ -158,12 +164,11 @@ test("sums the checks up in one word, with each of them behind it", () => {
   ];
   for (const [states, word, tally] of cases) {
     const { container } = render(<PullList now={NOW} pulls={[pull({ checks: checks(...states) })]} />);
+    const chip = container.querySelector(".checks .chip");
+    expect(chip?.textContent).toBe(`Checks: ${word}`);
+    expect(chip?.getAttribute("title")).toBe(tally);
+    expect(container.querySelector(".check-list")).toBeNull();
     unfold();
-    const summary = container.querySelector("summary");
-    expect(summary?.querySelector(".chip")?.textContent).toBe(word);
-    expect(summary?.querySelector(".tally")?.textContent).toBe(tally);
-    // Closed until asked for.
-    expect(container.querySelector("details")?.open).toBe(false);
     expect(container.querySelectorAll(".check-list li")).toHaveLength(states.length);
     cleanup();
   }
@@ -620,120 +625,6 @@ test("an action that fails says why next to its buttons, until the next one star
   expect(screen.queryByRole("alert")).toBeNull();
   await finish(undefined, "not an Error");
   expect(screen.getByRole("alert").textContent).toBe("That didn't work.");
-});
-
-// Files changed
-
-function withFiles(pulls: PullRequest[], read: ReadFiles) {
-  const tree = (shown: PullRequest[]) => (
-    <ActionsContext.Provider value={{ files: read }}>
-      <PullList now={NOW} pulls={shown} />
-    </ActionsContext.Provider>
-  );
-  const rendered = render(tree(pulls));
-  unfold();
-  return { ...rendered, show: (shown: PullRequest[]) => rendered.rerender(tree(shown)) };
-}
-
-/** Lets a read that was started finish, and draws what it found. */
-async function settle() {
-  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-}
-
-async function toggleFiles(open: boolean) {
-  const details = screen.getByText(/^Files changed/).closest("details") as HTMLDetailsElement;
-  act(() => {
-    details.open = open;
-    fireEvent(details, new Event("toggle"));
-  });
-  await settle();
-}
-
-const someFiles: PullFiles = {
-  files: [
-    { path: "src/wind.ts", previousPath: undefined, status: "added", additions: 40, deletions: 0 },
-    { path: "src/gusts.ts", previousPath: "src/wind_old.ts", status: "renamed", additions: 3, deletions: 1 },
-    { path: "README.md", previousPath: undefined, status: "modified", additions: 2, deletions: 5 },
-  ],
-  truncated: false,
-};
-
-test("offers no files where they can't be read", () => {
-  withActions([pull()]);
-  expect(screen.queryByText(/^Files changed/)).toBeNull();
-});
-
-test("reads the files changed when first opened, and shows each one", async () => {
-  const read = vi.fn<ReadFiles>(() => Promise.resolve(someFiles));
-  withFiles([pull()], read);
-  expect(screen.getByText("Files changed")).toBeTruthy();
-  expect(read).not.toHaveBeenCalled();
-  await toggleFiles(true);
-  expect(read).toHaveBeenCalledTimes(1);
-  const items = screen.getByText("Files changed (3)").closest("details")?.querySelectorAll("li") ?? [];
-  expect([...items].map((item) => item.textContent)).toEqual([
-    "Addedsrc/wind.ts+40−0",
-    "Renamedsrc/wind_old.ts →  to src/gusts.ts+3−1",
-    "ModifiedREADME.md+2−5",
-  ]);
-  // Opened again, it shows what it read without reading in between.
-  await toggleFiles(false);
-  await toggleFiles(true);
-  expect(screen.queryByText("Reading the files changed…")).toBeNull();
-  expect(screen.getByText("Files changed (3)")).toBeTruthy();
-});
-
-test("says so while it reads, and links to GitHub for more than it read", async () => {
-  let finish: (files: PullFiles) => void = () => {};
-  const read = vi.fn<ReadFiles>(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  withFiles([pull()], read);
-  await toggleFiles(true);
-  expect(screen.getByText("Reading the files changed…")).toBeTruthy();
-  await act(async () => finish({ ...someFiles, truncated: true }));
-  expect(screen.getByText("Files changed (3+)")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "More files on GitHub" }).getAttribute("href")).toBe(
-    "https://github.com/octocat/weather-station/pull/1/files",
-  );
-});
-
-test("says why it couldn't read the files, and tries again on request", async () => {
-  const read = vi.fn<ReadFiles>().mockRejectedValueOnce(new Error("GitHub answered 502.")).mockResolvedValue(someFiles);
-  withFiles([pull()], read);
-  await toggleFiles(true);
-  expect(screen.getByRole("alert").textContent).toContain("Couldn't read the files changed. GitHub answered 502.");
-  act(() => {
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  });
-  await settle();
-  expect(read).toHaveBeenCalledTimes(2);
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByText("Files changed (3)")).toBeTruthy();
-});
-
-test("reads the files again, while open, once the head is a new commit", async () => {
-  const read = vi.fn<ReadFiles>(() => Promise.resolve(someFiles));
-  const { show } = withFiles([pull({ sha: "aaa" })], read);
-  await toggleFiles(true);
-  // The same head read again: nothing new to read.
-  show([pull({ sha: "aaa", title: "Renamed" })]);
-  expect(read).toHaveBeenCalledTimes(1);
-  act(() => {
-    show([pull({ sha: "bbb" })]);
-  });
-  await settle();
-  expect(read).toHaveBeenCalledTimes(2);
-  expect(read.mock.calls[1]?.[0].sha).toBe("bbb");
-});
-
-test("says so when no files changed", async () => {
-  withFiles([pull()], () => Promise.resolve({ files: [], truncated: false }));
-  await toggleFiles(true);
-  expect(screen.getByText("No files changed")).toBeTruthy();
 });
 
 test("folds a compact list's filters behind a button that says when one is on", () => {

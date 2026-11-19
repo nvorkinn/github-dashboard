@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
+import type { Check, CheckState, PullActions, PullRequest } from "../model.ts";
 import { isDependabot, summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
-import { AutoMergeButton, ConfirmButton, reasonOf, useAction, useActions } from "./actions.tsx";
+import { AutoMergeButton, ConfirmButton, useAction, useActions } from "./actions.tsx";
 import { type BackgroundEntry, type BackgroundWhat, keyOf, useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { PullReview } from "./PullReview.tsx";
@@ -334,7 +334,6 @@ export function PullList({
                 pull={pull}
                 reviewPulls={filtered}
                 now={now}
-                foldable
                 showRepository={showRepository}
               />
             ))}
@@ -354,13 +353,7 @@ export function PullList({
                 ) : (
                   <ul class="cards" aria-labelledby={`column-${value}`}>
                     {these.map((pull) => (
-                      <PullRow
-                        key={`${pull.repo}#${pull.number}`}
-                        pull={pull}
-                        reviewPulls={sorted}
-                        now={now}
-                        foldable
-                      />
+                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} reviewPulls={sorted} now={now} />
                     ))}
                   </ul>
                 )}
@@ -410,25 +403,22 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
 }
 
 /**
- * One pull request. A `foldable` one starts folded, down to its project, number, title, states and buttons, with a
- * button that unfolds the rest: who opened it and when, its branches, each check and the files changed.
+ * One pull request. It starts folded, down to its project, number, title, states and buttons, with a
+ * button that unfolds the rest under the same row: its branches, when it was opened and each check.
  */
 export function PullRow({
   pull: read,
   reviewPulls,
   now,
-  foldable = false,
   showRepository = false,
 }: {
   pull: PullRequest;
   reviewPulls?: PullRequest[];
   now: number;
-  foldable?: boolean;
   showRepository?: boolean;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
-  const folded = foldable && !unfolded;
   const actions = useActions()?.pulls;
   const readFiles = useActions()?.files;
   const [doneState, setDoneState] = useState<Done | undefined>(undefined);
@@ -455,62 +445,50 @@ export function PullRow({
       ? { ...read, autoMerge: done.what === "autoMergeOn" }
       : read;
   return (
-    <li class={`${folded ? "pull pull-folded" : "pull"} pull-${columnOf(pull)}`}>
-      {folded ? null : pull.authorAvatarUrl ? (
-        <img class="avatar" src={pull.authorAvatarUrl} alt="" width="32" height="32" loading="lazy" />
-      ) : (
-        <span class="avatar avatar-missing" aria-hidden="true" />
-      )}
+    <li class={`${unfolded ? "pull pull-folded pull-unfolded" : "pull pull-folded"} pull-${columnOf(pull)}`}>
       <div class="pull-main">
         <div class="pull-head">
           <span class="repo-label" title={pull.repo}>
             {shortName(pull.repo)}
           </span>
-          {foldable && (
-            <button
-              type="button"
-              class="fold-toggle"
-              aria-expanded={unfolded}
-              aria-label={`Details of #${pull.number} in ${shortName(pull.repo)}`}
-              title={unfolded ? "Hide details" : "Show details"}
-              onClick={() => setUnfolded(!unfolded)}
-            />
-          )}
+          <button
+            type="button"
+            class="fold-toggle"
+            aria-expanded={unfolded}
+            aria-label={`Details of #${pull.number} in ${shortName(pull.repo)}`}
+            title={unfolded ? "Hide details" : "Show details"}
+            onClick={() => setUnfolded(!unfolded)}
+          />
         </div>
         <ExternalLink class="pull-title" href={pull.url}>
           <span class="number">#{pull.number}</span> {pull.title}
         </ExternalLink>
-        {folded && (
-          <p class="pull-compact-meta">
-            {showRepository && (
-              <span class="pull-compact-repo" title={pull.repo}>
-                {shortName(pull.repo)}
-              </span>
-            )}
-            <code>{pull.head}</code>
-            <span>{pull.author}</span>
-            <span>
-              updated <Ago at={pull.updatedAt} now={now} />
+        <p class="pull-compact-meta">
+          {showRepository && (
+            <span class="pull-compact-repo" title={pull.repo}>
+              {shortName(pull.repo)}
             </span>
-          </p>
-        )}
-        {!folded && (
-          <p class="meta">
-            <span>{pull.author}</span>
+          )}
+          {unfolded ? (
             <span class="branches">
               <code>{pull.head}</code>
               <span aria-hidden="true"> → </span>
               <span class="visually-hidden"> into </span>
               <code>{pull.base}</code>
             </span>
+          ) : (
+            <code>{pull.head}</code>
+          )}
+          {!unfolded && <span>{pull.author}</span>}
+          {unfolded && (
             <span>
               opened <Ago at={pull.createdAt} now={now} />
             </span>
-            <span>
-              updated <Ago at={pull.updatedAt} now={now} />
-            </span>
-          </p>
-        )}
+          )}
+          <span>
+            updated <Ago at={pull.updatedAt} now={now} />
+          </span>
+        </p>
       </div>
       <div class="pull-badges">
         {pull.draft && <span class="badge">Draft</span>}
@@ -536,7 +514,7 @@ export function PullRow({
         {done?.what === "rebaseAsked" && <span class="badge">Rebase requested</span>}
       </div>
       {reviewOpen && <PullReview initial={pull} pulls={reviewPulls ?? [pull]} onClose={() => setReviewOpen(false)} />}
-      <Checks checks={pull.checks} folded={folded} />
+      <Checks checks={pull.checks} />
       <PullButtons
         pull={pull}
         actions={
@@ -569,7 +547,7 @@ export function PullRow({
         onDone={setDone}
         onReview={readFiles && (() => setReviewOpen(true))}
       />
-      {readFiles && !folded && <FilesChanged pull={pull} read={readFiles} />}
+      {unfolded && <CheckList checks={pull.checks} />}
     </li>
   );
 }
@@ -698,94 +676,6 @@ function PullButtons({
   );
 }
 
-/** What is known of a pull request's files, for the head commit `sha`. */
-type FilesState = { sha: string } & (
-  | { status: "loading" }
-  | { status: "loaded"; files: PullFiles }
-  | { status: "failed"; problem: string }
-);
-
-const FILE_STATUS: Record<string, string> = {
-  added: "Added",
-  modified: "Modified",
-  removed: "Removed",
-  renamed: "Renamed",
-  copied: "Copied",
-  changed: "Changed",
-  unchanged: "Unchanged",
-};
-
-/** The files a pull request changes: read when first opened, and again while open once its head is a new commit. */
-function FilesChanged({ pull, read }: { pull: PullRequest; read: ReadFiles }) {
-  const [open, setOpen] = useState(false);
-  const [state, setState] = useState<FilesState | undefined>(undefined);
-  const [attempt, setAttempt] = useState(0);
-  const { sha } = pull;
-
-  // Not for each new copy of the same pull request: only a new head, or a retry, reads again.
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    let current = true;
-    setState((was) => (was?.sha === sha && was.status === "loaded" ? was : { sha, status: "loading" }));
-    read(pull).then(
-      (files) => current && setState({ sha, status: "loaded", files }),
-      (error: unknown) => current && setState({ sha, status: "failed", problem: reasonOf(error) }),
-    );
-    return () => {
-      current = false;
-    };
-  }, [open, sha, attempt, read]);
-
-  const loaded = state?.sha === sha && state.status === "loaded" ? state.files : undefined;
-  const count = loaded ? ` (${loaded.files.length}${loaded.truncated ? "+" : ""})` : "";
-  return (
-    <details class="pull-files" onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>Files changed{count}</summary>
-      {state?.status === "failed" ? (
-        <div class="files-note" role="alert">
-          <p class="problem">Couldn't read the files changed. {state.problem}</p>
-          <button type="button" class="action" onClick={() => setAttempt((n) => n + 1)}>
-            Try again
-          </button>
-        </div>
-      ) : !loaded ? (
-        <p class="files-note quiet">Reading the files changed…</p>
-      ) : loaded.files.length === 0 ? (
-        <p class="files-note quiet">No files changed</p>
-      ) : (
-        <ul class="file-list">
-          {loaded.files.map((file) => (
-            <li key={file.path} class={`file file-${file.status}`}>
-              <span class="file-status">{FILE_STATUS[file.status] ?? file.status}</span>
-              <span class="file-path">
-                {file.previousPath && (
-                  <>
-                    <span class="quiet">{file.previousPath}</span>
-                    <span aria-hidden="true"> → </span>
-                    <span class="visually-hidden"> to </span>
-                  </>
-                )}
-                {file.path}
-              </span>
-              <span class="file-counts">
-                <span class="additions">+{file.additions}</span>
-                <span class="deletions">−{file.deletions}</span>
-              </span>
-            </li>
-          ))}
-          {loaded.truncated && (
-            <li class="file-more">
-              <ExternalLink href={`${pull.url}/files`}>More files on GitHub</ExternalLink>
-            </li>
-          )}
-        </ul>
-      )}
-    </details>
-  );
-}
-
 const MERGE_LOOKS: Record<PullRequest["mergeState"], { tone: Tone; icon: Tone | "behind"; label: string }> = {
   clean: { tone: "done", icon: "done", label: "Ready to merge" },
   conflicts: { tone: "failed", icon: "failed", label: "Conflicts" },
@@ -841,47 +731,43 @@ function tally(checks: Check[]): string {
   return [...counts].map(([word, count]) => `${count} ${word}`).join(", ");
 }
 
-/** The checks in one word, and each of them behind it; `folded`, the one word alone. */
-function Checks({ checks, folded }: { checks: Check[]; folded: boolean }) {
+/** The checks in one word, with the tally of each state as its title. */
+/** Each check by name, worst first, linked to its run where it has one. */
+function CheckList({ checks }: { checks: Check[] }) {
+  if (checks.length === 0) {
+    return null;
+  }
+  return (
+    <ul class="check-list">
+      {sortChecks(checks).map((check, index) => {
+        const tone = toneOf(check.state);
+        return (
+          // Names can repeat (a matrix, a rerun), so the place in the list is part of the key.
+          <li key={`${check.name}:${index}`} class={`tone-${tone}`}>
+            <ToneIcon tone={tone} />
+            {check.url ? <ExternalLink href={check.url}>{check.name}</ExternalLink> : <span>{check.name}</span>}
+            <span class="check-state">{labelOf(check.state)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function Checks({ checks }: { checks: Check[] }) {
   const summary = summarize(checks);
   if (summary === "none") {
     return <p class="checks checks-none quiet">No checks</p>;
   }
   const look = SUMMARY_LOOKS[summary];
-  if (folded) {
-    return (
-      <p class="checks">
-        <span class={`chip tone-${look.tone}`} title={tally(checks)}>
-          <ToneIcon tone={look.tone} />
-          <span class="visually-hidden">Checks: </span>
-          {look.label}
-        </span>
-      </p>
-    );
-  }
   return (
-    <details class="checks">
-      <summary>
-        <span class={`chip tone-${look.tone}`}>
-          <ToneIcon tone={look.tone} />
-          {look.label}
-        </span>
-        <span class="quiet tally">{tally(checks)}</span>
-      </summary>
-      <ul class="check-list">
-        {sortChecks(checks).map((check, index) => {
-          const tone = toneOf(check.state);
-          return (
-            // Names can repeat (a matrix, a rerun), so the place in the list is part of the key.
-            <li key={`${check.name}:${index}`} class={`tone-${tone}`}>
-              <ToneIcon tone={tone} />
-              {check.url ? <ExternalLink href={check.url}>{check.name}</ExternalLink> : <span>{check.name}</span>}
-              <span class="check-state">{labelOf(check.state)}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </details>
+    <p class="checks">
+      <span class={`chip tone-${look.tone}`} title={tally(checks)}>
+        <ToneIcon tone={look.tone} />
+        <span class="visually-hidden">Checks: </span>
+        {look.label}
+      </span>
+    </p>
   );
 }
 
