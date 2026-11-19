@@ -1510,9 +1510,10 @@ button.secondary {
     padding: 1rem 0.75rem 2rem;
   }
 
-  /* A phone's header wraps to a few lines: too tall to keep over the page. */
+  /* Not kept over the page on a phone, but still above it, so its menus open over the page and not under it. */
   .top {
-    position: static;
+    position: relative;
+    z-index: 20;
     padding: 0.5rem 0.75rem;
   }
 
@@ -1892,4 +1893,196 @@ h1 .home {
   color: inherit;
   background: transparent;
   border: 0;
+}
+
+/* Wide screens show the header's controls in a row, each with its word; a phone's header is one row of icons. */
+.refresh-icon,
+.account-toggle {
+  display: none;
+}
+
+/*
+ * Settings is in the account's menu for a phone's sake; a wide screen spreads the menu out in the header's row and
+ * puts Settings back before the bell, the rest of the account after it.
+ */
+.account {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.account,
+.account-items,
+.account-who {
+  display: contents;
+}
+
+.notification-control {
+  order: 1;
+}
+
+.account-items > :not(.button),
+.account-who > * {
+  order: 2;
+}
+
+.top:not(.command-top) .top-controls {
+  column-gap: 0.75rem;
+}
+
+.pull-filters-toggle {
+  display: none;
+}
+
+@media (max-width: 46rem) {
+  .top {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .top .title-text,
+  .refresh-label,
+  .service-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .top-controls,
+  .command-top .top-controls {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .freshness {
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+
+  .top .updated {
+    display: none;
+  }
+
+  /* The liveness word goes first when space is short; its dot stays. */
+  .liveness {
+    margin-right: auto;
+  }
+
+  .refresh,
+  .service-pill,
+  .notification-trigger {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0;
+  }
+
+  .service-pill {
+    display: inline-flex;
+    justify-content: center;
+  }
+
+  .service-pill > :last-child {
+    display: none;
+  }
+
+  .refresh-icon {
+    display: block;
+  }
+
+  .account {
+    position: relative;
+    display: block;
+    flex: none;
+    order: 2;
+  }
+
+  .account-toggle {
+    display: inline-grid;
+    place-items: center;
+    width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0;
+    background: transparent;
+    border-color: transparent;
+    border-radius: 50%;
+  }
+
+  .account-toggle .avatar,
+  .command-top .account-toggle .avatar {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .account-items {
+    display: none;
+  }
+
+  .account-open .account-items {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+    width: max-content;
+    min-width: 13rem;
+    max-width: calc(100vw - 1.5rem);
+    padding: 0.5rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  }
+
+  .account-open .account-items > .button,
+  .account-open .account-items > button {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .account-open .account-who {
+    order: -1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .account-open .account-who .login,
+  .command-top .account-open .account-who .login {
+    display: inline;
+    font-weight: 600;
+  }
+
+  .pull-filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    min-height: 2.25rem;
+    margin-left: auto;
+    padding: 0 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .pull-filters-toggle.filtering {
+    color: var(--link);
+    border-color: color-mix(in srgb, var(--link) 50%, var(--border));
+  }
+
+  .pull-controls-folding:not(.open) {
+    display: none;
+  }
 }

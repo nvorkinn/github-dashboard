@@ -735,3 +735,15 @@ test("says so when no files changed", async () => {
   await toggleFiles(true);
   expect(screen.getByText("No files changed")).toBeTruthy();
 });
+
+test("folds a compact list's filters behind a button that says when one is on", () => {
+  render(<PullList pulls={[pull(), pull({ number: 2, author: "hubot" })]} now={NOW} compact />);
+  const toggle = screen.getByRole("button", { name: "Filters" });
+  const controls = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+  expect(controls?.classList.contains("open")).toBe(false);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(controls?.classList.contains("open")).toBe(true);
+  fireEvent.change(screen.getByRole("combobox", { name: /Author/ }), { target: { value: "hubot" } });
+  expect(screen.getByRole("button", { name: "Filters · on" })).toBeTruthy();
+});

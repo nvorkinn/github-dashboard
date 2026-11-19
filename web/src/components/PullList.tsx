@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { Check, CheckState, PullActions, PullFiles, PullRequest, ReadFiles } from "../model.ts";
 import { isDependabot, summarize } from "../model.ts";
 import { Ago } from "./Ago.tsx";
@@ -174,6 +174,9 @@ export function PullList({
   const [status, setStatus] = useState<PullFilter>("all");
   const [author, setAuthor] = useState("all");
   const [savedViews, setSavedViews] = useState(readSavedViews);
+  // A phone folds the filters away behind one button; wider screens always show them.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const controlsId = useId();
   const sorted = sortPulls(pulls, order);
   const authors = [...new Set(pulls.map((pull) => pull.author))].sort((a, b) => a.localeCompare(b));
   const effectiveAuthor = author === "all" || authors.includes(author) ? author : "all";
@@ -184,6 +187,7 @@ export function PullList({
           (effectiveAuthor === "all" || pull.author === effectiveAuthor),
       )
     : sorted;
+  const filtering = status !== "all" || effectiveAuthor !== "all";
   const matchingSavedView = savedViews.find((view) => view.status === status && view.author === effectiveAuthor);
 
   function keepSavedViews(next: SavedPullView[]): void {
@@ -215,7 +219,22 @@ export function PullList({
         <h2 id="pulls-heading">
           {compact ? "Open pull requests" : "Pull requests"} <span class="count">{pulls.length}</span>
         </h2>
-        <div class="pull-controls">
+        {compact && (
+          <button
+            type="button"
+            class={filtering ? "secondary pull-filters-toggle filtering" : "secondary pull-filters-toggle"}
+            aria-expanded={filtersOpen}
+            aria-controls={controlsId}
+            onClick={() => setFiltersOpen(!filtersOpen)}
+          >
+            Filters
+            {filtering && <span class="pull-filters-on"> · on</span>}
+          </button>
+        )}
+        <div
+          id={controlsId}
+          class={["pull-controls", compact && "pull-controls-folding", filtersOpen && "open"].filter(Boolean).join(" ")}
+        >
           {compact && (
             <>
               <label class="pull-filter">
