@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/pr
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
-import { fakeDashboard, project, pull, ready } from "./components/testing.ts";
+import { fakeDashboard, pull, ready } from "./components/testing.ts";
 import type { Call } from "./testing.ts";
 import { stubBackend, tokenAnswer } from "./testing.ts";
 
@@ -267,23 +267,4 @@ test("keeps streamed notices in the in-app notification centre", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "Notifications, 0 unread" })).toBeTruthy());
   fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
   expect(screen.getByText("No notifications yet.")).toBeTruthy();
-});
-
-test("opens the command palette by keyboard and can enter a repository workspace", async () => {
-  stubBackend(signedIn);
-  const dashboard = fakeDashboard(ready({ projects: [project()] }));
-  render(<App auth={createAuth()} dashboard={dashboard} />);
-  await screen.findByRole("button", { name: "Refresh" });
-  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
-
-  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-  const palette = screen.getByRole("dialog", { name: "Command palette" });
-  expect(palette).toBeTruthy();
-  fireEvent.input(screen.getByRole("searchbox", { name: "Search commands" }), {
-    target: { value: "weather-station" },
-  });
-  fireEvent.click(screen.getByRole("option", { name: "Open weather-station" }));
-
-  expect(await screen.findByRole("heading", { name: "weather-station" })).toBeTruthy();
-  expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
 });

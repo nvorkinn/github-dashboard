@@ -227,7 +227,6 @@ button:disabled {
   opacity: 0.65;
 }
 
-.header-icon-button,
 .notification-trigger {
   position: relative;
   display: inline-grid;
@@ -338,119 +337,6 @@ button:disabled {
   justify-content: flex-end;
 }
 
-.command-palette-backdrop {
-  position: fixed;
-  z-index: 100;
-  inset: 0;
-  display: grid;
-  place-items: start center;
-  padding: min(12vh, 7rem) 1rem 1rem;
-  background: rgb(2 6 12 / 0.72);
-  backdrop-filter: blur(4px);
-}
-
-.command-palette-dismiss {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  background: transparent;
-  border: 0;
-}
-
-.command-palette {
-  position: relative;
-  width: min(44rem, 100%);
-  max-height: min(42rem, calc(100dvh - 2rem));
-  overflow: hidden;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 30px 100px rgb(0 0 0 / 0.65);
-}
-
-.command-palette-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.command-palette-search {
-  display: block;
-  padding: 0.85rem 1rem;
-}
-
-.command-palette-search input {
-  width: 100%;
-  min-height: 2.75rem;
-  padding: 0.55rem 0.75rem;
-  color: var(--text);
-  font: inherit;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.command-palette-search input:focus {
-  border-color: var(--link);
-  outline: 2px solid color-mix(in srgb, var(--link) 60%, white);
-  outline-offset: 2px;
-}
-
-.command-palette-results {
-  max-height: min(31rem, calc(100dvh - 14rem));
-  padding: 0 0.65rem 0.75rem;
-  overflow-y: auto;
-}
-
-.command-palette-empty {
-  padding: 1.5rem 0.5rem;
-  color: var(--quiet);
-  text-align: center;
-}
-
-.command-palette-group {
-  display: grid;
-  gap: 0.2rem;
-  margin: 0;
-  padding: 0.45rem 0;
-  border: 0;
-}
-
-.command-palette-group legend {
-  padding: 0.35rem 0.5rem;
-  color: var(--quiet);
-  font-size: 0.7rem;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.command-palette-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  width: 100%;
-  min-height: 2.6rem;
-  text-align: left;
-  background: transparent;
-  border-color: transparent;
-}
-
-.command-palette-option[aria-selected="true"] {
-  background: color-mix(in srgb, var(--link) 13%, var(--surface));
-  border-color: color-mix(in srgb, var(--link) 55%, var(--border));
-}
-
-.command-palette-option kbd {
-  color: var(--quiet);
-  font-size: 0.7rem;
-}
-
 .quiet {
   color: var(--quiet);
 }
@@ -498,7 +384,6 @@ h2 {
   letter-spacing: -0.02em;
 }
 
-.command-palette-head h2,
 .notification-centre-head h2 {
   font-size: 1rem;
 }
@@ -1649,18 +1534,6 @@ button.secondary {
 
   .notification-list {
     max-height: calc(100dvh - 12.5rem);
-  }
-
-  .command-palette-backdrop {
-    padding: 0.75rem;
-  }
-
-  .command-palette {
-    max-height: calc(100dvh - 1.5rem);
-  }
-
-  .command-palette-results {
-    max-height: calc(100dvh - 12rem);
   }
 
   /* The badges move under the text, where a phone has the room. */

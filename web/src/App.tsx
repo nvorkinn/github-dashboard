@@ -3,7 +3,6 @@ import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { BackgroundProvider } from "./components/background.tsx";
-import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
 import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
@@ -12,7 +11,6 @@ import { Logo } from "./components/Logo.tsx";
 import { NotificationCentre } from "./components/NotificationCentre.tsx";
 import { ServiceStatus, useServiceStatus } from "./components/ServiceStatus.tsx";
 import { Settings } from "./components/Settings.tsx";
-import { navigateWorkspace, type WorkspaceDestination } from "./components/Workspace.tsx";
 import { type Dashboard, type DashboardState, summarize } from "./model.ts";
 import {
   addNotificationHistory,
@@ -141,12 +139,9 @@ function SignedIn({
   const closeStatus = useCallback(() => setStatusOpen(false), []);
   const openStatus = () => {
     setNotificationsOpen(false);
-    setPaletteOpen(false);
     setStatusOpen(true);
   };
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceDestination | undefined>(undefined);
 
   // What needs attention shows as a desktop notification, for as long as the dashboard runs.
   useEffect(
@@ -161,79 +156,6 @@ function SignedIn({
   );
 
   const commandCentre = page === "dashboard";
-  const hiddenRepositories = readHidden();
-  const openWorkspace = (destination?: WorkspaceDestination) => {
-    if (destination) {
-      setPendingWorkspace(destination);
-    }
-    location.hash = "#dashboard";
-  };
-  const commands: PaletteCommand[] = [
-    {
-      id: "view:workspace",
-      label: "Open Workspace",
-      group: "Views",
-      keywords: ["command centre", "dashboard"],
-      run: () => openWorkspace(),
-    },
-    {
-      id: "action:refresh",
-      label: "Refresh dashboard",
-      group: "Actions",
-      run: refresh,
-    },
-    {
-      id: "page:settings",
-      label: "Open Settings",
-      group: "Navigation",
-      run: () => {
-        location.hash = "#settings";
-      },
-    },
-    ...workspaceCommands(openWorkspace),
-    ...(state.status === "ready"
-      ? state.data.projects
-          .filter((project) => !hiddenRepositories.has(project.repo))
-          .map(
-            (project): PaletteCommand => ({
-              id: `repo:${project.repo}`,
-              label: `Open ${project.name}`,
-              group: "Repositories",
-              keywords: [project.repo],
-              run: () => openWorkspace({ repo: project.repo }),
-            }),
-          )
-      : []),
-  ];
-
-  useEffect(() => {
-    if (!pendingWorkspace) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      navigateWorkspace(pendingWorkspace);
-      setPendingWorkspace(undefined);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [pendingWorkspace]);
-
-  useEffect(() => {
-    const open = (event: KeyboardEvent) => {
-      if (
-        !event.defaultPrevented &&
-        !event.isComposing &&
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "k"
-      ) {
-        event.preventDefault();
-        setNotificationsOpen(false);
-        setStatusOpen(false);
-        setPaletteOpen(true);
-      }
-    };
-    window.addEventListener("keydown", open);
-    return () => window.removeEventListener("keydown", open);
-  }, []);
   return (
     <>
       {commandCentre && (
@@ -256,19 +178,6 @@ function SignedIn({
         <div class="top-controls">
           <ServiceStatus state={status} open={statusOpen} onOpen={openStatus} onClose={closeStatus} />
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
-          <button
-            type="button"
-            class="header-icon-button command-palette-trigger"
-            title="Open command palette (Command or Control + K)"
-            onClick={() => {
-              setNotificationsOpen(false);
-              setStatusOpen(false);
-              setPaletteOpen(true);
-            }}
-          >
-            <Icon name="command" />
-            <span class="visually-hidden">Open command palette</span>
-          </button>
           <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
             Settings
           </a>
@@ -277,7 +186,6 @@ function SignedIn({
             open={notificationsOpen}
             onOpen={() => {
               setStatusOpen(false);
-              setPaletteOpen(false);
               setNotificationsOpen(true);
             }}
             onClose={() => setNotificationsOpen(false)}
@@ -300,30 +208,8 @@ function SignedIn({
           </ActionsContext.Provider>
         )}
       </main>
-      <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
     </>
   );
-}
-
-function workspaceCommands(open: (destination: WorkspaceDestination) => void): PaletteCommand[] {
-  return [
-    { id: "workspace:overview", label: "Workspace overview", group: "Workspace", run: () => open({ repo: null }) },
-    { id: "workspace:pulls", label: "Open pull requests", group: "Workspace", run: () => open({ section: "pulls" }) },
-    {
-      id: "workspace:workflows",
-      label: "Open workflows",
-      group: "Workspace",
-      run: () => open({ section: "workflows" }),
-    },
-    { id: "workspace:releases", label: "Open releases", group: "Workspace", run: () => open({ section: "releases" }) },
-    {
-      id: "workspace:attention",
-      label: "Show items needing attention",
-      group: "Workspace",
-      keywords: ["failed conflicts waiting"],
-      run: () => open({ section: "attention" }),
-    },
-  ];
 }
 
 function CommandSummary({ state }: { state: DashboardState }) {
