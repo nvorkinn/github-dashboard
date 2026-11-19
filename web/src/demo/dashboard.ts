@@ -189,6 +189,8 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
       // Dependabot takes a moment to read the comment and push the rebase.
       later(REBASE_MS, () => newHead(pull));
     },
+    // Only the demo's own Merge takes a pull request off the list.
+    merged: async () => true,
   };
 
   function advance(): void {

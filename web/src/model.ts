@@ -176,6 +176,8 @@ export type PullActions = {
    * rebase itself, a little later, and pushes it as a new head.
    */
   requestRebase(pull: PullRequest): Promise<void>;
+  /** Whether a pull request that is no longer open was merged, rather than closed. */
+  merged?(pull: Pick<PullRequest, "repo" | "number">): Promise<boolean>;
 };
 
 /** Dependabot's logins: GitHub's REST API and the page call it `dependabot[bot]`, GraphQL plain `dependabot`. */

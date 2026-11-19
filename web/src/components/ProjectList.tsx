@@ -2,6 +2,7 @@ import { type Project, promoteTag, type RunActions } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
+import { ReleaseAfterMerge } from "./PendingRelease.tsx";
 import { RunAction } from "./RunAction.tsx";
 import { Unreleased } from "./Unreleased.tsx";
 
@@ -137,6 +138,7 @@ export function ProjectActions({
           return `Released ${project.repo} as ${tag}.`;
         }}
       />
+      <ReleaseAfterMerge project={project} />
       {promote && (
         <RunAction
           label={`Promote ${promote}`}
