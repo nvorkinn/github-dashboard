@@ -45,6 +45,8 @@ export type RawPull = {
   mergeable_state?: string;
   auto_merge?: object | null;
   node_id: string;
+  /** How many commits it has; only a pull request's own page says, the list leaves it out. */
+  commits?: number;
 };
 export type RawCheckRun = { name: string; status: string; conclusion: string | null; html_url: string | null };
 export type RawStatus = { context: string; state: string; target_url: string | null };
@@ -440,6 +442,7 @@ export type GqlPull = {
   mergeable: string;
   mergeStateStatus: string;
   autoMergeRequest: object | null;
+  commits: { totalCount: number };
   author: GqlActor;
   statusCheckRollup: { contexts: { pageInfo: { hasNextPage: boolean }; nodes: (GqlContext | null)[] } } | null;
 };
@@ -449,6 +452,7 @@ export const PULL = `fragment Pull on PullRequest {
   id number title url isDraft headRefName baseRefName headRefOid createdAt updatedAt
   mergeable mergeStateStatus
   autoMergeRequest { enabledAt }
+  commits { totalCount }
   author { __typename login avatarUrl }
   statusCheckRollup { contexts(first: ${CHECKS_PER_PULL}) {
     pageInfo { hasNextPage }
@@ -528,6 +532,7 @@ export function pullOf(repo: string, pull: RawPull, checkRuns: RawCheckRun[], st
     autoMerge: pull.auto_merge != null,
     checks: checks(checkRuns, statuses),
     nodeId: pull.node_id,
+    commits: pull.commits,
   };
 }
 
@@ -552,6 +557,7 @@ export function pullFrom(repo: string, pull: GqlPull): PullRequest {
     mergeable_state: pull.mergeStateStatus.toLowerCase(),
     auto_merge: pull.autoMergeRequest,
     node_id: pull.id,
+    commits: pull.commits.totalCount,
   };
   const checkRuns: RawCheckRun[] = [];
   const statuses: RawStatus[] = [];

@@ -479,6 +479,11 @@ export function PullRow({
           ) : (
             <code>{pull.head}</code>
           )}
+          {pull.commits !== undefined && (
+            <span>
+              {pull.commits} {pull.commits === 1 ? "commit" : "commits"}
+            </span>
+          )}
           {!unfolded && <span>{pull.author}</span>}
           {unfolded && (
             <span>

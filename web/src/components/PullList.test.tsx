@@ -68,6 +68,19 @@ test("draws a pull request", () => {
   expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Pull requests 1");
 });
 
+test("says how many commits a pull request has, folded and unfolded, when GitHub said", () => {
+  const { rerender } = render(<PullList now={NOW} pulls={[pull({ commits: 3 })]} />);
+  const meta = () => screen.getByRole("listitem").querySelector(".pull-compact-meta")?.textContent;
+  expect(meta()).toBe("monalisa/change3 commitsmonalisaupdated 1m ago");
+  unfold();
+  expect(meta()).toContain("3 commits");
+  rerender(<PullList now={NOW} pulls={[pull({ commits: 1 })]} />);
+  expect(meta()).toContain("1 commit");
+  expect(meta()).not.toContain("1 commits");
+  rerender(<PullList now={NOW} pulls={[pull()]} />);
+  expect(meta()).not.toContain("commit");
+});
+
 test("starts folded, down to the project, number, title, states and buttons, and unfolds on request", () => {
   const { actions } = fakeActions();
   const { container } = render(
