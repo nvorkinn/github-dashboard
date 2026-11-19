@@ -143,12 +143,12 @@ function SignedIn({
   };
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
-  // What needs attention shows as a desktop notification, for as long as the dashboard runs.
+  // What needs attention shows as a desktop notification, for as long as the dashboard runs. The bell keeps only what
+  // was sent as one, so what the user saw happen, or turned off, doesn't pile up there.
   useEffect(
     () =>
       dashboard.onNotice?.((notice) => {
-        notifier.notify(notice);
-        if (!readHidden().has(notice.repo)) {
+        if (notifier.notify(notice)) {
           setNotices(addNotificationHistory(notice));
         }
       }),

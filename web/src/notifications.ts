@@ -176,9 +176,11 @@ function storedNotice(value: unknown): Notice | undefined {
 export type Notifier = {
   /**
    * Shows `notice` as a desktop notification, unless it is a repeat, its kind is off, its project is hidden, or the
-   * user is looking at the dashboard right now: the page's own bell and notices show it then.
+   * user is looking at the dashboard right now. Returns whether it was sent, which is what the bell keeps: a notice
+   * that wasn't worth a notification isn't worth the bell either. Sent counts even where the browser won't show
+   * notifications, so the bell still works without them.
    */
-  notify(notice: Notice): void;
+  notify(notice: Notice): boolean;
   /** Shows a sample notification, for the settings page's "Send a test", whatever the settings say. */
   test(): void;
 };
@@ -217,7 +219,7 @@ export function createNotifier(options: {
   return {
     notify(notice) {
       if (seen.has(notice.key)) {
-        return;
+        return false;
       }
       seen.set(notice.key, true);
       if (seen.size > MAX_SEEN) {
@@ -228,9 +230,10 @@ export function createNotifier(options: {
       }
       // A notice skipped while the user looks stays seen, so it doesn't pop up later once they look away.
       if (!settings()[notice.type] || options.hidden?.().has(notice.repo) || watching()) {
-        return;
+        return false;
       }
       display(NOTICE_LABELS[notice.type].title, notice.headline, notice.key, notice.url);
+      return true;
     },
 
     test() {

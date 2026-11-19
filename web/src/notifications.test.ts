@@ -195,12 +195,12 @@ test("notification history tolerates unavailable or corrupt storage and can be c
 test("nothing shows while the user looks at the dashboard, and the notice doesn't show later either", () => {
   let looking = true;
   const { notifier, shown } = setUp({ watching: () => looking });
-  notifier.notify(merged);
+  expect(notifier.notify(merged)).toBe(false);
   expect(shown).toEqual([]);
   looking = false;
-  notifier.notify(merged);
+  expect(notifier.notify(merged)).toBe(false);
   expect(shown).toEqual([]);
-  notifier.notify({ ...merged, key: "merged:octo/app#8" });
+  expect(notifier.notify({ ...merged, key: "merged:octo/app#8" })).toBe(true);
   expect(shown.map(({ tag }) => tag)).toEqual(["merged:octo/app#8"]);
 });
 
@@ -223,4 +223,12 @@ test("the page is looked at only when its tab shows and its window has the focus
     expect(lookingAtPage()).toBe(expected);
   }
   vi.restoreAllMocks();
+});
+
+test("notify says whether the notice was sent, so the bell keeps only those", () => {
+  const { notifier } = setUp({ hidden: ["octo/hidden"], settings: { release: false } });
+  expect(notifier.notify(merged)).toBe(true);
+  expect(notifier.notify(merged)).toBe(false);
+  expect(notifier.notify({ ...merged, type: "release", key: "release:octo/app:1" })).toBe(false);
+  expect(notifier.notify({ ...merged, key: "merged:octo/hidden#1", repo: "octo/hidden" })).toBe(false);
 });
