@@ -41,6 +41,11 @@ export function sortRuns(runs: ReleaseRun[]): ReleaseRun[] {
  * The release workflows' runs that are going, one card per row, and under them the ones that just finished, each
  * folded to a few lines until it leaves.
  */
+/** A run's workflow and its number, as GitHub names a run: "Release #101", or "Release" where the number is unknown. */
+export function runName(run: Pick<ReleaseRun, "workflow" | "number">): string {
+  return run.number === undefined ? run.workflow : `${run.workflow} #${run.number}`;
+}
+
 export function ReleaseList({ runs, now, inspect = false }: { runs: ReleaseRun[]; now: number; inspect?: boolean }) {
   const shown = sortRuns(shownRuns(runs, now));
   return (
@@ -85,7 +90,7 @@ export function ReleaseCard({ run, now, inspect = false }: { run: ReleaseRun; no
     <li class={finished ? "release release-folded" : "release"}>
       <div class="release-top">
         <span class="repo-label" title={run.repo}>
-          {shortName(run.repo)} <span aria-hidden="true">·</span> {run.workflow}
+          {shortName(run.repo)} <span aria-hidden="true">·</span> <span class="run-name">{runName(run)}</span>
         </span>
         <span class="release-badges">
           {run.tag && (

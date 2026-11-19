@@ -989,6 +989,11 @@ button.action-confirm:hover:not(:disabled) {
   flex: 1 1 9rem;
 }
 
+/* "Release #101" wraps as one, so the number never sits on a line of its own. */
+.run-name {
+  white-space: nowrap;
+}
+
 .release-badges {
   margin-left: auto;
   display: flex;

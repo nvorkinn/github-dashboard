@@ -88,15 +88,22 @@ test("failed checks list each pull request the commit is at", () => {
 });
 
 test("a finished release says how it went, but other runs are quiet", () => {
-  const run = { id: 1, name: "Release", conclusion: "failure", run_attempt: 2, html_url: "https://example.com/" };
+  const run = {
+    id: 1,
+    name: "Release",
+    run_number: 101,
+    conclusion: "failure",
+    run_attempt: 2,
+    html_url: "https://example.com/",
+  };
   const payload = { action: "completed", repository, workflow_run: run };
   expect(noticeFrom("workflow_run", payload)).toEqual({
     type: "release",
     repo: "nvorkinn/countdown",
-    headline: "Release in nvorkinn/countdown: failure",
+    headline: "Release #101 in nvorkinn/countdown: failure",
     url: "https://github.com/nvorkinn/countdown/actions/runs/1",
     key: "finished:nvorkinn/countdown:1:2",
-    text: "Release in nvorkinn/countdown: failure\nhttps://github.com/nvorkinn/countdown/actions/runs/1",
+    text: "Release #101 in nvorkinn/countdown: failure\nhttps://github.com/nvorkinn/countdown/actions/runs/1",
   });
   expect(noticeFrom("workflow_run", { ...payload, workflow_run: { ...run, name: "Test" } })).toBeUndefined();
   expect(noticeFrom("workflow_run", { ...payload, action: "in_progress" })).toBeUndefined();

@@ -31,6 +31,7 @@ test("folds a run that just finished, with its jobs behind Jobs, and counts down
       runs={[
         run({
           title: "v2.4.1",
+          number: 101,
           startedAt: before(312_000),
           finishedAt: before(60_000),
           jobs: [job({ id: 1, name: "build" })],
@@ -40,7 +41,7 @@ test("folds a run that just finished, with its jobs behind Jobs, and counts down
   );
   const card = container.querySelector(".release") as HTMLElement;
   expect(card.classList.contains("release-folded")).toBe(true);
-  expect(card.querySelector(".repo-label")?.textContent).toBe("weather-station · Release");
+  expect(card.querySelector(".repo-label")?.textContent).toBe("weather-station · Release #101");
   expect(within(card).getByRole("link", { name: "v2.4.1" }).getAttribute("href")).toBe(
     "https://github.com/octocat/weather-station/actions/runs/1",
   );
