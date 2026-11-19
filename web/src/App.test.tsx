@@ -192,6 +192,20 @@ test("the Refresh button reads again and shows it", async () => {
   expect(await screen.findByRole("button", { name: "Refresh" })).toBeTruthy();
 });
 
+test("Reload loads the whole page again, from the header and from the account's menu", async () => {
+  stubBackend(signedIn);
+  const reload = vi.spyOn(window.location, "reload").mockImplementation(() => {});
+  render(<App auth={createAuth()} dashboard={fakeDashboard(ready())} />);
+  // The header has one for a wide screen; a phone's is in the account's menu.
+  const buttons = await screen.findAllByRole("button", { name: "Reload" });
+  expect(buttons).toHaveLength(2);
+  for (const button of buttons) {
+    fireEvent.click(button);
+  }
+  expect(reload).toHaveBeenCalledTimes(2);
+  reload.mockRestore();
+});
+
 test("the actions it is given reach the pull requests, and without them there are no buttons", async () => {
   stubBackend(signedIn);
   const dashboard = fakeDashboard(ready({ pulls: [pull({ title: "Ready one" })] }));
