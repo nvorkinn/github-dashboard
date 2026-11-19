@@ -174,8 +174,13 @@ function storedNotice(value: unknown): Notice | undefined {
 }
 
 export type Notifier = {
-  /** Shows `notice` as a desktop notification, unless it is a repeat, its kind is off, or its project is hidden. */
-  notify(notice: Notice): void;
+  /**
+   * Shows `notice` as a desktop notification, unless it is a repeat, its kind is off, its project is hidden, or the
+   * user is looking at the dashboard right now. Returns whether it was sent, which is what the bell keeps: a notice
+   * that wasn't worth a notification isn't worth the bell either. Sent counts even where the browser won't show
+   * notifications, so the bell still works without them.
+   */
+  notify(notice: Notice): boolean;
   /** Shows a sample notification, for the settings page's "Send a test", whatever the settings say. */
   test(): void;
 };
@@ -188,10 +193,13 @@ export function createNotifier(options: {
   show?: Show;
   /** Opens a link from a clicked notification. */
   open?: (url: string) => void;
+  /** Whether the user is looking at the dashboard. Left out, `lookingAtPage`. */
+  watching?: () => boolean;
 }): Notifier {
   const settings = options.settings ?? readSettings;
   const show = options.show ?? browserShow;
   const open = options.open ?? ((url: string) => window.open(url, "_blank", "noopener"));
+  const watching = options.watching ?? lookingAtPage;
   // A Map keeps the order keys were added in, so the first are the oldest.
   const seen = new Map<string, true>();
 
@@ -211,7 +219,7 @@ export function createNotifier(options: {
   return {
     notify(notice) {
       if (seen.has(notice.key)) {
-        return;
+        return false;
       }
       seen.set(notice.key, true);
       if (seen.size > MAX_SEEN) {
@@ -220,16 +228,26 @@ export function createNotifier(options: {
           seen.delete(oldest);
         }
       }
-      if (!settings()[notice.type] || options.hidden?.().has(notice.repo)) {
-        return;
+      // A notice skipped while the user looks stays seen, so it doesn't pop up later once they look away.
+      if (!settings()[notice.type] || options.hidden?.().has(notice.repo) || watching()) {
+        return false;
       }
       display(NOTICE_LABELS[notice.type].title, notice.headline, notice.key, notice.url);
+      return true;
     },
 
     test() {
       display("GitHub dashboard", "Notifications from the dashboard show like this.", "test", undefined);
     },
   };
+}
+
+/**
+ * Whether the user is looking at the dashboard: its tab is the one showing and its window has the focus. A window that
+ * shows but sits behind another app, or a tab in the background, isn't looked at, so notifications show then.
+ */
+export function lookingAtPage(): boolean {
+  return document.visibilityState === "visible" && document.hasFocus();
 }
 
 /**

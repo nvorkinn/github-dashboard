@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 import { createAuth } from "./auth.ts";
 import { fakeDashboard, pull, ready } from "./components/testing.ts";
+import { readNotificationHistory } from "./notifications.ts";
 import type { Call } from "./testing.ts";
 import { stubBackend, tokenAnswer } from "./testing.ts";
 
@@ -262,7 +263,7 @@ test("a notice from the dashboard goes to the notifier while signed in", async (
 test("keeps streamed notices in the in-app notification centre", async () => {
   stubBackend(signedIn);
   const dashboard = fakeDashboard(ready());
-  const notifier = { notify: vi.fn(), test: vi.fn() };
+  const notifier = { notify: vi.fn(() => true), test: vi.fn() };
   render(<App auth={createAuth()} dashboard={dashboard} notifier={notifier} />);
   await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
   const notice = {
@@ -281,6 +282,24 @@ test("keeps streamed notices in the in-app notification centre", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "Notifications, 0 unread" })).toBeTruthy());
   fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
   expect(screen.getByText("No notifications yet.")).toBeTruthy();
+});
+
+test("a notice that wasn't sent as a notification stays out of the bell", async () => {
+  stubBackend(signedIn);
+  const dashboard = fakeDashboard(ready());
+  const notifier = { notify: vi.fn(() => false), test: vi.fn() };
+  render(<App auth={createAuth()} dashboard={dashboard} notifier={notifier} />);
+  await waitFor(() => expect(dashboard.start).toHaveBeenCalledOnce());
+  dashboard.notice({
+    type: "release",
+    key: "release:octo/app:1",
+    repo: "octo/app",
+    headline: "Release finished in octo/app",
+    url: "https://github.com/octo/app/actions/runs/1",
+  });
+  expect(notifier.notify).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("button", { name: "Notifications, 0 unread" })).toBeTruthy();
+  expect(readNotificationHistory()).toEqual([]);
 });
 
 test("folds Settings and signing out into the account menu, which Escape and going to Settings close", async () => {
