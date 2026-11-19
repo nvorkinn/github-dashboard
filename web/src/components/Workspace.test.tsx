@@ -256,3 +256,22 @@ function expectOverview() {
       .getAttribute("aria-current"),
   ).toBe("page");
 }
+
+test("opens the repository drawer from the tab bar, and closes it on choosing a repository or Escape", () => {
+  dashboard();
+  const opener = screen.getByRole("button", { name: "Repositories: all" });
+  expect(opener.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(opener);
+  expect(opener.getAttribute("aria-expanded")).toBe("true");
+  expect(document.querySelector(".workspace.sidebar-drawer-open")).not.toBeNull();
+  select(/home-ledger/);
+  expect(document.querySelector(".workspace.sidebar-drawer-open")).toBeNull();
+  const scoped = screen.getByRole("button", { name: "Repositories: home-ledger" });
+  expect(document.activeElement).toBe(scoped);
+  fireEvent.click(scoped);
+  fireEvent.keyDown(screen.getByRole("complementary", { name: "Repository navigation" }), { key: "Escape" });
+  expect(scoped.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(scoped);
+  fireEvent.click(screen.getByRole("button", { name: "Close repositories" }));
+  expect(scoped.getAttribute("aria-expanded")).toBe("false");
+});

@@ -658,6 +658,42 @@ body:has(.workspace) {
   border-bottom: 1px solid var(--border);
 }
 
+/* Wide screens show the sidebar beside the page; the drawer's buttons are a phone's. */
+.workspace-tabbar {
+  display: contents;
+}
+
+.workspace-drawer-toggle,
+.workspace-drawer-close {
+  display: none;
+  flex: none;
+  place-items: center;
+  width: 3rem;
+  min-height: 3rem;
+  padding: 0;
+  color: var(--quiet);
+  font-size: 1.25rem;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.workspace-drawer-toggle {
+  border-right: 1px solid var(--border);
+}
+
+.workspace-drawer-close {
+  width: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: 0.45rem;
+}
+
+.workspace-drawer-toggle:hover,
+.workspace-drawer-close:hover {
+  color: var(--text);
+}
+
 .workspace .workspace-tabs button {
   display: inline-flex;
   align-items: center;
@@ -1123,17 +1159,26 @@ body:has(.workspace) {
 }
 
 @media (max-width: 46rem) {
+  /* One row: the logo, then the controls; Settings and signing out are in the avatar's menu. */
   .command-top {
-    position: static;
-    display: grid;
-    grid-template-columns: 2.5rem minmax(0, 1fr);
-    align-items: start;
+    position: relative;
+    z-index: 20;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.5rem;
     min-height: auto;
-    padding: 0.65rem 0.75rem;
+    padding: 0.5rem 0.75rem;
   }
 
   .command-brand {
     display: block;
+    flex: none;
+  }
+
+  .command-mark {
+    width: 2rem;
+    height: 2rem;
   }
 
   .command-brand h1,
@@ -1149,82 +1194,96 @@ body:has(.workspace) {
   }
 
   .command-top .top-controls {
+    flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 0.15rem;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    overflow: visible;
-  }
-
-  .command-top .top-controls > *,
-  .command-top .account > * {
-    flex: none;
+    gap: 0.35rem;
   }
 
   .workspace {
     display: block;
-    min-height: auto;
+    min-height: calc(100dvh - var(--command-top-height, 3.5rem));
   }
 
+  /* A phone keeps the sidebar out of the way, as a drawer the tab bar's first button opens over the page. */
   .workspace-sidebar {
-    position: static;
-    width: auto;
-    height: auto;
-    padding: 0.65rem 0.75rem;
-    overflow: visible;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(20rem, 86vw);
+    height: 100dvh;
+    padding: 0.75rem 0.75rem 1.5rem;
+    visibility: hidden;
+    transform: translateX(-105%);
+    transition:
+      transform 0.2s ease,
+      visibility 0s linear 0.2s;
+    box-shadow: 12px 0 40px rgb(0 0 0 / 0.45);
   }
 
-  .workspace-sidebar-head,
-  .workspace-sidebar-label {
+  .sidebar-drawer-open .workspace-sidebar {
+    visibility: visible;
+    transform: none;
+    transition: transform 0.2s ease;
+  }
+
+  .workspace-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgb(0 0 0 / 0.5);
+  }
+
+  .workspace-sidebar-head {
+    padding-block: 0 0.5rem;
+  }
+
+  .workspace-sidebar-toggle {
     display: none;
   }
 
-  .workspace-overview {
-    margin-bottom: 0.55rem;
-  }
-
-  .workspace-manage {
-    margin-top: 0.55rem;
-  }
-
-  .workspace-repos {
-    display: flex;
-    gap: 0.35rem;
-    margin-top: 0.55rem;
-    padding-bottom: 0.15rem;
-    overflow-x: auto;
-  }
-
-  .workspace-repo {
-    flex: none;
-  }
-
-  .workspace-repo + .workspace-repo {
-    margin-top: 0;
-  }
-
-  .workspace-repos .workspace-nav {
-    width: auto;
-    flex: none;
-    padding-right: 0.65rem;
-  }
-
-  /* The strip has no room for release controls: the Releases tab has them. */
-  .workspace-repo-release,
-  .workspace-release-toggle,
-  .workspace-release-drawer {
-    display: none;
+  .workspace-drawer-close {
+    display: inline-grid;
   }
 
   .workspace-main {
     padding: 0 0.75rem 1.5rem;
   }
 
+  .workspace-tabbar {
+    display: flex;
+    margin: 0 -0.75rem 0.75rem;
+    background: rgb(8 14 23 / 0.92);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .workspace-drawer-toggle {
+    display: inline-grid;
+  }
+
   .workspace-tabs {
-    margin-inline: -0.75rem;
-    padding-inline: 0.75rem;
+    flex: 1;
+    gap: 0;
+    margin: 0;
+    padding: 0 0.25rem 0 0;
+    background: none;
+    border: 0;
+  }
+
+  /* Only the chosen tab spells its name out; the others are their icon and count, so all of them fit. */
+  .workspace .workspace-tabs button {
+    flex: 1 0 auto;
+    justify-content: center;
+    gap: 0.3rem;
+    padding-inline: 0.5rem;
+  }
+
+  .workspace-tabs button:not([aria-pressed="true"]) .workspace-tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .workspace-intro-actions {
@@ -1264,5 +1323,39 @@ body:has(.workspace) {
   .workspace .pull-controls {
     width: 100%;
     justify-content: flex-start;
+  }
+}
+
+/* A phone's pull request filters, unfolded: one per line, the label beside a full-width control. */
+@media (max-width: 46rem) {
+  .workspace .panel-heading {
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 0.6rem;
+  }
+
+  .workspace .pull-controls-folding.open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .workspace .pull-controls-folding .pull-filter,
+  .workspace .pull-controls-folding .order {
+    display: grid;
+    grid-template-columns: 3.25rem minmax(0, 1fr);
+    margin: 0;
+  }
+
+  .workspace .pull-controls-folding select {
+    width: 100%;
+  }
+
+  .workspace .pull-controls-folding .pull-saved-views {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-auto-flow: column;
   }
 }

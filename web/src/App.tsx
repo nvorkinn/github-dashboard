@@ -169,7 +169,7 @@ function SignedIn({
           <h1>
             <a class={commandCentre ? "home" : "home title-with-logo"} href="#dashboard">
               {!commandCentre && <Logo size={24} />}
-              {commandCentre ? "GitHub Command Centre" : "GitHub dashboard"}
+              <span class="title-text">{commandCentre ? "GitHub Command Centre" : "GitHub dashboard"}</span>
             </a>
           </h1>
           {commandCentre && <p>Build · Review · Release · Operate</p>}
@@ -178,9 +178,6 @@ function SignedIn({
         <div class="top-controls">
           <ServiceStatus state={status} open={statusOpen} onOpen={openStatus} onClose={closeStatus} />
           <Freshness state={state} now={now} refresh={refresh} pending={pending} />
-          <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
-            Settings
-          </a>
           <NotificationCentre
             notices={notices}
             open={notificationsOpen}
@@ -194,7 +191,11 @@ function SignedIn({
               setNotices([]);
             }}
           />
-          <Account auth={auth} />
+          <Account auth={auth}>
+            <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
+              Settings
+            </a>
+          </Account>
         </div>
       </header>
       <main class={commandCentre ? "command-main" : undefined}>

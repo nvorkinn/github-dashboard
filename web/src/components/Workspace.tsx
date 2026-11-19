@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { Project, PullRequest, ReleaseRun } from "../model.ts";
 import { summarize } from "../model.ts";
 import { useActions } from "./actions.tsx";
@@ -58,6 +58,26 @@ function useSidebarCollapsed(): [boolean, (collapsed: boolean) => void] {
       }
     },
   ];
+}
+
+/**
+ * The repository sidebar as a phone shows it: a drawer over the page, opened from the tab bar. Focus goes into it
+ * when it opens and back to its button when it closes. Wider screens never open it, so it changes nothing there.
+ */
+function useSidebarDrawer() {
+  const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) {
+      panel.current?.querySelector<HTMLElement>(".workspace-nav.active, .workspace-nav")?.focus();
+    } else if (wasOpen.current) {
+      toggle.current?.focus();
+    }
+    wasOpen.current = open;
+  }, [open]);
+  return { open, panel, toggle, show: () => setOpen(true), close: () => setOpen(false) };
 }
 
 /**
@@ -121,6 +141,7 @@ export function Workspace({
   const [tab, setTab] = useState<WorkspaceTab>("all");
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useSidebarCollapsed();
+  const sheet = useSidebarDrawer();
   // The repository whose release controls are unfolded in the sidebar; one at a time.
   const [releaseOpen, setReleaseOpen] = useState<string | undefined>(undefined);
   // Once a release or promotion has started, its drawer folds away; the focus, if it was in there, goes back to the
@@ -169,8 +190,27 @@ export function Workspace({
   ];
 
   return (
-    <div class={collapsed ? "workspace sidebar-collapsed" : "workspace"}>
-      <aside id="workspace-sidebar" class="workspace-sidebar" aria-label="Repository navigation">
+    <div
+      class={["workspace", collapsed && "sidebar-collapsed", sheet.open && "sidebar-drawer-open"]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {sheet.open && (
+        // The tap target to close the drawer; Escape and the close button do the same from a keyboard.
+        <div class="workspace-drawer-backdrop" aria-hidden="true" onClick={sheet.close} />
+      )}
+      <aside
+        id="workspace-sidebar"
+        ref={sheet.panel}
+        class="workspace-sidebar"
+        aria-label="Repository navigation"
+        onKeyDown={(event) => {
+          if (sheet.open && event.key === "Escape") {
+            event.preventDefault();
+            sheet.close();
+          }
+        }}
+      >
         <div class="workspace-sidebar-head">
           <h2>Repositories</h2>
           <span class="workspace-sidebar-total">{shown.length}</span>
@@ -185,6 +225,9 @@ export function Workspace({
           >
             <Icon name="sidebar" />
           </button>
+          <button type="button" class="workspace-drawer-close" aria-label="Close repositories" onClick={sheet.close}>
+            ×
+          </button>
         </div>
         <button
           type="button"
@@ -196,6 +239,7 @@ export function Workspace({
           onClick={() => {
             setScope(undefined);
             setTab("all");
+            sheet.close();
           }}
         >
           <span class="workspace-nav-icon">
@@ -225,7 +269,8 @@ export function Workspace({
               pulls.some((pull) => pull.repo === project.repo && pullNeedsAttention(pull)) ||
               runs.some((run) => run.repo === project.repo && runNeedsAttention(run));
             const drawer = `workspace-release-${project.repo.replace(/[^A-Za-z0-9_-]/g, "-")}`;
-            const open = releaseOpen === project.repo && !collapsed;
+            // The folded rail has no room for the controls; a phone's drawer is never folded.
+            const open = releaseOpen === project.repo && (!collapsed || sheet.open);
             const pending = (waiting(project) ?? 0) > 0;
             return (
               <div key={project.repo} class={open ? "workspace-repo release-open" : "workspace-repo"}>
@@ -238,6 +283,7 @@ export function Workspace({
                     onClick={() => {
                       setScope(project.repo);
                       setTab("all");
+                      sheet.close();
                     }}
                   >
                     <span class="workspace-repo-name">
@@ -307,23 +353,36 @@ export function Workspace({
         id="workspace-content"
         tabindex={-1}
       >
-        <nav class="workspace-tabs" aria-label="Workspace sections">
-          {tabs.map((one) => (
-            <button
-              key={one.value}
-              type="button"
-              aria-label={one.label}
-              aria-pressed={activeTab === one.value}
-              onClick={() => setTab(one.value)}
-            >
-              <span class="workspace-tab-icon" aria-hidden="true">
-                <Icon name={TAB_ICONS[one.value]} />
-              </span>
-              {one.label}
-              {one.count !== undefined && <span class="count">{one.count}</span>}
-            </button>
-          ))}
-        </nav>
+        <div class="workspace-tabbar">
+          <button
+            ref={sheet.toggle}
+            type="button"
+            class="workspace-drawer-toggle"
+            aria-controls="workspace-sidebar"
+            aria-expanded={sheet.open}
+            onClick={sheet.show}
+          >
+            <Icon name="sidebar" />
+            <span class="visually-hidden">Repositories: {selected ? selected.name : "all"}</span>
+          </button>
+          <nav class="workspace-tabs" aria-label="Workspace sections">
+            {tabs.map((one) => (
+              <button
+                key={one.value}
+                type="button"
+                aria-label={one.label}
+                aria-pressed={activeTab === one.value}
+                onClick={() => setTab(one.value)}
+              >
+                <span class="workspace-tab-icon" aria-hidden="true">
+                  <Icon name={TAB_ICONS[one.value]} />
+                </span>
+                <span class="workspace-tab-label">{one.label}</span>
+                {one.count !== undefined && <span class="count">{one.count}</span>}
+              </button>
+            ))}
+          </nav>
+        </div>
 
         {selected && (
           <header class="workspace-intro">

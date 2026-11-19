@@ -268,3 +268,19 @@ test("keeps streamed notices in the in-app notification centre", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Clear notifications" }));
   expect(screen.getByText("No notifications yet.")).toBeTruthy();
 });
+
+test("folds Settings and signing out into the account menu, which Escape and going to Settings close", async () => {
+  stubBackend(signedIn);
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
+  const toggle = await screen.findByRole("button", { name: "Account menu" });
+  const menu = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+  expect(menu?.contains(screen.getByRole("link", { name: "Settings" }))).toBe(true);
+  expect(menu?.contains(screen.getByRole("button", { name: "Sign out" }))).toBe(true);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.keyDown(toggle, { key: "Escape" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("false"));
+});

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
+import { Icon } from "./Icon.tsx";
 import { Workspace } from "./Workspace.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
@@ -43,8 +44,9 @@ export function Freshness({
           </span>
         </>
       )}
-      <button type="button" onClick={refresh} disabled={refreshing || state.status === "loading"}>
-        {refreshing ? "Refreshing…" : "Refresh"}
+      <button type="button" class="refresh" onClick={refresh} disabled={refreshing || state.status === "loading"}>
+        <Icon name="refresh" class={refreshing ? "refresh-icon spinning" : "refresh-icon"} />
+        <span class="refresh-label">{refreshing ? "Refreshing…" : "Refresh"}</span>
       </button>
     </div>
   );

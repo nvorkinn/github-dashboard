@@ -90,7 +90,7 @@ export function ServiceStatus({
         <span class="service-symbol" aria-hidden="true">
           {SYMBOLS[tone]}
         </span>
-        <span>
+        <span class="service-label">
           <span class="service-prefix">GitHub: </span>
           {label}
           {suffix}
