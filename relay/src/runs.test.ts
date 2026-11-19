@@ -33,6 +33,7 @@ function run(id: number, status: string, more: Record<string, unknown> = {}) {
     updated_at: `2026-11-14T12:3${id % 10}:00Z`,
     head_sha: "a".repeat(40),
     path: PATH,
+    run_number: 100 + id,
     run_attempt: 1,
     ...more,
   };
@@ -102,6 +103,7 @@ test("a run that starts is told whole, with its workflow's jobs laid out and non
     repo: REPO,
     id: 10,
     workflow: "Release",
+    number: 110,
     title: "v1.2.3",
     tag: "v1.2.3",
     state: "queued",

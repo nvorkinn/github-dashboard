@@ -112,6 +112,8 @@ export function releaseRun(value: unknown): ReleaseRun | undefined {
   }
   const { repo, id, workflow, title, url, state, startedAt } = value;
   const tag = optional(value.tag);
+  // Left out for a run the relay kept from before it read run numbers.
+  const { number } = value;
   const actor = optional(value.actor);
   const finishedAt = optional(value.finishedAt);
   const jobs = all(value.jobs, job);
@@ -122,6 +124,7 @@ export function releaseRun(value: unknown): ReleaseRun | undefined {
     typeof repo !== "string" ||
     typeof id !== "number" ||
     typeof workflow !== "string" ||
+    (number !== undefined && !Number.isInteger(number)) ||
     typeof title !== "string" ||
     typeof url !== "string" ||
     !url.startsWith("https://github.com/") ||
@@ -141,6 +144,7 @@ export function releaseRun(value: unknown): ReleaseRun | undefined {
     repo,
     id,
     workflow,
+    ...(number === undefined ? {} : { number: number as number }),
     title,
     ...(tag === undefined ? {} : { tag }),
     url,

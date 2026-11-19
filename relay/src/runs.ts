@@ -464,6 +464,7 @@ export function rawRun(value: unknown): RawRun | undefined {
   const started = time(value.run_started_at);
   const sha = text(value.head_sha);
   const path = text(value.path);
+  const number = wholeNumber(value.run_number);
   return {
     id,
     name: str(value.name) ?? null,
@@ -480,6 +481,7 @@ export function rawRun(value: unknown): RawRun | undefined {
     updated_at: time(value.updated_at) ?? created,
     ...(sha === undefined ? {} : { head_sha: sha }),
     ...(path === undefined ? {} : { path }),
+    ...(number === undefined ? {} : { run_number: number }),
     run_attempt: wholeNumber(value.run_attempt) ?? 1,
   };
 }

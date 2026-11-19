@@ -145,6 +145,7 @@ export function createDemoRunActions(
       repo: project.repo,
       id,
       workflow,
+      number: id - 9398,
       title,
       tag,
       url: `${project.url}/actions/runs/${id}`,

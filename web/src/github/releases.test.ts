@@ -14,6 +14,7 @@ const RUN = {
   repo: "octo/app",
   id: 1,
   workflow: "Release",
+  number: 101,
   title: "v1.2.3",
   tag: "v1.2.3",
   url: "https://github.com/octo/app/actions/runs/1",
@@ -47,6 +48,7 @@ test("a run the relay sent is read whole, with what its JSON leaves out as undef
 test.each([
   ["not an object", "run"],
   ["no id", { ...RUN, id: undefined }],
+  ["a number that isn't one", { ...RUN, number: "101" }],
   ["a state that is none", { ...RUN, state: "exploded" }],
   ["a link that leaves github.com", { ...RUN, url: "https://evil.example/run" }],
   ["a job's link that does", { ...RUN, jobs: [{ ...JOB, url: "javascript:alert(1)" }] }],

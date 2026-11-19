@@ -172,7 +172,8 @@ function releaseFinished(
   isRelease: IsRelease | undefined,
 ): Notice | undefined {
   const run = record(root.workflow_run);
-  const name = text(run.name) ?? "Release";
+  const number = wholeNumber(run.run_number);
+  const name = `${short(text(run.name) ?? "Release")}${number === undefined ? "" : ` #${number}`}`;
   const id = wholeNumber(run.id);
   if (root.action !== "completed" || !isReleaseRun(repo, run, isRelease) || id === undefined) {
     return undefined;
@@ -181,7 +182,7 @@ function releaseFinished(
     "release",
     repo,
     `finished:${repo}:${id}:${wholeNumber(run.run_attempt) ?? 1}`,
-    `${short(name)} in ${repo}: ${text(run.conclusion) ?? "finished"}`,
+    `${name} in ${repo}: ${text(run.conclusion) ?? "finished"}`,
     [runUrl(repo, id)],
   );
 }

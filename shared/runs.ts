@@ -28,6 +28,11 @@ export type ReleaseRun = {
   id: number;
   /** The workflow's name, such as "Release". */
   workflow: string;
+  /**
+   * Its number among its workflow's runs, as GitHub shows it after the name: the 101 of "Release #101". Unset where
+   * GitHub didn't say, such as a run the relay kept from before it read numbers.
+   */
+  number?: number | undefined;
   /** What the run is of: its display title on GitHub, such as the tag or the commit's subject. */
   title: string;
   /**
@@ -112,6 +117,8 @@ export type RawRun = {
   run_started_at?: string | null;
   updated_at: string;
   head_sha?: string;
+  /** Its number among its workflow's runs, such as 101 for "Release #101". */
+  run_number?: number;
   /** Which try of the run this is: 1, and one more for each re-run. */
   run_attempt?: number;
   /** Its workflow file, such as `.github/workflows/release.yml`. */
@@ -225,6 +232,7 @@ export function runOf(
     repo,
     id: run.id,
     workflow: workflow.name,
+    ...(run.run_number === undefined ? {} : { number: run.run_number }),
     title: run.display_title ?? run.name ?? workflow.name,
     tag: releaseTag(run),
     url: run.html_url,
