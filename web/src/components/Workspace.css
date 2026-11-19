@@ -1159,10 +1159,15 @@ body:has(.workspace) {
 }
 
 @media (max-width: 46rem) {
-  /* One row: the logo, then the controls; Settings and signing out are in the avatar's menu. */
-  .command-top {
-    position: relative;
+  /*
+   * One row: the logo, then the controls; Settings and signing out are in the avatar's menu. Short enough now to stay
+   * at the top, and opaque, so an installed iPhone app's status bar takes its colour as the page scrolls.
+   */
+  .top.command-top {
+    position: sticky;
+    top: 0;
     z-index: 20;
+    background: rgb(6 11 18);
     display: flex;
     flex-wrap: nowrap;
     align-items: center;

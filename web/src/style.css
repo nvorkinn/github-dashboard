@@ -1393,7 +1393,7 @@ button.secondary {
 
   .notification-centre {
     position: fixed;
-    inset: calc(4.75rem + env(safe-area-inset-top, 0px)) 0.75rem auto;
+    inset: 4.75rem 0.75rem auto;
     width: auto;
     max-height: calc(100dvh - 5.5rem);
   }
@@ -1669,9 +1669,9 @@ h1 .home {
   }
   .service-popover {
     position: fixed;
-    inset: calc(0.75rem + env(safe-area-inset-top, 0px)) 0.75rem auto;
+    inset: 0.75rem 0.75rem auto;
     width: auto;
-    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px));
+    max-height: calc(100dvh - 1.5rem);
   }
 }
 
@@ -1947,26 +1947,4 @@ h1 .home {
   .pull-controls-folding:not(.open) {
     display: none;
   }
-}
-
-/*
- * A phone's status bar: the page is drawn under it (viewport-fit=cover), so this strip, the header's colour, stays
- * behind it, and the page starts below it. Elsewhere the inset is 0 and none of it shows.
- */
-body {
-  padding-top: env(safe-area-inset-top, 0px);
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 100;
-  height: env(safe-area-inset-top, 0px);
-  background: var(--background);
-  pointer-events: none;
-}
-
-body:has(.command-top)::before {
-  background: rgb(6 11 18);
 }
