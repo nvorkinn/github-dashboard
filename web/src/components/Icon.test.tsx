@@ -22,7 +22,6 @@ test("supports every command-centre icon with a stable class and size", () => {
   const names: IconName[] = [
     "attention",
     "check",
-    "command",
     "overview",
     "pull-request",
     "release",

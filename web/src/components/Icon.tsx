@@ -5,7 +5,6 @@ export type IconName =
   | "folder"
   | "attention"
   | "check"
-  | "command"
   | "notification"
   | "overview"
   | "pull-request"
@@ -88,11 +87,6 @@ const paths: Record<IconName, ComponentChildren> = {
     </>
   ),
   check: <path d="m5 12 4 4L19 6" />,
-  command: (
-    <>
-      <path d="M9 6v12a3 3 0 1 1-3-3h12a3 3 0 1 1-3 3V6a3 3 0 1 1 3 3H6a3 3 0 1 1 3-3Z" />
-    </>
-  ),
   notification: (
     <>
       <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" />
