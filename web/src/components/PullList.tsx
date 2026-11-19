@@ -334,7 +334,6 @@ export function PullList({
                 pull={pull}
                 reviewPulls={filtered}
                 now={now}
-                foldable
                 showRepository={showRepository}
               />
             ))}
@@ -354,13 +353,7 @@ export function PullList({
                 ) : (
                   <ul class="cards" aria-labelledby={`column-${value}`}>
                     {these.map((pull) => (
-                      <PullRow
-                        key={`${pull.repo}#${pull.number}`}
-                        pull={pull}
-                        reviewPulls={sorted}
-                        now={now}
-                        foldable
-                      />
+                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} reviewPulls={sorted} now={now} />
                     ))}
                   </ul>
                 )}
@@ -410,25 +403,22 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
 }
 
 /**
- * One pull request. A `foldable` one starts folded, down to its project, number, title, states and buttons, with a
- * button that unfolds the rest: who opened it and when, its branches and each check.
+ * One pull request. It starts folded, down to its project, number, title, states and buttons, with a
+ * button that unfolds the rest under the same row: its branches, when it was opened and each check.
  */
 export function PullRow({
   pull: read,
   reviewPulls,
   now,
-  foldable = false,
   showRepository = false,
 }: {
   pull: PullRequest;
   reviewPulls?: PullRequest[];
   now: number;
-  foldable?: boolean;
   showRepository?: boolean;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
-  const folded = foldable && !unfolded;
   const actions = useActions()?.pulls;
   const readFiles = useActions()?.files;
   const [doneState, setDoneState] = useState<Done | undefined>(undefined);
@@ -455,62 +445,50 @@ export function PullRow({
       ? { ...read, autoMerge: done.what === "autoMergeOn" }
       : read;
   return (
-    <li class={`${folded ? "pull pull-folded" : "pull"} pull-${columnOf(pull)}`}>
-      {folded ? null : pull.authorAvatarUrl ? (
-        <img class="avatar" src={pull.authorAvatarUrl} alt="" width="32" height="32" loading="lazy" />
-      ) : (
-        <span class="avatar avatar-missing" aria-hidden="true" />
-      )}
+    <li class={`${unfolded ? "pull pull-folded pull-unfolded" : "pull pull-folded"} pull-${columnOf(pull)}`}>
       <div class="pull-main">
         <div class="pull-head">
           <span class="repo-label" title={pull.repo}>
             {shortName(pull.repo)}
           </span>
-          {foldable && (
-            <button
-              type="button"
-              class="fold-toggle"
-              aria-expanded={unfolded}
-              aria-label={`Details of #${pull.number} in ${shortName(pull.repo)}`}
-              title={unfolded ? "Hide details" : "Show details"}
-              onClick={() => setUnfolded(!unfolded)}
-            />
-          )}
+          <button
+            type="button"
+            class="fold-toggle"
+            aria-expanded={unfolded}
+            aria-label={`Details of #${pull.number} in ${shortName(pull.repo)}`}
+            title={unfolded ? "Hide details" : "Show details"}
+            onClick={() => setUnfolded(!unfolded)}
+          />
         </div>
         <ExternalLink class="pull-title" href={pull.url}>
           <span class="number">#{pull.number}</span> {pull.title}
         </ExternalLink>
-        {folded && (
-          <p class="pull-compact-meta">
-            {showRepository && (
-              <span class="pull-compact-repo" title={pull.repo}>
-                {shortName(pull.repo)}
-              </span>
-            )}
-            <code>{pull.head}</code>
-            <span>{pull.author}</span>
-            <span>
-              updated <Ago at={pull.updatedAt} now={now} />
+        <p class="pull-compact-meta">
+          {showRepository && (
+            <span class="pull-compact-repo" title={pull.repo}>
+              {shortName(pull.repo)}
             </span>
-          </p>
-        )}
-        {!folded && (
-          <p class="meta">
-            <span>{pull.author}</span>
+          )}
+          {unfolded ? (
             <span class="branches">
               <code>{pull.head}</code>
               <span aria-hidden="true"> → </span>
               <span class="visually-hidden"> into </span>
               <code>{pull.base}</code>
             </span>
+          ) : (
+            <code>{pull.head}</code>
+          )}
+          {!unfolded && <span>{pull.author}</span>}
+          {unfolded && (
             <span>
               opened <Ago at={pull.createdAt} now={now} />
             </span>
-            <span>
-              updated <Ago at={pull.updatedAt} now={now} />
-            </span>
-          </p>
-        )}
+          )}
+          <span>
+            updated <Ago at={pull.updatedAt} now={now} />
+          </span>
+        </p>
       </div>
       <div class="pull-badges">
         {pull.draft && <span class="badge">Draft</span>}
@@ -536,7 +514,7 @@ export function PullRow({
         {done?.what === "rebaseAsked" && <span class="badge">Rebase requested</span>}
       </div>
       {reviewOpen && <PullReview initial={pull} pulls={reviewPulls ?? [pull]} onClose={() => setReviewOpen(false)} />}
-      <Checks checks={pull.checks} folded={folded} />
+      <Checks checks={pull.checks} />
       <PullButtons
         pull={pull}
         actions={
@@ -569,6 +547,7 @@ export function PullRow({
         onDone={setDone}
         onReview={readFiles && (() => setReviewOpen(true))}
       />
+      {unfolded && <CheckList checks={pull.checks} />}
     </li>
   );
 }
@@ -752,47 +731,43 @@ function tally(checks: Check[]): string {
   return [...counts].map(([word, count]) => `${count} ${word}`).join(", ");
 }
 
-/** The checks in one word, and each of them behind it; `folded`, the one word alone. */
-function Checks({ checks, folded }: { checks: Check[]; folded: boolean }) {
+/** The checks in one word, with the tally of each state as its title. */
+/** Each check by name, worst first, linked to its run where it has one. */
+function CheckList({ checks }: { checks: Check[] }) {
+  if (checks.length === 0) {
+    return null;
+  }
+  return (
+    <ul class="check-list">
+      {sortChecks(checks).map((check, index) => {
+        const tone = toneOf(check.state);
+        return (
+          // Names can repeat (a matrix, a rerun), so the place in the list is part of the key.
+          <li key={`${check.name}:${index}`} class={`tone-${tone}`}>
+            <ToneIcon tone={tone} />
+            {check.url ? <ExternalLink href={check.url}>{check.name}</ExternalLink> : <span>{check.name}</span>}
+            <span class="check-state">{labelOf(check.state)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function Checks({ checks }: { checks: Check[] }) {
   const summary = summarize(checks);
   if (summary === "none") {
     return <p class="checks checks-none quiet">No checks</p>;
   }
   const look = SUMMARY_LOOKS[summary];
-  if (folded) {
-    return (
-      <p class="checks">
-        <span class={`chip tone-${look.tone}`} title={tally(checks)}>
-          <ToneIcon tone={look.tone} />
-          <span class="visually-hidden">Checks: </span>
-          {look.label}
-        </span>
-      </p>
-    );
-  }
   return (
-    <details class="checks">
-      <summary>
-        <span class={`chip tone-${look.tone}`}>
-          <ToneIcon tone={look.tone} />
-          {look.label}
-        </span>
-        <span class="quiet tally">{tally(checks)}</span>
-      </summary>
-      <ul class="check-list">
-        {sortChecks(checks).map((check, index) => {
-          const tone = toneOf(check.state);
-          return (
-            // Names can repeat (a matrix, a rerun), so the place in the list is part of the key.
-            <li key={`${check.name}:${index}`} class={`tone-${tone}`}>
-              <ToneIcon tone={tone} />
-              {check.url ? <ExternalLink href={check.url}>{check.name}</ExternalLink> : <span>{check.name}</span>}
-              <span class="check-state">{labelOf(check.state)}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </details>
+    <p class="checks">
+      <span class={`chip tone-${look.tone}`} title={tally(checks)}>
+        <ToneIcon tone={look.tone} />
+        <span class="visually-hidden">Checks: </span>
+        {look.label}
+      </span>
+    </p>
   );
 }
 

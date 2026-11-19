@@ -54,12 +54,13 @@ test("draws a pull request", () => {
   const link = within(row).getByRole("link", { name: "#42 Show wind gusts" });
   expect(link.getAttribute("href")).toBe("https://github.com/octocat/weather-station/pull/1");
   expect(within(row).getByText("weather-station")).toBeTruthy();
-  expect(within(row).getByText("monalisa")).toBeTruthy();
+  // Unfolded, the author gives way to the branches and when it was opened.
+  expect(within(row).queryByText("monalisa")).toBeNull();
   expect(within(row).getByText("monalisa/wind-gusts")).toBeTruthy();
   expect(within(row).getByText("main")).toBeTruthy();
   expect(row.textContent).toContain("opened 3d ago");
   expect(row.textContent).toContain("updated 2h ago");
-  expect(row.querySelector("img")?.getAttribute("src")).toBe("https://avatars.githubusercontent.com/u/1");
+  expect(row.querySelector("img, .avatar")).toBeNull();
   expect(within(row).getByText("Ready to merge")).toBeTruthy();
   expect(within(row).getByText("No checks")).toBeTruthy();
   expect(within(row).queryByText("Draft")).toBeNull();
@@ -85,15 +86,20 @@ test("starts folded, down to the project, number, title, states and buttons, and
   expect(within(row).getByText("Ready to merge")).toBeTruthy();
   expect(row.querySelector(".checks .chip")?.textContent).toBe("Checks: Failed");
   expect(buttons()).toEqual(["Review changes", "Merge", "Cancel auto-merge"]);
-  // Nothing else: no author or picture, no branches or times, no list of checks, no files.
+  // One line under the title: branch, author and when it was updated. No picture, no list of checks, no files.
+  expect(row.querySelector(".pull-compact-meta")?.textContent).toBe("monalisa/changemonalisaupdated 1m ago");
   expect(row.querySelector("img, .avatar, details")).toBeNull();
-  expect(row.querySelector(".meta")).toBeNull();
   expect(container.querySelector(".check-list")).toBeNull();
+  const folded = row.className;
 
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(row.querySelector(".meta")?.textContent).toContain("monalisa");
-  expect(row.querySelector("img")).toBeTruthy();
+  // The same row, the same line under the title, now with the base branch and when it was opened.
+  expect(row.className).toBe(`${folded.replace("pull-folded", "pull-folded pull-unfolded")}`);
+  expect(row.querySelector(".pull-compact-meta")?.textContent).toContain("into");
+  expect(row.querySelector(".pull-compact-meta")?.textContent).not.toContain("monalisaupdated");
+  expect(row.querySelector("img, .avatar, details")).toBeNull();
+  expect(row.querySelector(".checks .chip")?.textContent).toBe("Checks: Failed");
   expect(container.querySelectorAll(".check-list li")).toHaveLength(2);
   expect(within(row).queryByText(/^Files changed/)).toBeNull();
 
@@ -148,7 +154,7 @@ test("says how the merge stands", () => {
   expect(screen.getByText("Conflicts")).toBeTruthy();
 });
 
-test("sums the checks up in one word, with each of them behind it", () => {
+test("sums the checks up in one word, with each of them listed when unfolded", () => {
   const cases: [CheckState[], string, string][] = [
     [["passed", "failed", "running"], "Failed", "1 failed, 1 running, 1 done"],
     [["passed", "cancelled"], "Failed", "1 cancelled, 1 done"],
@@ -158,12 +164,11 @@ test("sums the checks up in one word, with each of them behind it", () => {
   ];
   for (const [states, word, tally] of cases) {
     const { container } = render(<PullList now={NOW} pulls={[pull({ checks: checks(...states) })]} />);
+    const chip = container.querySelector(".checks .chip");
+    expect(chip?.textContent).toBe(`Checks: ${word}`);
+    expect(chip?.getAttribute("title")).toBe(tally);
+    expect(container.querySelector(".check-list")).toBeNull();
     unfold();
-    const summary = container.querySelector("summary");
-    expect(summary?.querySelector(".chip")?.textContent).toBe(word);
-    expect(summary?.querySelector(".tally")?.textContent).toBe(tally);
-    // Closed until asked for.
-    expect(container.querySelector("details")?.open).toBe(false);
     expect(container.querySelectorAll(".check-list li")).toHaveLength(states.length);
     cleanup();
   }

@@ -622,28 +622,6 @@ h2 {
 
 /* Pull requests */
 
-.pull {
-  display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr) auto;
-  grid-template-areas:
-    "avatar main badges"
-    ". checks actions";
-  gap: 0.25rem 0.75rem;
-  align-items: start;
-}
-
-.pull > .avatar {
-  grid-area: avatar;
-  width: 2rem;
-  height: 2rem;
-  margin-top: 0.125rem;
-}
-
-.avatar-missing {
-  display: block;
-  border: 1px solid var(--border);
-}
-
 .pull-main {
   grid-area: main;
   min-width: 0;
@@ -800,45 +778,6 @@ button.action-confirm:hover:not(:disabled) {
   font-size: 0.8125rem;
 }
 
-.checks > summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.5rem;
-  width: fit-content;
-  max-width: 100%;
-  min-height: 2rem;
-  padding: 0.125rem 0.375rem 0.125rem 0;
-  list-style: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.checks > summary::-webkit-details-marker {
-  display: none;
-}
-
-/* The disclosure triangle, drawn here so that it lines up with the chip. */
-.checks > summary::before {
-  content: "";
-  flex: none;
-  width: 0.45rem;
-  height: 0.45rem;
-  margin: 0 0.125rem;
-  border-right: 2px solid var(--quiet);
-  border-bottom: 2px solid var(--quiet);
-  transform: rotate(-45deg);
-  transition: transform 0.12s;
-}
-
-.checks[open] > summary::before {
-  transform: rotate(45deg);
-}
-
-.tally {
-  font-size: 0.8125rem;
-}
-
 .check-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
@@ -868,6 +807,12 @@ button.action-confirm:hover:not(:disabled) {
   margin-left: auto;
   white-space: nowrap;
   color: var(--tone);
+}
+
+/* Unfolded, the row stays as it was and its checks are listed under it. */
+.pull-folded > .check-list {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 /* Release runs */
@@ -1441,16 +1386,6 @@ button.secondary {
     max-height: calc(100dvh - 12.5rem);
   }
 
-  /* The badges move under the text, where a phone has the room. */
-  .pull {
-    grid-template-columns: 2rem minmax(0, 1fr);
-    grid-template-areas:
-      "avatar main"
-      ". badges"
-      ". checks"
-      ". actions";
-  }
-
   .pull-actions {
     align-items: flex-start;
   }
@@ -1477,15 +1412,6 @@ button.secondary {
 
 /* A pull request card in a narrow board column: its badges and buttons go under the text, as on a phone. */
 @container (max-width: 30rem) {
-  .pull {
-    grid-template-columns: 2rem minmax(0, 1fr);
-    grid-template-areas:
-      "avatar main"
-      ". badges"
-      ". checks"
-      ". actions";
-  }
-
   .pull-badges {
     flex-flow: row wrap;
     align-items: center;
@@ -1514,10 +1440,6 @@ button.secondary {
   button,
   .button,
   select {
-    min-height: 2.75rem;
-  }
-
-  .checks > summary {
     min-height: 2.75rem;
   }
 
