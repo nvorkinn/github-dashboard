@@ -541,8 +541,8 @@
   --diff-step: 2;
 }
 .review-diff {
-  --diff-font-size: calc(10px + var(--diff-step) * 1px);
-  --diff-line-height: calc(15px + var(--diff-step) * 2px);
+  --diff-font-size: calc(9px + var(--diff-step) * 1px);
+  --diff-line-height: calc(13px + var(--diff-step) * 2px);
 }
 .review-font-controls button {
   min-width: 2.2em;
@@ -662,8 +662,8 @@
 }
 @media (min-width: 2200px) {
   .review-diff {
-    --diff-font-size: calc(11px + var(--diff-step) * 1px);
-    --diff-line-height: calc(17px + var(--diff-step) * 2px);
+    --diff-font-size: calc(10px + var(--diff-step) * 1px);
+    --diff-line-height: calc(15px + var(--diff-step) * 2px);
   }
 }
 @media (max-width: 1300px) {
@@ -713,7 +713,7 @@
     flex-basis: 100%;
   }
   .review-diff {
-    --diff-font-size: calc(9px + var(--diff-step) * 1px);
+    --diff-font-size: calc(8px + var(--diff-step) * 1px);
   }
 }
 @media (max-width: 520px) {
