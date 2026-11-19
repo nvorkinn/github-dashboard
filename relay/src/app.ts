@@ -8,9 +8,11 @@ import type { Hub } from "./events.ts";
 import { createHub, eventStream } from "./events.ts";
 import { createGitHubApp } from "./github_app.ts";
 import { createMergeStates } from "./merge_states.ts";
+import { pageNotice } from "./notices.ts";
+import { createPendingReleases } from "./pending_releases.ts";
 import { createReleases, NOT_CONFIGURED } from "./releases.ts";
 import { createStatusCache } from "./status.ts";
-import { telegramNotifier } from "./telegram.ts";
+import { telegramNotifier, telegramSender } from "./telegram.ts";
 import { pageEvents, type Telemetry } from "./telemetry.ts";
 import { type OnWebhook, webhookRoutes } from "./webhook.ts";
 
@@ -25,7 +27,9 @@ const PING_MS = 20_000;
  * GitHub service status (see status.ts); and, given `githubApp`, the release workflows and their runs of the
  * repositories the GitHub App reaches, read as the app itself with a token that lasts an hour (see releases.ts). As
  * the app it also works out, after each push, whether the pull requests into the branch pushed to can still be
- * merged, and tells the pages (see merge_states.ts).
+ * merged, and tells the pages (see merge_states.ts). The one thing it writes to GitHub, as the app, is a release
+ * the user set up to go out once some pull requests have merged (see pending_releases.ts); those it keeps in
+ * `dataDir`, when given, so they last through a restart.
  *
  * Without `auth` the sign-in endpoints answer 503, and without `webhookSecret` the webhook endpoint does. Without
  * `githubApp` the relay knows of no release runs, and tells the pages so; nor does it read merge states. With
@@ -50,6 +54,10 @@ export function createApp(options: {
   pingMs?: number;
   closing?: AbortSignal;
   telemetry?: Telemetry | undefined;
+  /** Where the relay keeps what has to last through a restart: the pending releases. */
+  dataDir?: string | undefined;
+  /** How often the pending releases' pull requests are read again; for tests. */
+  pendingRecheckMs?: number | undefined;
 }) {
   const app = new Hono();
   const hub = options.hub ?? createHub();
@@ -111,8 +119,27 @@ export function createApp(options: {
         fetch: fetcher,
       })
     : undefined;
+  const sendTelegram = options.telegram
+    ? telegramSender({ config: options.telegram, hub, dashboard: options.auth?.publicOrigin, fetch: fetcher })
+    : undefined;
+  const pending = createPendingReleases({
+    app: githubApp,
+    installationOf: (repo) => releases?.installationOf(repo),
+    reposKnown: releases?.ready.catch(() => {}) ?? Promise.resolve(),
+    dataDir: options.dataDir,
+    publicOrigin: options.auth?.publicOrigin,
+    fetch: fetcher,
+    onSnapshot: (snapshot) => hub.tell({ name: "pending", data: snapshot }),
+    notify(notice) {
+      hub.announce(pageNotice(notice));
+      void sendTelegram?.(notice);
+    },
+    closing: options.closing,
+    recheckMs: options.pendingRecheckMs,
+  });
   const onWebhook: OnWebhook = (kind, payload, delivery) => {
     releases?.onWebhook(kind, payload);
+    pending.onWebhook(kind, payload);
     mergeStates?.onWebhook(kind, payload);
     return telegram?.(kind, payload, delivery);
   };
@@ -125,6 +152,7 @@ export function createApp(options: {
   });
 
   app.route("/api/auth", authRoutes({ config: options.auth, fetch: fetcher }));
+  app.route("/api/pending", pending.routes);
   app.route(
     "/api/github",
     webhookRoutes({
@@ -144,6 +172,7 @@ export function createApp(options: {
       pingMs: options.pingMs ?? PING_MS,
       closing: options.closing,
       releases: releases ? releases.snapshot : () => NOT_CONFIGURED,
+      pending: pending.snapshot,
       telemetry: options.telemetry,
     }),
   );

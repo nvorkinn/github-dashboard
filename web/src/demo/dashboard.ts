@@ -4,12 +4,14 @@ import type {
   DashboardData,
   DashboardState,
   Notice,
+  PendingActions,
+  PendingRelease,
   PullActions,
   PullRequest,
   RunActions,
 } from "../model.ts";
 import { isDependabot } from "../model.ts";
-import { applyEdits, clearEdits, createDemoRunActions, forgetRun, noEdits } from "./actions.ts";
+import { applyEdits, clearEdits, createDemoRunActions, FAILING_PROJECT, forgetRun, noEdits } from "./actions.ts";
 import { demoNotices, FIRST_FRAME, FRAMES, NOTHING, SCRIPTED_RUN, sampleData } from "./data.ts";
 import { withGraphs } from "./graphs.ts";
 
@@ -37,7 +39,7 @@ export const REBASE_MS = 2500;
 
 // The demo's actions, for `demoPullActions` and `demoRunActions` to find. Kept beside the dashboard, not in its
 // type, so that the rest of the page only ever sees a `Dashboard`.
-const ACTIONS = new WeakMap<Dashboard, { pulls: PullActions; runs: RunActions }>();
+const ACTIONS = new WeakMap<Dashboard, { pulls: PullActions; runs: RunActions; pending: PendingActions }>();
 
 /** The demo's pull request actions, if `dashboard` is the demo's. They change its sample data. */
 export function demoPullActions(dashboard: Dashboard): PullActions | undefined {
@@ -47,6 +49,28 @@ export function demoPullActions(dashboard: Dashboard): PullActions | undefined {
 /** The demo's actions on release runs and projects, if `dashboard` is the demo's. They change its sample data. */
 export function demoRunActions(dashboard: Dashboard): RunActions | undefined {
   return ACTIONS.get(dashboard)?.runs;
+}
+
+/** The demo's pending releases, if `dashboard` is the demo's. They change its sample data. */
+export function demoPendingActions(dashboard: Dashboard): PendingActions | undefined {
+  return ACTIONS.get(dashboard)?.pending;
+}
+
+/** The pending release the demo starts with: weather-station waits for its two pull requests on auto-merge. */
+function samplePending(): PendingRelease[] {
+  return [
+    {
+      id: "demo-weather-station",
+      repo: "octocat/weather-station",
+      pulls: [
+        { repo: "octocat/weather-station", number: 128, title: "Show wind gusts on the hourly chart" },
+        { repo: "octocat/weather-station", number: 131, title: "Bump vite from 8.3.6 to 8.3.7" },
+      ],
+      by: "octocat",
+      createdAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+      state: "waiting",
+    },
+  ];
 }
 
 /**
@@ -76,6 +100,8 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   const tweaks = new Map<string, (pull: PullRequest) => PullRequest | undefined>();
   // What the actions did to release runs and projects, applied the same way.
   const edits = noEdits();
+  // The demo's pending releases, which its actions change.
+  let pending = samplePending();
 
   function setState(next: DashboardState): void {
     state = next;
@@ -107,7 +133,10 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
   function ready(refreshing: boolean, readAt: number): DashboardState {
     return {
       status: "ready",
-      data: show === "empty" ? NOTHING : withGraphs(applyEdits(tweaked(sampleData({ base, frame, frameAt })), edits)),
+      data:
+        show === "empty"
+          ? NOTHING
+          : { ...withGraphs(applyEdits(tweaked(sampleData({ base, frame, frameAt })), edits)), pending },
       readAt,
       refreshing,
       problem: show === "problem" ? "GitHub didn't answer (503). Showing what was read 5 minutes ago." : undefined,
@@ -286,7 +315,48 @@ export function createDemoDashboard(options: DemoOptions = {}): Dashboard {
 
     stop,
   };
-  ACTIONS.set(dashboard, { pulls: actions, runs: createDemoRunActions(edits, later, redraw, ACTION_MS) });
+  const pendingActions: PendingActions = {
+    async set(project, pulls) {
+      await pause();
+      if (project.repo.endsWith(`/${FAILING_PROJECT}`)) {
+        throw new Error(`You can't release ${project.repo}: it takes write access.`);
+      }
+      const shown = state.status === "ready" ? state.data.pulls : [];
+      pending = [
+        ...pending.filter((one) => one.repo !== project.repo),
+        {
+          id: `demo-${Date.now()}`,
+          repo: project.repo,
+          pulls: pulls.map((one) => ({
+            repo: one.repo,
+            number: one.number,
+            title: shown.find((pull) => pull.repo === one.repo && pull.number === one.number)?.title ?? "",
+          })),
+          by: "octocat",
+          createdAt: new Date().toISOString(),
+          state: "waiting",
+        },
+      ];
+      redraw();
+    },
+    async cancel(one) {
+      await pause();
+      pending =
+        one.state === "waiting"
+          ? pending.map((p) =>
+              p.id === one.id
+                ? { ...p, state: "cancelled", problem: "Cancelled by octocat.", endedAt: new Date().toISOString() }
+                : p,
+            )
+          : pending.filter((p) => p.id !== one.id);
+      redraw();
+    },
+  };
+  ACTIONS.set(dashboard, {
+    pulls: actions,
+    runs: createDemoRunActions(edits, later, redraw, ACTION_MS),
+    pending: pendingActions,
+  });
   return dashboard;
 }
 

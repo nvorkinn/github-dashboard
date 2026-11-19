@@ -4,9 +4,11 @@
  *
  * Times are ISO strings as GitHub gives them. Addresses ending in `Url` open the thing on github.com.
  */
+import type { PendingRelease, PendingSnapshot } from "../../shared/pending.ts";
 import type { MergeState } from "../../shared/pulls.ts";
 import type { Approval, CheckState, Job, ReleaseRun } from "../../shared/runs.ts";
 
+export type { PendingPull, PendingRelease, PendingSnapshot } from "../../shared/pending.ts";
 export type { Approval, CheckState, Job, JobGraph, JobNode, ReleaseRun } from "../../shared/runs.ts";
 
 /** One check on a pull request's head commit: a check run, or an older commit status. */
@@ -95,6 +97,11 @@ export type DashboardData = {
   pulls: PullRequest[];
   /** Per project and release workflow: the runs still going, and the last one that finished. */
   releases: ReleaseRun[];
+  /**
+   * The releases set to go out once their pull requests merge, as the relay last told them, the ended ones for a day.
+   * Undefined where the relay can't keep them.
+   */
+  pending?: PendingRelease[] | undefined;
 };
 
 /**
@@ -155,6 +162,8 @@ export type Dashboard = {
   changed(change: { kind: string; repo?: string; pull?: number; sha?: string; run?: number; path?: string }): void;
   /** Calls `listener` with each notice that arrives while started; returns how to stop. Left out, none ever do. */
   onNotice?(listener: (notice: Notice) => void): () => void;
+  /** Shows these pending releases at once, as the relay answered an action on them, before its event says so. */
+  pendingChanged?(snapshot: PendingSnapshot): void;
 };
 
 /**
@@ -252,6 +261,17 @@ export type RunActions = {
   release(project: Project, tag: string): Promise<void>;
   /** Starts the project's Promote workflow for this release tag. */
   promote(project: Project, tag: string): Promise<void>;
+};
+
+/**
+ * What the page can do with pending releases (see shared/pending.ts), which the relay keeps. Each resolves once the
+ * relay took it, and rejects with an `Error` whose message says why not, in words for the user.
+ */
+export type PendingActions = {
+  /** Sets `project` to be released once all these pull requests have merged, in place of what it waited for. */
+  set(project: Project, pulls: Pick<PullRequest, "repo" | "number">[]): Promise<void>;
+  /** Cancels one that waits, or forgets one that ended. */
+  cancel(pending: PendingRelease): Promise<void>;
 };
 
 /** A release tag that Promote takes: a plain version with its `v`, such as v1.2.3. */

@@ -3,6 +3,7 @@ import type { Dashboard, DashboardState } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useHiddenProjects } from "./hooks.ts";
 import { Icon } from "./Icon.tsx";
+import { PendingContext } from "./PendingRelease.tsx";
 import { Workspace } from "./Workspace.tsx";
 
 /** Runs `dashboard.refresh()` and knows while it is under way, also where the state doesn't say so. */
@@ -128,7 +129,15 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
           {state.problem}
         </p>
       )}
-      <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
+      <PendingContext.Provider
+        value={{
+          pending: data.pending,
+          pulls,
+          projects: data.projects.filter((one) => !hidden.has(one.repo)),
+        }}
+      >
+        <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
+      </PendingContext.Provider>
     </>
   );
 }

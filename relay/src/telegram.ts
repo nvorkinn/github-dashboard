@@ -56,6 +56,29 @@ export function telegramNotifier(options: {
   };
 }
 
+/**
+ * Sends a notice the relay made itself, such as a pending release going out (see pending_releases.ts), to the
+ * Telegram chat, on the same terms as a webhook's: only while nobody is watching the dashboard, which shows it already.
+ */
+export function telegramSender(options: {
+  config: TelegramConfig;
+  hub: Hub;
+  dashboard?: string | undefined;
+  fetch?: typeof fetch;
+}): (notice: Notice) => Promise<void> {
+  const fetcher = options.fetch ?? fetch;
+  return async (notice) => {
+    if (!nobodyWatching(options.hub)) {
+      return;
+    }
+    const text = options.dashboard ? `${notice.text}\nDashboard: ${options.dashboard}` : notice.text;
+    const failure = await send(fetcher, options.config, { ...notice, text });
+    if (failure) {
+      console.warn(`telegram notice not sent: ${failure}`);
+    }
+  };
+}
+
 function nobodyWatching(hub: Hub): boolean {
   const since = hub.idleSince();
   return since !== undefined && Date.now() - since >= QUIET_MS;

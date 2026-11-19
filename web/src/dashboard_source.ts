@@ -6,6 +6,7 @@ import { createDashboard } from "./github/dashboard.ts";
 import { createFilesReader } from "./github/files.ts";
 import type { Shape } from "./github/graphql.ts";
 import { createImageReader } from "./github/images.ts";
+import { createPendingActions } from "./github/pending_actions.ts";
 import { createPullActions } from "./github/pull_actions.ts";
 import { createRepositoryConfig } from "./github/repository_config.ts";
 import { createReviewService } from "./github/review.ts";
@@ -55,19 +56,22 @@ export async function makeDashboard(auth: Auth, demo: boolean): Promise<Dashboar
  */
 export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolean): Promise<Actions> {
   if (demo && import.meta.env.MODE === "demo") {
-    const { demoPullActions, demoRunActions } = await import("./demo/dashboard.ts");
+    const { demoPullActions, demoRunActions, demoPendingActions } = await import("./demo/dashboard.ts");
     const pulls = demoPullActions(dashboard);
     const runs = demoRunActions(dashboard);
+    const pending = demoPendingActions(dashboard);
     const { demoFiles, demoImage } = await import("./demo/files.ts");
     const { demoReview } = await import("./demo/review.ts");
     return {
       ...(pulls ? { pulls } : {}),
       ...(runs ? { runs } : {}),
+      ...(pending ? { pending } : {}),
       files: demoFiles,
       image: demoImage,
       review: demoReview,
     };
   }
+  const pending = createPendingActions(auth, dashboard);
   return {
     // Each labelled with what it is for, for the telemetry (telemetry.ts).
     review: createReviewService(labelled(auth, "review"), dashboard),
@@ -75,6 +79,7 @@ export async function makeActions(auth: Auth, dashboard: Dashboard, demo: boolea
     secrets: createSecretCopy(labelled(auth, "secrets")),
     pulls: createPullActions(labelled(auth, "action.pull"), dashboard),
     runs: createRunActions(labelled(auth, "action.run"), dashboard),
+    ...(pending ? { pending } : {}),
     files: createFilesReader(createApi(labelled(auth, "review.files"))),
     image: createImageReader(labelled(auth, "review.image")),
   };

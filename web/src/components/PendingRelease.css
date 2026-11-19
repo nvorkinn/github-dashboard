@@ -1,0 +1,254 @@
+/* A project's pending release: a line in its release controls, and the picker of what it waits for. */
+.pending-status {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.pending-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: 0;
+  color: var(--quiet);
+  line-height: 1.45;
+}
+
+.pending-words {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending-pulls {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0 0 0 0.2rem;
+  list-style: none;
+}
+
+.pending-pulls li {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--quiet);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pending-pulls li::before {
+  display: inline-block;
+  width: 1rem;
+  content: "○";
+  color: var(--waiting);
+}
+
+.pending-pulls li.pending-merged::before {
+  content: "✓";
+  color: var(--done);
+}
+
+.pending-title {
+  color: var(--text);
+}
+
+.pending-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.pending-problem {
+  max-width: none;
+  margin: 0;
+  text-align: left;
+}
+
+/* In the sidebar's release drawer, as small as the rest of it. */
+.workspace-release-drawer .pending-status {
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #22324b;
+}
+
+.workspace-release-drawer .pending-buttons .action {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+}
+
+/* Under a project's title, beside its other controls; in the Releases tab, under the project's release line. */
+.project .pending-status,
+.workspace-intro .pending-status {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+}
+
+.badge.badge-pending {
+  color: var(--waiting);
+  border-color: color-mix(in srgb, var(--waiting) 45%, transparent);
+}
+
+.pending-picker {
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 4rem);
+  padding: 0;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 24px 80px #000a;
+}
+
+.pending-picker[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.pending-picker::backdrop {
+  background: #050810b3;
+}
+
+.pending-picker-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem 0.6rem;
+}
+
+.pending-picker-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-picker-header h3 {
+  margin: 0 0 0.25rem;
+  padding: 0;
+  border: 0;
+  font-size: 1rem;
+}
+
+.pending-picker-header p {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.pending-picker-close {
+  flex-shrink: 0;
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+}
+
+.pending-picker-filter {
+  padding: 0 1rem 0.6rem;
+}
+
+.pending-picker-filter input {
+  width: 100%;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.6rem;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+}
+
+.pending-picker-body {
+  display: grid;
+  gap: 0.75rem;
+  min-height: 0;
+  padding: 0.75rem 1rem;
+  overflow-y: auto;
+  border-block: 1px solid var(--border);
+}
+
+.pending-group {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.pending-group legend {
+  padding: 0 0 0.3rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.pending-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  font-size: 0.875rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.pending-option:hover {
+  background: var(--surface);
+}
+
+.pending-option input {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.pending-number {
+  flex-shrink: 0;
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+}
+
+.pending-option-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pending-option .badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+}
+
+.pending-picker-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.8125rem;
+}
+
+.pending-picker-footer .action-problem {
+  flex-basis: 100%;
+  order: -1;
+  max-width: none;
+  margin: 0;
+  text-align: left;
+}
+
+.pending-picker-buttons {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+@media (max-width: 30rem) {
+  .pending-option .badge {
+    display: none;
+  }
+}

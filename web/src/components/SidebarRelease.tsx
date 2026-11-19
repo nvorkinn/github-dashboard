@@ -3,6 +3,7 @@ import { unreleasedUrl } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { Icon } from "./Icon.tsx";
+import { PendingStatus } from "./PendingRelease.tsx";
 import { ProjectActions } from "./ProjectList.tsx";
 
 /** How many changes wait for a release: pull requests when they are known, else commits; undefined when unknown. */
@@ -135,6 +136,7 @@ export function SidebarReleaseDrawer({
           </>
         )}
       </p>
+      <PendingStatus project={project} />
       {actions && (
         <div class="actions workspace-release-actions">
           <ProjectActions project={project} actions={actions} onStarted={onStarted} />

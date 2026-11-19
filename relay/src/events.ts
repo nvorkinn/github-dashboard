@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { PendingSnapshot } from "../../shared/pending.ts";
 import type { MergeUpdate } from "../../shared/pulls.ts";
 import type { ReleaseRun, ReleasesSnapshot } from "../../shared/runs.ts";
 import type { PageNotice } from "./notices.ts";
@@ -34,7 +35,8 @@ export type Change = {
 export type RelayEvent =
   | { name: "run"; data: ReleaseRun }
   | { name: "releases"; data: ReleasesSnapshot }
-  | { name: "merge"; data: MergeUpdate };
+  | { name: "merge"; data: MergeUpdate }
+  | { name: "pending"; data: PendingSnapshot };
 
 /** Passes changes from the webhook endpoint to the event streams that are open at that moment. */
 export type Hub = {
@@ -129,7 +131,8 @@ const MAX_UNREAD = 256;
  *
  * Release runs are the exception, as the relay keeps them: given `releases`, the stream sends `releases` with all of
  * them right after `hello`, then `run` for each run that changes and `releases` again when more than one did. After a
- * push, `merge` says how the pull requests into the branch pushed to can be merged (see merge_states.ts).
+ * push, `merge` says how the pull requests into the branch pushed to can be merged (see merge_states.ts). Given
+ * `pending`, it sends every pending release (see pending_releases.ts) after `hello` too, and again whenever one changes.
  *
  * The stream ends when the client goes away or `closing` fires, and then leaves no listener or timer behind.
  */
@@ -137,6 +140,8 @@ export function eventStream(options: {
   hub: Hub;
   pingMs: number;
   closing?: AbortSignal | undefined;
+  /** Every pending release at this moment. */
+  pending?: (() => PendingSnapshot) | undefined;
   /** Everything known of release runs at this moment. */
   releases?: (() => ReleasesSnapshot) | undefined;
   /** Logs each stream opening and closing, with how long it was open and how much it carried (telemetry.ts). */
@@ -210,6 +215,9 @@ export function eventStream(options: {
         send("event: hello\ndata: {}\n\n");
         if (options.releases) {
           send(`event: releases\ndata: ${JSON.stringify(options.releases())}\n\n`);
+        }
+        if (options.pending) {
+          send(`event: pending\ndata: ${JSON.stringify(options.pending())}\n\n`);
         }
         if (gone.aborted || options.closing?.aborted) {
           stop();

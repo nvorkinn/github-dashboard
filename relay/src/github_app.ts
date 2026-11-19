@@ -38,13 +38,16 @@ export type InstalledRepo = {
  * Reads api.github.com as the GitHub App: as one of its installations, with that installation's token. Octokit
  * (`@octokit/auth-app`) makes the tokens from the app's ID and private key: it signs the app's own short-lived token,
  * trades it for an installation's, which lasts an hour, and keeps that in memory until shortly before it ends.
- * Everything here reads, GraphQL queries included; the relay writes nothing to GitHub.
+ * Everything here reads, GraphQL queries included, except `post`, which only the pending releases use (see
+ * pending_releases.ts): publishing a release the user set up to go out once its pull requests merge.
  */
 export type GitHubApp = {
   /** Every repository the app's installations reach, archived ones left out. */
   repositories(): Promise<InstalledRepo[]>;
   /** `GET <path>` as the installation. Throws an `AppError`; 404 is one like any other. */
   get<T>(installation: number, path: string): Promise<T>;
+  /** `POST <path>` with a JSON body as the installation, giving GitHub's answer. Throws an `AppError`. */
+  post<T>(installation: number, path: string, body: unknown): Promise<T>;
   /** Every page of a list: an array, or the array under `key` of an object. */
   list<T>(installation: number, path: string, key?: string): Promise<T[]>;
   /**
@@ -166,6 +169,8 @@ export function createGitHubApp(options: {
 
   return {
     get,
+    post: async <T>(installation: number, path: string, body: unknown) =>
+      (await asInstallation(installation, "POST", path, body)) as T,
     list: (installation, path, key) => pages((one) => get(installation, one), path, key),
 
     async query(installation, query, variables) {

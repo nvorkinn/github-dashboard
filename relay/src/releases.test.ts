@@ -129,8 +129,8 @@ test("a page that connects is told every release run the relay read at its start
   await post(app, "workflow_run", { action: "completed", repository, workflow_run: run(5, "completed") });
   await settle();
 
-  const [hello, releases, afterJob, afterRun] = await events(stream, 7).then((all) =>
-    all.filter((event) => event.name !== "change" && event.name !== "notice"),
+  const [hello, releases, afterJob, afterRun] = await events(stream, 8).then((all) =>
+    all.filter((event) => event.name !== "change" && event.name !== "notice" && event.name !== "pending"),
   );
   expect(hello?.name).toBe("hello");
   expect(releases).toMatchObject({
@@ -171,7 +171,7 @@ test("a workflow marked as a release gets its notice whatever its name, and the 
   const repository = { full_name: REPO };
   await post(app, "workflow_run", { action: "completed", repository, workflow_run: run(5, "completed") });
   await settle();
-  const notice = (await events(stream, 5)).find((event) => event.name === "notice");
+  const notice = (await events(stream, 6)).find((event) => event.name === "notice");
   expect(notice?.data).toMatchObject({ type: "release", headline: `Ship in ${REPO}: success` });
 
   const logged = logs.flatMap((log) => log.mock.calls.flat()).join("\n");
@@ -221,7 +221,7 @@ test("a push tells the open pages, read as the app, how the pull requests into t
     installation: { id: 1 },
   });
   await settle();
-  const merge = (await events(stream, 4)).find((event) => event.name === "merge");
+  const merge = (await events(stream, 5)).find((event) => event.name === "merge");
   expect(merge?.data).toEqual({ repo: REPO, base: "main", pulls: [{ number: 3, sha: head, mergeState: "conflicts" }] });
   closing.abort();
 });

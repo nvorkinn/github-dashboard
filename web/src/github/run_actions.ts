@@ -1,4 +1,5 @@
 import { approval, PROMOTE_WORKFLOW, type RawPendingDeployment } from "../../../shared/runs.ts";
+import { nextVersion } from "../../../shared/versions.ts";
 import type { Auth } from "../auth.ts";
 import type { Dashboard, Project, RunActions } from "../model.ts";
 import { RELEASE_TAG } from "../model.ts";
@@ -168,41 +169,14 @@ async function gone<T>(reading: Promise<T>): Promise<T | undefined> {
   }
 }
 
-const SEMVER = /^(v?)(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
-
 /**
- * The next minor version after the highest of these release tags, with the `v` of that tag or without it, and the
- * tag it follows. A prerelease counts, below its own release: after `v3.0.0-rc.2` comes `v3.1.0`. Tags that aren't
- * versions are passed over; with no release at all the first is `v1.0.0`.
+ * The next minor version after the highest of these release tags (see `nextVersion`), or an error for the user when
+ * none of them is a version.
  */
 export function nextTag(tags: string[]): { previous: string | undefined; tag: string } {
-  if (tags.length === 0) {
-    return { previous: undefined, tag: "v1.0.0" };
-  }
-  let best: { tag: string; key: number[]; prefix: string } | undefined;
-  for (const tag of tags) {
-    const match = SEMVER.exec(tag);
-    if (!match) {
-      continue;
-    }
-    const key = [Number(match[2]), Number(match[3]), Number(match[4]), match[5] === undefined ? 1 : 0];
-    if (!best || compare(key, best.key) > 0) {
-      best = { tag, key, prefix: match[1] ?? "" };
-    }
-  }
-  if (!best) {
+  const next = nextVersion(tags);
+  if (!next) {
     throw new ActionError("No release has a version tag such as v1.19.0, so the next one isn't known.");
   }
-  const [major, minor] = best.key as [number, number];
-  return { previous: best.tag, tag: `${best.prefix}${major}.${minor + 1}.0` };
-}
-
-function compare(a: number[], b: number[]): number {
-  for (let index = 0; index < a.length; index++) {
-    const difference = (a[index] ?? 0) - (b[index] ?? 0);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-  return 0;
+  return next;
 }

@@ -4,6 +4,7 @@ import { summarize } from "../model.ts";
 import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { Icon, type IconName } from "./Icon.tsx";
+import { PendingStatus } from "./PendingRelease.tsx";
 import { ProjectActions, ProjectList } from "./ProjectList.tsx";
 import { PullList } from "./PullList.tsx";
 import { ReleaseList, shownRuns, sortRuns } from "./ReleaseList.tsx";
@@ -396,6 +397,7 @@ export function Workspace({
               <ExternalLink href={selected.url}>Open on GitHub</ExternalLink>
               {actions && <ProjectActions project={selected} actions={actions} />}
             </div>
+            <PendingStatus project={selected} />
           </header>
         )}
 

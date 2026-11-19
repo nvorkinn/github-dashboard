@@ -7,7 +7,8 @@ export function blob(text: string) {
 
 /**
  * A GitHub App client for tests: `routes` says what each path answers, a number being the status it fails with, and
- * can be changed between reads. A path nothing is said of fails with 404. `calls` are the paths read, in order.
+ * can be changed between reads. A path nothing is said of fails with 404. A write is answered by `routes["POST <path>"]`:
+ * the answer, a status, or a function of the body that gives either. `calls` are the paths read, in order.
  * A GraphQL query is answered by `routes.graphql`, a function of the query and its variables that gives the data or
  * a status to fail with; its call is `graphql`. The app's webhook deliveries are `routes.deliveries`: the pages in
  * order, each a list, the cursor of the next being its index; its call is `deliveries`.
@@ -34,6 +35,17 @@ export function fakeApp(
         pushedAt: one.pushedAt,
       })),
     get: async <T>(_installation: number, path: string) => answer(path) as T,
+    post: async <T>(_installation: number, path: string, body: unknown) => {
+      const key = `POST ${path}`;
+      const found = Object.hasOwn(routes, key) ? routes[key] : undefined;
+      const result = typeof found === "function" ? (found as (body: unknown) => unknown)(body) : found;
+      calls.push(key);
+      if (result === undefined || typeof result === "number") {
+        const status = typeof result === "number" ? result : 404;
+        throw new AppError(status, `HTTP ${status}`);
+      }
+      return result as T;
+    },
     list: async <T>(_installation: number, path: string, key?: string) => {
       const found = answer(path);
       return (key === undefined ? found : (found as Record<string, unknown>)[key]) as T[];

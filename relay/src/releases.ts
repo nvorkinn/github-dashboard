@@ -25,6 +25,8 @@ export type Releases = {
   snapshot(): ReleasesSnapshot;
   /** Whether the workflow file `path` of `repo` is a release workflow; undefined for a repository not read. */
   isRelease(repo: string, path: string): boolean | undefined;
+  /** The installation of the app that reaches `repo`, once the read made at the start is in. */
+  installationOf(repo: string): number | undefined;
   /** Resolves once the read made at the start is in. */
   ready: Promise<void>;
 };
@@ -108,6 +110,7 @@ export function createReleases(options: {
     },
     snapshot,
     isRelease: (repo, path) => definitions.isRelease(repo, path),
+    installationOf: (repo) => definitions.installationOf(repo),
     ready,
   };
 }

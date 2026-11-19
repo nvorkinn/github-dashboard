@@ -24,6 +24,7 @@ export type Change = {
   delivery?: string;
 };
 
+import { type PendingSnapshot, pendingSnapshot } from "../../../shared/pending.ts";
 import { MERGE_STATES, type MergeState, type MergeUpdate } from "../../../shared/pulls.ts";
 import type { ReleaseRun, ReleasesSnapshot } from "../../../shared/runs.ts";
 import { NOTICE_TYPES, type Notice, type NoticeType } from "../model.ts";
@@ -52,6 +53,8 @@ export type EventsOptions = {
   onRun?(run: ReleaseRun): void;
   /** Some pull requests' merge states, which the relay worked out after a push to their base. */
   onMerge?(update: MergeUpdate): void;
+  /** Every pending release the relay keeps: on connecting, and whenever one changed. */
+  onPending?(snapshot: PendingSnapshot): void;
 };
 
 export type Events = {
@@ -137,6 +140,12 @@ export function createEvents(options: EventsOptions): Events {
       const update = stream === mine ? mergeUpdate(dataOf(event)) : undefined;
       if (update) {
         options.onMerge?.(update);
+      }
+    });
+    mine.addEventListener("pending", (event) => {
+      const snapshot = stream === mine ? pendingSnapshot(dataOf(event)) : undefined;
+      if (snapshot) {
+        options.onPending?.(snapshot);
       }
     });
     mine.addEventListener("error", () => {

@@ -1,6 +1,6 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
-import type { PullActions, PullRequest, ReadFiles, ReadImage, RunActions } from "../model.ts";
+import type { PendingActions, PullActions, PullRequest, ReadFiles, ReadImage, RunActions } from "../model.ts";
 
 /**
  * What the page can do, beyond showing: GitHub's for real, the demo's on its sample data. Each part is missing where
@@ -16,6 +16,8 @@ export type Actions = {
   pulls?: PullActions;
   /** On release runs and projects. */
   runs?: RunActions;
+  /** On releases set to go out once some pull requests merge. */
+  pending?: PendingActions;
   /** Reads a pull request's changed files. */
   files?: ReadFiles;
   /** Reads either side of a changed image, so the review can show it. Without it images are left to GitHub. */

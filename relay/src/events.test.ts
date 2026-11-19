@@ -109,7 +109,9 @@ test("a webhook reaches a connected reader as a change event", async () => {
 
   const data = `{"kind":"workflow_run","repo":"nvorkinn/github-dashboard","action":"completed","pull":5,"sha":"${"a".repeat(40)}","run":99}`;
   // Without the GitHub App's key the relay knows of no release runs, and says so on connecting.
-  const none = 'event: releases\ndata: {"configured":false,"projects":{},"runs":[]}\n\n';
+  const none =
+    'event: releases\ndata: {"configured":false,"projects":{},"runs":[]}\n\n' +
+    'event: pending\ndata: {"configured":false,"pending":[]}\n\n';
   const expected = `event: hello\ndata: {}\n\n${none}event: change\ndata: ${data}\n\n`;
   expect(await first.until("event: change")).toBe(expected);
   expect(await second.until("event: change")).toBe(expected);

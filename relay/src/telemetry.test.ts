@@ -198,6 +198,7 @@ test("an event stream is logged when it opens and closes, with what it carried",
       sent: {
         hello: { count: 1, bytes: 23 },
         releases: expect.objectContaining({ count: 1 }),
+        pending: expect.objectContaining({ count: 1 }),
         change: { count: 1, bytes: 37 },
       },
     }),

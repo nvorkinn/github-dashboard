@@ -2,6 +2,7 @@ import { type Project, promoteTag, type RunActions } from "../model.ts";
 import { Ago } from "./Ago.tsx";
 import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
+import { PendingButton, PendingStatus } from "./PendingRelease.tsx";
 import { RunAction } from "./RunAction.tsx";
 import { Unreleased } from "./Unreleased.tsx";
 
@@ -60,6 +61,7 @@ export function ProjectList({
                   <span class="quiet">no release yet</span>
                 )}
               </div>
+              <PendingStatus project={project} />
               {(actions || onToggle) && (
                 <div class="actions project-actions">
                   {actions && <ProjectActions project={project} actions={actions} />}
@@ -137,6 +139,7 @@ export function ProjectActions({
           return `Released ${project.repo} as ${tag}.`;
         }}
       />
+      <PendingButton project={project} />
       {promote && (
         <RunAction
           label={`Promote ${promote}`}

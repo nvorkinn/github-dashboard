@@ -1,3 +1,4 @@
+import type { PendingSnapshot } from "../../../shared/pending.ts";
 import type { MergeState, MergeUpdate } from "../../../shared/pulls.ts";
 import type { ReleasesSnapshot } from "../../../shared/runs.ts";
 import type { Auth } from "../auth.ts";
@@ -90,7 +91,18 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const noticeListeners = new Set<(notice: Notice) => void>();
-  const events = createEvents({ connect: options.connect, onLive, onChange, onNotice, onReleases, onRun, onMerge });
+  // The pending releases, as the relay last told them; undefined until it does, or where it can't keep them.
+  let pending: PendingSnapshot | undefined;
+  const events = createEvents({
+    connect: options.connect,
+    onLive,
+    onChange,
+    onNotice,
+    onReleases,
+    onRun,
+    onMerge,
+    onPending,
+  });
 
   function setState(next: DashboardState): void {
     state = next;
@@ -160,6 +172,7 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
         return one.promoteWorkflow === promoteWorkflow ? one : { ...one, promoteWorkflow };
       }),
       pulls: data.pulls,
+      ...(pending?.configured ? { pending: pending.pending } : {}),
       releases: relayed.runs
         .filter((run) => shown.has(run.repo))
         .map((run) => {
@@ -182,6 +195,15 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       mergeStatesFromRelay = snapshot.configured;
       relayed = snapshot;
       showReleases();
+    }
+  }
+
+  function onPending(snapshot: PendingSnapshot): void {
+    if (started) {
+      pending = snapshot;
+      if (state.status === "ready") {
+        setState({ ...state, data: withReleases(state.data) });
+      }
     }
   }
 
@@ -570,8 +592,11 @@ export function createDashboard(auth: Auth, options: DashboardOptions = {}): Das
       onChange(change, "action");
     },
 
+    pendingChanged: onPending,
+
     stop() {
       started = false;
+      pending = undefined;
       events.stop();
       clearTimeout(timer);
       clearTimeout(changeTimer);
