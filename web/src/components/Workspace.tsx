@@ -5,7 +5,7 @@ import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { Icon, type IconName } from "./Icon.tsx";
 import { ProjectActions, ProjectList } from "./ProjectList.tsx";
-import { columnOf, PullList } from "./PullList.tsx";
+import { PullList } from "./PullList.tsx";
 import { ReleaseList, shownRuns, sortRuns } from "./ReleaseList.tsx";
 import { RepositorySettings } from "./RepositorySettings.tsx";
 import { SidebarReleaseDrawer, SidebarReleaseLine, SidebarReleaseToggle, waiting } from "./SidebarRelease.tsx";
@@ -13,8 +13,7 @@ import { Unreleased } from "./Unreleased.tsx";
 import "./Workspace.css";
 
 type Scope = string | undefined;
-type WorkspaceTab = "all" | "pulls" | "ready" | "workflows" | "releases" | "attention" | "settings";
-type VisibleTab = Exclude<WorkspaceTab, "ready">;
+type WorkspaceTab = "all" | "pulls" | "workflows" | "releases" | "attention" | "settings";
 
 export type WorkspaceSection = "overview" | "pulls" | "workflows" | "releases" | "attention" | "settings";
 export type WorkspaceDestination = {
@@ -31,7 +30,7 @@ export function navigateWorkspace(destination: WorkspaceDestination): void {
   window.dispatchEvent(new CustomEvent<WorkspaceDestination>(WORKSPACE_NAVIGATE_EVENT, { detail: destination }));
 }
 
-const TAB_ICONS: Record<VisibleTab, IconName> = {
+const TAB_ICONS: Record<WorkspaceTab, IconName> = {
   all: "overview",
   pulls: "pull-request",
   workflows: "workflow",
@@ -44,7 +43,7 @@ const TAB_ICONS: Record<VisibleTab, IconName> = {
 export const OVERVIEW_RUNS = 3;
 
 const ACTIVE_RUNS = new Set(["running", "waiting", "queued"]);
-const SECTIONS: Record<WorkspaceSection, VisibleTab> = {
+const SECTIONS: Record<WorkspaceSection, WorkspaceTab> = {
   overview: "all",
   pulls: "pulls",
   workflows: "workflows",
@@ -218,7 +217,6 @@ export function Workspace({
   const attentionPulls = visiblePulls.filter(pullNeedsAttention);
   const attentionRuns = visibleRuns.filter(runNeedsAttention);
   const attentionCount = attentionPulls.length + attentionRuns.length;
-  const ready = visiblePulls.filter((pull) => columnOf(pull) === "ready");
   const overviewRuns = sortRuns(visibleRuns).slice(0, OVERVIEW_RUNS);
   const actions = useActions()?.runs;
   const listed = [...shown]
@@ -228,7 +226,7 @@ export function Workspace({
         project.name.toLowerCase().includes(filter.toLowerCase()) ||
         project.repo.toLowerCase().includes(filter.toLowerCase()),
     );
-  const tabs: { value: VisibleTab; label: string; count?: number }[] = [
+  const tabs: { value: WorkspaceTab; label: string; count?: number }[] = [
     { value: "all", label: "Overview" },
     { value: "pulls", label: "Pull requests", count: visiblePulls.length },
     { value: "workflows", label: "Workflows", count: running.length },
@@ -375,14 +373,18 @@ export function Workspace({
         </details>
       </aside>
 
-      <div class={activeTab === "settings" ? "workspace-main workspace-settings-view" : "workspace-main"}>
+      <div
+        class={activeTab === "settings" ? "workspace-main workspace-settings-view" : "workspace-main"}
+        id="workspace-content"
+        tabindex={-1}
+      >
         <nav class="workspace-tabs" aria-label="Workspace sections">
           {tabs.map((one) => (
             <button
               key={one.value}
               type="button"
               aria-label={one.label}
-              aria-pressed={activeTab === one.value || (one.value === "pulls" && activeTab === "ready")}
+              aria-pressed={activeTab === one.value}
               onClick={() => setTab(one.value)}
             >
               <span class="workspace-tab-icon" aria-hidden="true">
@@ -394,33 +396,20 @@ export function Workspace({
           ))}
         </nav>
 
-        <header class="workspace-intro" id="workspace-content" tabindex={-1}>
-          <div class="workspace-repo-mark" aria-hidden="true">
-            {selected ? selected.name.slice(0, 1).toUpperCase() : <Icon name="command" size={20} />}
-          </div>
-          <div class="workspace-intro-copy">
-            <p class="workspace-breadcrumb">
-              Repositories <span aria-hidden="true">›</span> {selected?.name ?? "Overview"}
-            </p>
+        {selected && (
+          <header class="workspace-intro">
             <div class="workspace-title-line">
-              <h2>{selected ? selected.name : "Overview"}</h2>
-              {selected && <span class="badge">{selected.private ? "Private" : "Public"}</span>}
-              {selected?.latestRelease && <span class="badge badge-accent">{selected.latestRelease.tag}</span>}
-              {selected && <Unreleased project={selected} />}
+              <h2>{selected.name}</h2>
+              <span class="badge">{selected.private ? "Private" : "Public"}</span>
+              {selected.latestRelease && <span class="badge badge-accent">{selected.latestRelease.tag}</span>}
+              <Unreleased project={selected} />
             </div>
-            <p class="quiet">
-              {selected
-                ? `Pull requests, workflows and releases for ${selected.repo}`
-                : "Operational status across every visible repository."}
-            </p>
-          </div>
-          {selected && (
             <div class="workspace-intro-actions">
               <ExternalLink href={selected.url}>Open on GitHub</ExternalLink>
               {actions && <ProjectActions project={selected} actions={actions} />}
             </div>
-          )}
-        </header>
+          </header>
+        )}
 
         {selected && repositoryConfig && activeTab === "settings" && (
           <RepositorySettings
@@ -432,116 +421,50 @@ export function Workspace({
         )}
 
         {activeTab !== "settings" && (
-          <>
-            <section class="workspace-metrics" aria-label="Dashboard summary">
-              <button
-                type="button"
-                class="workspace-metric metric-pulls"
-                aria-label={`Show ${visiblePulls.length} open pull requests`}
-                onClick={() => setTab("pulls")}
-              >
-                <span class="workspace-metric-icon" aria-hidden="true">
-                  <Icon name="pull-request" />
-                </span>
-                <span>OPEN PULL REQUESTS</span>
-                <strong>{visiblePulls.length}</strong>
-                <small>{selected ? "In this repository" : "Across visible repositories"}</small>
-              </button>
-              <button
-                type="button"
-                class="workspace-metric metric-running"
-                aria-label={`Show ${running.length} active workflows`}
-                onClick={() => setTab("workflows")}
-              >
-                <span class="workspace-metric-icon" aria-hidden="true">
-                  <Icon name="workflow" />
-                </span>
-                <span>ACTIVE WORKFLOWS</span>
-                <strong>{running.length}</strong>
-                <small>Running or awaiting approval</small>
-              </button>
-              <button
-                type="button"
-                class="workspace-metric metric-ready"
-                aria-label={`Show ${ready.length} pull requests ready to merge`}
-                onClick={() => setTab("ready")}
-              >
-                <span class="workspace-metric-icon" aria-hidden="true">
-                  <Icon name="check" />
-                </span>
-                <span>READY TO MERGE</span>
-                <strong>{ready.length}</strong>
-                <small>Checks passed and mergeable</small>
-              </button>
-              <button
-                type="button"
-                class="workspace-metric metric-attention"
-                aria-label={`Show ${attentionCount} items needing attention`}
-                onClick={() => setTab("attention")}
-              >
-                <span class="workspace-metric-icon" aria-hidden="true">
-                  <Icon name="attention" />
-                </span>
-                <span>NEEDS ATTENTION</span>
-                <strong class={attentionCount ? "workspace-alert-number" : ""}>{attentionCount}</strong>
-                <small>Failed, conflicted or waiting</small>
-              </button>
-            </section>
-
-            <div class={activeTab === "all" ? "workspace-content" : "workspace-content workspace-content-focused"}>
-              {activeTab === "all" && (
-                <>
-                  <PullList
-                    key={`overview:${currentScope ?? "all"}`}
-                    pulls={visiblePulls}
-                    now={now}
-                    compact
-                    showRepository={selected === undefined}
-                  />
-                  <div class="workspace-operations">
-                    <ReleaseList runs={overviewRuns} now={now} inspect />
-                    {visibleRuns.length > overviewRuns.length && (
-                      <button type="button" class="workspace-view-all" onClick={() => setTab("workflows")}>
-                        View all {visibleRuns.length} workflows
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-              {activeTab === "pulls" && (
+          <div class={activeTab === "all" ? "workspace-content" : "workspace-content workspace-content-focused"}>
+            {activeTab === "all" && (
+              <>
                 <PullList
-                  key={`pulls:${currentScope ?? "all"}`}
+                  key={`overview:${currentScope ?? "all"}`}
                   pulls={visiblePulls}
                   now={now}
                   compact
                   showRepository={selected === undefined}
                 />
-              )}
-              {activeTab === "ready" && (
+                <div class="workspace-operations">
+                  <ReleaseList runs={overviewRuns} now={now} inspect />
+                  {visibleRuns.length > overviewRuns.length && (
+                    <button type="button" class="workspace-view-all" onClick={() => setTab("workflows")}>
+                      View all {visibleRuns.length} workflows
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            {activeTab === "pulls" && (
+              <PullList
+                key={`pulls:${currentScope ?? "all"}`}
+                pulls={visiblePulls}
+                now={now}
+                compact
+                showRepository={selected === undefined}
+              />
+            )}
+            {activeTab === "workflows" && <ReleaseList runs={visibleRuns} now={now} inspect />}
+            {activeTab === "releases" && <ReleasePanel projects={selected ? [selected] : shown} now={now} />}
+            {activeTab === "attention" && (
+              <div class="workspace-attention-view">
                 <PullList
-                  key={`ready:${currentScope ?? "all"}`}
-                  pulls={ready}
+                  key={`attention:${currentScope ?? "all"}`}
+                  pulls={attentionPulls}
                   now={now}
                   compact
                   showRepository={selected === undefined}
                 />
-              )}
-              {activeTab === "workflows" && <ReleaseList runs={visibleRuns} now={now} inspect />}
-              {activeTab === "releases" && <ReleasePanel projects={selected ? [selected] : shown} now={now} />}
-              {activeTab === "attention" && (
-                <div class="workspace-attention-view">
-                  <PullList
-                    key={`attention:${currentScope ?? "all"}`}
-                    pulls={attentionPulls}
-                    now={now}
-                    compact
-                    showRepository={selected === undefined}
-                  />
-                  <ReleaseList runs={attentionRuns} now={now} inspect />
-                </div>
-              )}
-            </div>
-          </>
+                <ReleaseList runs={attentionRuns} now={now} inspect />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
