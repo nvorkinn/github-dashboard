@@ -214,6 +214,7 @@ function ApprovalActions({
         label={`Approve ${environment}`}
         title={`Let the run deploy to ${environment}`}
         busy="Approving…"
+        primary
         {...(isProduction(environment) ? { ask: () => `Approve ${environment}?` } : {})}
         run={async () => {
           await actions.review(run, approval, "approved");

@@ -17,6 +17,8 @@ export type RunActionProps<T> = {
   title?: string;
   /** The button's words while the action is under way, such as "Approving…". */
   busy: string;
+  /** The main choice, filled with colour, such as Approve beside Reject. */
+  primary?: boolean;
   /** A quieter button, for the less likely choice next to a main one. */
   secondary?: boolean;
   /** Works out what the action is about before asking, such as the release's tag. */
@@ -43,7 +45,7 @@ type Phase<T> =
  * next to it, or where `onNotice` puts it.
  */
 export function RunAction<T = undefined>(props: RunActionProps<T>) {
-  const { label, name, title, busy, secondary, prepare, ask, run, onNotice } = props;
+  const { label, name, title, busy, primary, secondary, prepare, ask, run, onNotice } = props;
   const [phase, setPhase] = useState<Phase<T>>({ name: "idle" });
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mounted = useRef(true);
@@ -114,7 +116,7 @@ export function RunAction<T = undefined>(props: RunActionProps<T>) {
     }
   }
 
-  const kind = secondary ? "action secondary" : "action";
+  const kind = secondary ? "action secondary" : primary ? "action primary" : "action";
   switch (phase.name) {
     case "asking":
       return (

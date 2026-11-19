@@ -553,6 +553,7 @@ export function PullReview({
           </ExternalLink>
           <button
             type="button"
+            class="primary"
             disabled={!fresh || !info?.canApprove || !!action.busy || !!done}
             title={
               info?.canApprove
