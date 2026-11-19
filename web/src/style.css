@@ -1931,6 +1931,21 @@ h1 .home {
   column-gap: 0.75rem;
 }
 
+/* Reloading the page is rarely wanted, so it stays quiet beside Refresh; a phone has it in the account's menu. */
+.reload {
+  color: var(--quiet);
+  background: transparent;
+  border-color: transparent;
+}
+
+.reload:hover:not(:disabled) {
+  color: inherit;
+}
+
+.reload-menu {
+  display: none;
+}
+
 .pull-filters-toggle {
   display: none;
 }
@@ -1997,6 +2012,14 @@ h1 .home {
 
   .refresh-icon {
     display: block;
+  }
+
+  .reload {
+    display: none;
+  }
+
+  .account-open .account-items > .reload-menu {
+    display: inline-flex;
   }
 
   .account {

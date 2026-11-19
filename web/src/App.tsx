@@ -3,7 +3,7 @@ import type { Auth, AuthState } from "./auth.ts";
 import { Account } from "./components/Account.tsx";
 import { type Actions, ActionsContext } from "./components/actions.tsx";
 import { BackgroundProvider } from "./components/background.tsx";
-import { DashboardView, Freshness, useRefresh } from "./components/DashboardView.tsx";
+import { DashboardView, Freshness, ReloadButton, useRefresh } from "./components/DashboardView.tsx";
 import { ExternalLink } from "./components/ExternalLink.tsx";
 import { readHidden, useDashboardState, useNow } from "./components/hooks.ts";
 import { Icon, type IconName } from "./components/Icon.tsx";
@@ -195,6 +195,7 @@ function SignedIn({
             <a class="button" href="#settings" aria-current={page === "settings" ? "page" : undefined}>
               Settings
             </a>
+            <ReloadButton class="button reload-menu" />
           </Account>
         </div>
       </header>

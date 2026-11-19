@@ -48,7 +48,25 @@ export function Freshness({
         <Icon name="refresh" class={refreshing ? "refresh-icon spinning" : "refresh-icon"} />
         <span class="refresh-label">{refreshing ? "Refreshing…" : "Refresh"}</span>
       </button>
+      <ReloadButton />
     </div>
+  );
+}
+
+/**
+ * Loads the whole page again, as the browser's own reload does: for an installed app or a phone, which have no
+ * reload of their own. Refresh only reads GitHub again; this also picks up a new version of the dashboard.
+ */
+export function ReloadButton({ class: className = "reload" }: { class?: string }) {
+  return (
+    <button
+      type="button"
+      class={className}
+      title="Reload the page, like the browser's reload"
+      onClick={() => window.location.reload()}
+    >
+      Reload
+    </button>
   );
 }
 
