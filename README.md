@@ -294,8 +294,8 @@ list of the open pull requests of every shown project, the project's own first. 
 | ---------- | -------------------------------------------------------------------------------------------------------- |
 | `DATA_DIR` | A writable folder the relay keeps `pending-releases.json` in. Without it they are lost on every restart. |
 
-In the image the relay runs as user 1000, so mount a volume there that it can write, such as `/data` with
-`DATA_DIR=/data`.
+The image has an empty `/data` owned by user 1000, which the relay runs as: mount a named volume there and set
+`DATA_DIR=/data`. A bind mount instead must be writable by user 1000.
 
 ## Reading GitHub
 

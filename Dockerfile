@@ -14,6 +14,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY relay/src relay/src
 COPY shared shared
 COPY --from=build /app/dist dist
+# Where the relay keeps its pending releases when DATA_DIR=/data. Owned by the node user, so a named volume mounted
+# here starts out writable by it.
+RUN mkdir /data && chown 1000:1000 /data
 # The node user, by number so a host can check it without the image's /etc/passwd.
 USER 1000
 EXPOSE 8080
