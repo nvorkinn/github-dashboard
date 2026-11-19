@@ -249,8 +249,8 @@ without each page asking GitHub. It reads GitHub as the GitHub App, not as a use
   folders of the repositories that GitHub says were pushed to since; once a day all of them, for what no push says,
   such as a workflow being disabled.
 
-All of it is in memory only: a restart reads it again. The relay only reads, except for pending releases (below);
-approving, re-running and the like stay with the page, as the signed-in user. Whether the signed-in user may approve a waiting deployment is theirs to
+All of it is in memory only: a restart reads it again. The relay only reads; approving, re-running and the like
+stay with the page, as the signed-in user. Whether the signed-in user may approve a waiting deployment is theirs to
 ask, as the app is nobody's reviewer.
 
 | Variable                 | Value                                                                                      |
@@ -264,38 +264,6 @@ that isn't one, it refuses to start. The key's line breaks may be written as `\n
 Vaultwarden). With it Octokit (`@octokit/auth-app`) asks GitHub for a token per installation, which lasts an hour, is
 held in memory and is never logged. The app needs no
 permission beyond the ones it has for the page (Actions, Contents, Deployments and Metadata, read).
-
-### Pending releases
-
-A project's next release can be set to go out on its own once some pull requests have merged: **Release after
-merge…** beside Release (in the sidebar's release controls, under the project's title, and in the Releases tab) opens a
-list of the open pull requests of every shown project, the project's own first. Pick any number, of any of them, up to
-20. A pull request a release waits for says so on its card ("Releases weather-station").
-
-- The relay keeps it, and hears from the `pull_request` webhook as each one closes. Once the last of them has merged it
-  publishes the project's next minor release, as the Release button would (`nextVersion` in `shared/versions.ts`),
-  with the notes GitHub writes. The tag points at the merge commit of the last of the project's own pull requests
-  that went into its default branch, so whatever merged after that waits for the next release; when none of the
-  pull requests is the project's own, at the head of the default branch.
-- One of them closing without merging cancels the whole release. Releasing, failing and that cancelling each send a
-  notice: to the open pages and, while none is open, to Telegram.
-- The release is published as the GitHub App (its Contents write), since no browser need be open; it shows the app as
-  its author, and its tag starts the release workflow as a tag the page made would.
-- One pending release per project: setting it up again changes what it waits for. Cancel stops one that waits;
-  one that ended stays on the page for a day, or until dismissed.
-- Setting one up or cancelling it goes to the relay (`POST /api/pending`, `DELETE /api/pending/<id>`) with the
-  signed-in user's token, from the page only. The relay asks GitHub with that token who the user is, that they can
-  push to the project, and that each pull request is open; the app must be installed on every repository involved.
-- The pull requests still waited for are read again when the relay starts and every five minutes, for a webhook
-  missed meanwhile. A release GitHub didn't answer for is tried again then, up to three times; before each try the
-  relay looks whether the tag it settled on is out already.
-
-| Variable   | Value                                                                                                    |
-| ---------- | -------------------------------------------------------------------------------------------------------- |
-| `DATA_DIR` | A writable folder the relay keeps `pending-releases.json` in. Without it they are lost on every restart. |
-
-The image has an empty `/data` owned by user 1000, which the relay runs as: mount a named volume there and set
-`DATA_DIR=/data`. A bind mount instead must be writable by user 1000.
 
 ## Reading GitHub
 

@@ -5,7 +5,6 @@ import { Ago } from "./Ago.tsx";
 import { AutoMergeButton, ConfirmButton, useAction, useActions } from "./actions.tsx";
 import { type BackgroundEntry, type BackgroundWhat, keyOf, useBackground } from "./background.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
-import { PendingBadges } from "./PendingRelease.tsx";
 import { PullReview } from "./PullReview.tsx";
 import type { Tone } from "./state.tsx";
 import { labelOf, ToneIcon, toneOf } from "./state.tsx";
@@ -517,7 +516,6 @@ export function PullRow({
           <MergeState pull={pull} />
         )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
-        <PendingBadges pull={pull} />
         {done?.what === "rebaseAsked" && <span class="badge">Rebase requested</span>}
       </div>
       {reviewOpen && <PullReview initial={pull} pulls={reviewPulls ?? [pull]} onClose={() => setReviewOpen(false)} />}

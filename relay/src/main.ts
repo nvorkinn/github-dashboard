@@ -26,19 +26,7 @@ const closing = new AbortController();
 
 const telemetry = telemetryEnabled(process.env) ? createTelemetry() : undefined;
 
-// Where what must last through a restart is kept: the pending releases. Without it they live in memory only.
-const dataDir = process.env.DATA_DIR || undefined;
-
-const app = createApp({
-  staticRoot,
-  auth,
-  webhookSecret,
-  telegram,
-  githubApp,
-  closing: closing.signal,
-  telemetry,
-  dataDir,
-});
+const app = createApp({ staticRoot, auth, webhookSecret, telegram, githubApp, closing: closing.signal, telemetry });
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`relay listening on :${info.port}`);
   console.log(auth ? `sign-in set up for ${auth.publicOrigin}` : "sign-in not configured: its endpoints answer 503");
@@ -54,13 +42,6 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
       : webhookSecret
         ? "release runs set up: read as the GitHub App, then kept from its webhooks"
         : "release runs set up, but without webhooks they are only read again every few minutes",
-  );
-  console.log(
-    !githubApp
-      ? "pending releases off: they need the GitHub App"
-      : dataDir
-        ? `pending releases kept in ${dataDir}`
-        : "pending releases kept in memory only: set DATA_DIR to keep them through a restart",
   );
   console.log(
     telemetry ? "telemetry on: one JSON line per request answered and sent (TELEMETRY=off stops it)" : "telemetry off",

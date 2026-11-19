@@ -1,246 +1,200 @@
-import { createContext } from "preact";
-import { useContext, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { MAX_PENDING_PULLS, pullLabel } from "../../../shared/pending.ts";
-import type { PendingRelease, Project, PullRequest } from "../model.ts";
-import { reasonOf, useAction, useActions } from "./actions.tsx";
-import { ExternalLink } from "./ExternalLink.tsx";
-import { ToneIcon } from "./state.tsx";
+import { type ComponentChildren, createContext } from "preact";
+import { useContext, useEffect, useRef, useState } from "preact/hooks";
+import type { Project, PullRequest } from "../model.ts";
+import { reasonOf, useActions } from "./actions.tsx";
 import "./PendingRelease.css";
 
-/**
- * What the pending releases need of the page: every one the relay keeps (undefined where it keeps none), and the open
- * pull requests and projects that are shown, to pick from.
- */
-export type PendingView = { pending: PendingRelease[] | undefined; pulls: PullRequest[]; projects: Project[] };
-
-export const PendingContext = createContext<PendingView | undefined>(undefined);
-
-/** The project's pending release to show: the one that waits or is going out, else the last that ended. */
-export function pendingOf(list: PendingRelease[] | undefined, repo: string): PendingRelease | undefined {
-  const mine = (list ?? []).filter((one) => one.repo === repo);
-  return (
-    mine.find((one) => one.state === "waiting" || one.state === "releasing") ??
-    mine.sort((a, b) => (b.endedAt ?? "").localeCompare(a.endedAt ?? ""))[0]
-  );
-}
-
-/** The pending releases that wait for this pull request. */
-export function waitingOn(list: PendingRelease[] | undefined, pull: Pick<PullRequest, "repo" | "number">) {
-  return (list ?? []).filter(
-    (one) =>
-      one.state === "waiting" && one.pulls.some((p) => p.repo === pull.repo && p.number === pull.number && !p.merged),
-  );
-}
-
-function nameOf(repo: string): string {
-  return repo.split("/")[1] ?? repo;
-}
+type PullKey = Pick<PullRequest, "repo" | "number">;
 
 /**
- * The button that sets up the project's pending release, or changes what it waits for: in the project's release
- * controls, beside Release. Nothing where the relay keeps no pending releases.
+ * A release this page makes once some pull requests have merged: `waiting` for them, `releasing`, or `done`, with
+ * what came of it. It lives in this tab only, and is gone when the tab closes.
  */
-export function PendingButton({ project }: { project: Project }) {
-  const view = useContext(PendingContext);
-  const actions = useActions()?.pending;
-  const [open, setOpen] = useState(false);
-  if (!view?.pending || !actions) {
-    return null;
+type Pending = {
+  project: Project;
+  pulls: PullKey[];
+  merged: string[];
+  state: "waiting" | "releasing" | "done";
+  said?: string;
+  failed?: boolean;
+};
+
+type PendingApi = {
+  pulls: PullRequest[];
+  of(repo: string): Pending | undefined;
+  set(project: Project, pulls: PullKey[]): void;
+  cancel(repo: string): void;
+};
+
+const PendingContext = createContext<PendingApi | undefined>(undefined);
+
+const keyOf = (pull: PullKey) => `${pull.repo}#${pull.number}`;
+
+/** `#7` for the project's own pull request, `lib#7` for another's. */
+function label(pull: PullKey, project: string): string {
+  return pull.repo === project ? `#${pull.number}` : `${pull.repo.split("/")[1] ?? pull.repo}#${pull.number}`;
+}
+
+/**
+ * Keeps this tab's pending releases. Whenever a pull request one waits for leaves the open ones, it asks GitHub
+ * whether it merged; once all have, it releases the project with the Release button's action (the next minor). One
+ * that closed without merging cancels the release.
+ */
+export function PendingProvider({ pulls, children }: { pulls: PullRequest[]; children: ComponentChildren }) {
+  const actions = useActions();
+  const all = useRef(new Map<string, Pending>());
+  const asking = useRef(new Set<string>());
+  const [, redraw] = useState(0);
+  const update = (repo: string, change: Partial<Pending>) => {
+    const one = all.current.get(repo);
+    if (one) {
+      all.current.set(repo, { ...one, ...change });
+      redraw((n) => n + 1);
+    }
+  };
+
+  async function release(one: Pending): Promise<void> {
+    const runs = actions?.runs;
+    if (!runs) return;
+    update(one.project.repo, { state: "releasing" });
+    try {
+      const tag = await runs.nextRelease(one.project);
+      await runs.release(one.project, tag);
+      update(one.project.repo, { state: "done", said: `Released ${tag}.` });
+    } catch (error) {
+      update(one.project.repo, { state: "done", failed: true, said: `Release failed: ${reasonOf(error)}` });
+    }
   }
-  const current = pendingOf(view.pending, project.repo);
-  const waiting = current?.state === "waiting" ? current : undefined;
-  if (current?.state === "releasing") {
-    return null;
+
+  useEffect(() => {
+    const merged = actions?.pulls?.merged;
+    if (!merged) return;
+    const open = new Set(pulls.map(keyOf));
+    for (const one of all.current.values()) {
+      if (one.state !== "waiting") continue;
+      for (const pull of one.pulls) {
+        const key = keyOf(pull);
+        if (open.has(key) || one.merged.includes(key) || asking.current.has(`${one.project.repo}>${key}`)) continue;
+        asking.current.add(`${one.project.repo}>${key}`);
+        void merged(pull)
+          .then((yes) => {
+            const now = all.current.get(one.project.repo);
+            if (now?.state !== "waiting" || now.pulls !== one.pulls) return;
+            if (!yes) {
+              const said = `${label(pull, now.project.repo)} closed without merging, so nothing was released.`;
+              update(now.project.repo, { state: "done", failed: true, said });
+              return;
+            }
+            const done = [...now.merged, key];
+            update(now.project.repo, { merged: done });
+            if (done.length === now.pulls.length) void release({ ...now, merged: done });
+          })
+          // Asked again with the next change to the open pull requests.
+          .catch(() => {})
+          .finally(() => asking.current.delete(`${one.project.repo}>${key}`));
+      }
+    }
+  });
+
+  const api: PendingApi = {
+    pulls,
+    of: (repo) => all.current.get(repo),
+    set(project, picked) {
+      all.current.set(project.repo, { project, pulls: picked, merged: [], state: "waiting" });
+      redraw((n) => n + 1);
+    },
+    cancel(repo) {
+      all.current.delete(repo);
+      redraw((n) => n + 1);
+    },
+  };
+  return <PendingContext.Provider value={api}>{children}</PendingContext.Provider>;
+}
+
+/**
+ * Beside Release: "Release after merge…", which picks the pull requests to wait for; while it waits, what for, with
+ * Cancel; once done, what came of it.
+ */
+export function ReleaseAfterMerge({ project }: { project: Project }) {
+  const pending = useContext(PendingContext);
+  const actions = useActions();
+  const [open, setOpen] = useState(false);
+  if (!pending || !actions?.runs || !actions.pulls?.merged) return null;
+  const one = pending.of(project.repo);
+  if (one?.state === "waiting" || one?.state === "releasing") {
+    return (
+      <span class="pending-release">
+        <span class="pending-words">
+          {one.state === "releasing"
+            ? "Releasing…"
+            : `Releases once ${one.pulls.map((pull) => label(pull, project.repo)).join(", ")} merge (${one.merged.length} of ${one.pulls.length} merged)`}
+        </span>
+        {one.state === "waiting" && (
+          <button
+            type="button"
+            class="action"
+            aria-label={`Cancel the release of ${project.name} after merge`}
+            onClick={() => pending.cancel(project.repo)}
+          >
+            Cancel
+          </button>
+        )}
+      </span>
+    );
   }
   return (
     <>
       <button
         type="button"
         class="action"
-        title={`Publish the next minor release of ${project.repo} once the pull requests you pick have merged`}
+        title={`Release ${project.repo} once the pull requests you pick have merged, while this tab stays open`}
         onClick={() => setOpen(true)}
       >
-        {waiting ? "Change PRs…" : "Release after merge…"}
+        Release after merge…
       </button>
-      {open && <PendingPicker project={project} waiting={waiting} onClose={() => setOpen(false)} />}
+      {one?.said && (
+        <span class={one.failed ? "action-problem pending-said" : "quiet pending-said"} role="status">
+          {one.said}
+        </span>
+      )}
+      {open && (
+        <Picker
+          project={project}
+          pulls={pending.pulls}
+          onPick={(picked) => pending.set(project, picked)}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </>
   );
 }
 
-const STATE_LOOKS = {
-  waiting: { tone: "waiting", label: "Waiting" },
-  releasing: { tone: "running", label: "Releasing" },
-  released: { tone: "done", label: "Released" },
-  failed: { tone: "failed", label: "Failed" },
-  cancelled: { tone: "skipped", label: "Cancelled" },
-} as const;
-
-/**
- * The project's pending release, as a line in its release controls: what it waits for and how far that got, or how
- * it ended, with Cancel (or Dismiss, once it ended).
- */
-export function PendingStatus({ project }: { project: Project }) {
-  const view = useContext(PendingContext);
-  const actions = useActions()?.pending;
-  const { busy, problem, run } = useAction();
-  const one = pendingOf(view?.pending, project.repo);
-  if (!one) {
-    return null;
-  }
-  const look = STATE_LOOKS[one.state];
-  const merged = one.pulls.filter((p) => p.merged).length;
-  const ended = one.state !== "waiting" && one.state !== "releasing";
-  return (
-    <div class={`pending-status pending-${one.state}`}>
-      <p class="pending-line">
-        <span class={`chip tone-${look.tone}`}>
-          <ToneIcon tone={look.tone} />
-          {look.label}
-        </span>
-        <span class="pending-words">
-          {one.state === "waiting" && (
-            <>
-              Next minor release once{" "}
-              {one.pulls.length === 1 ? "this merges" : `all ${one.pulls.length} merge (${merged} merged)`}:
-            </>
-          )}
-          {one.state === "releasing" && <>Publishing {one.tag ?? "the next release"}…</>}
-          {one.state === "released" && (
-            <>
-              {one.url ? <ExternalLink href={one.url}>{one.tag ?? "Release"}</ExternalLink> : one.tag} went out after
-              these merged:
-            </>
-          )}
-          {(one.state === "failed" || one.state === "cancelled") && one.problem}
-        </span>
-      </p>
-      <ul class="pending-pulls">
-        {one.pulls.map((pull) => (
-          <li key={`${pull.repo}#${pull.number}`} class={pull.merged ? "pending-merged" : undefined}>
-            <ExternalLink href={`https://github.com/${pull.repo}/pull/${pull.number}`}>
-              {pullLabel(pull, one.repo)}
-            </ExternalLink>{" "}
-            <span class="pending-title">{pull.title}</span>
-            {pull.merged && <span class="visually-hidden"> (merged)</span>}
-          </li>
-        ))}
-      </ul>
-      {actions && one.state !== "releasing" && (
-        <div class="pending-buttons">
-          <button
-            type="button"
-            class="action"
-            disabled={busy !== undefined}
-            aria-label={`${ended ? "Dismiss" : "Cancel"} the pending release of ${project.name}`}
-            onClick={() => run("cancel", () => actions.cancel(one))}
-          >
-            {busy ? (ended ? "Dismissing…" : "Cancelling…") : ended ? "Dismiss" : "Cancel"}
-          </button>
-        </div>
-      )}
-      {problem && (
-        <p class="action-problem pending-problem" role="alert">
-          {problem}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** On a pull request's card: that merging it (with the others) releases a project. */
-export function PendingBadges({ pull }: { pull: PullRequest }) {
-  const view = useContext(PendingContext);
-  return (
-    <>
-      {waitingOn(view?.pending, pull).map((one) => {
-        const others = one.pulls.filter((p) => !p.merged && !(p.repo === pull.repo && p.number === pull.number));
-        return (
-          <span
-            key={one.id}
-            class="badge badge-pending"
-            title={
-              others.length === 0
-                ? `Merging it releases ${one.repo}`
-                : `${one.repo} is released once this and ${others.map((p) => pullLabel(p, pull.repo)).join(", ")} merge`
-            }
-          >
-            Releases {nameOf(one.repo)}
-          </span>
-        );
-      })}
-    </>
-  );
-}
-
-/**
- * Picks the pull requests a project's release waits for, from every project shown: the project's own first. Opens
- * with what it waits for now, when it does.
- */
-function PendingPicker({
+/** Every open pull request shown, grouped by project, the project's own first, to tick the ones to wait for. */
+function Picker({
   project,
-  waiting,
+  pulls,
+  onPick,
   onClose,
 }: {
   project: Project;
-  waiting: PendingRelease | undefined;
+  pulls: PullRequest[];
+  onPick: (pulls: PullKey[]) => void;
   onClose: () => void;
 }) {
-  const view = useContext(PendingContext);
-  const actions = useActions()?.pending;
   const dialog = useRef<HTMLDialogElement>(null);
-  const [picked, setPicked] = useState<Set<string>>(
-    () => new Set((waiting?.pulls ?? []).filter((p) => !p.merged).map((p) => `${p.repo}#${p.number}`)),
-  );
-  const [filter, setFilter] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [picked, setPicked] = useState<PullKey[]>([]);
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-
-  const groups = useMemo(() => {
-    const words = filter.trim().toLowerCase();
-    const shown = (view?.pulls ?? []).filter(
-      (pull) =>
-        !words ||
-        pull.title.toLowerCase().includes(words) ||
-        `${pull.repo}#${pull.number}`.toLowerCase().includes(words) ||
-        pull.author.toLowerCase().includes(words),
+  const repos = [...new Set(pulls.map((pull) => pull.repo))].sort((a, b) =>
+    a === project.repo ? -1 : b === project.repo ? 1 : a.localeCompare(b),
+  );
+  const toggle = (pull: PullRequest) =>
+    setPicked((now) =>
+      now.some((one) => keyOf(one) === keyOf(pull))
+        ? now.filter((one) => keyOf(one) !== keyOf(pull))
+        : [...now, { repo: pull.repo, number: pull.number }],
     );
-    const byRepo = new Map<string, PullRequest[]>();
-    for (const pull of shown) {
-      byRepo.set(pull.repo, [...(byRepo.get(pull.repo) ?? []), pull]);
-    }
-    return [...byRepo]
-      .sort(([a], [b]) => (a === project.repo ? -1 : b === project.repo ? 1 : nameOf(a).localeCompare(nameOf(b))))
-      .map(([repo, pulls]) => ({ repo, pulls: pulls.sort((a, b) => b.number - a.number) }));
-  }, [view?.pulls, filter, project.repo]);
-
-  const toggle = (key: string) => {
-    const next = new Set(picked);
-    if (!next.delete(key)) next.add(key);
-    setPicked(next);
-  };
-  const tooMany = picked.size > MAX_PENDING_PULLS;
-  const save = async () => {
-    if (!actions || picked.size === 0 || tooMany) return;
-    setBusy(true);
-    setProblem(undefined);
-    try {
-      await actions.set(
-        project,
-        [...picked].map((key) => {
-          const [repo = "", number = "0"] = key.split("#");
-          return { repo, number: Number(number) };
-        }),
-      );
-      onClose();
-    } catch (error) {
-      setProblem(reasonOf(error));
-      setBusy(false);
-    }
-  };
-
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the click is only the backdrop's; Escape is its keyboard way out.
     <dialog
@@ -256,75 +210,48 @@ function PendingPicker({
       }}
     >
       <header class="pending-picker-header">
-        <div>
-          <h3 id="pending-picker-title">Release {project.name} after merge</h3>
-          <p>
-            Once every pull request you pick has merged, the next minor release of {project.repo} goes out. If one
-            closes without merging, nothing is released.
-          </p>
-        </div>
-        <button class="pending-picker-close" type="button" onClick={onClose} aria-label="Close">
-          ×
-        </button>
+        <h3 id="pending-picker-title">Release {project.name} after merge</h3>
+        <p>
+          Once every pull request you pick has merged, this tab releases the next minor version of {project.repo}. Keep
+          the tab open until then.
+        </p>
       </header>
-      <div class="pending-picker-filter">
-        <input
-          type="search"
-          placeholder="Filter pull requests"
-          aria-label="Filter pull requests"
-          value={filter}
-          onInput={(event) => setFilter((event.target as HTMLInputElement).value)}
-        />
-      </div>
       <div class="pending-picker-body">
-        {groups.length === 0 && <p class="quiet">No open pull requests{filter ? " match" : ""}.</p>}
-        {groups.map((group) => (
-          <fieldset key={group.repo} class="pending-group">
-            <legend>
-              {nameOf(group.repo)}
-              {group.repo === project.repo && <span class="quiet"> · this project</span>}
-            </legend>
-            {group.pulls.map((pull) => {
-              const key = `${pull.repo}#${pull.number}`;
-              return (
-                <label key={key} class="pending-option">
-                  <input type="checkbox" checked={picked.has(key)} onChange={() => toggle(key)} />
-                  <span class="pending-number">#{pull.number}</span>
+        {repos.length === 0 && <p class="quiet">No open pull requests.</p>}
+        {repos.map((repo) => (
+          <fieldset key={repo} class="pending-group">
+            <legend>{repo.split("/")[1] ?? repo}</legend>
+            {pulls
+              .filter((pull) => pull.repo === repo)
+              .map((pull) => (
+                <label key={keyOf(pull)} class="pending-option">
+                  <input
+                    type="checkbox"
+                    checked={picked.some((one) => keyOf(one) === keyOf(pull))}
+                    onChange={() => toggle(pull)}
+                  />
+                  <span class="quiet">#{pull.number}</span>
                   <span class="pending-option-title">{pull.title}</span>
-                  {pull.draft && <span class="badge">Draft</span>}
-                  {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
                 </label>
-              );
-            })}
+              ))}
           </fieldset>
         ))}
       </div>
       <footer class="pending-picker-footer">
-        <span class="quiet" aria-live="polite">
-          {tooMany ? `At most ${MAX_PENDING_PULLS} pull requests.` : `${picked.size} picked`}
-        </span>
-        {problem && (
-          <p class="action-problem" role="alert">
-            {problem}
-          </p>
-        )}
-        <div class="pending-picker-buttons">
-          <button type="button" class="action" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="action primary"
-            disabled={busy || picked.size === 0 || tooMany}
-            onClick={() => void save()}
-          >
-            {busy
-              ? "Saving…"
-              : picked.size === 0
-                ? "Pick pull requests"
-                : `Release after ${picked.size === 1 ? "it merges" : `all ${picked.size} merge`}`}
-          </button>
-        </div>
+        <button type="button" class="action" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="action primary"
+          disabled={picked.length === 0}
+          onClick={() => {
+            onPick(picked);
+            onClose();
+          }}
+        >
+          {picked.length === 0 ? "Pick pull requests" : `Release after ${picked.length} merge`}
+        </button>
       </footer>
     </dialog>
   );

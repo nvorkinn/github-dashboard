@@ -112,5 +112,11 @@ export function createPullActions(auth: Auth, dashboard: Dashboard): PullActions
         // which comes back as an event of its own; nothing here changes until then.
         await send(`repos/${pull.repo}/issues/${pull.number}/comments`, "POST", { body: REBASE_COMMAND });
       }),
+
+    merged: (pull) =>
+      worded(async () => {
+        const read = await createApi(auth).get<{ merged?: unknown }>(`repos/${pull.repo}/pulls/${pull.number}`);
+        return read.merged === true;
+      }),
   };
 }

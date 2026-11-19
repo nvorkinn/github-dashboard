@@ -188,10 +188,10 @@ export function authRoutes(options: { config: AuthConfig | undefined; fetch: typ
  * Whether a request comes from the page itself. Browsers say so in Sec-Fetch-Site; one that doesn't send it must
  * show the page's own Origin. (The refresh cookie being SameSite=Strict is the second lock.)
  */
-export function sameOrigin(c: Context, publicOrigin: string | undefined): boolean {
+function sameOrigin(c: Context, publicOrigin: string): boolean {
   const site = c.req.header("Sec-Fetch-Site");
   if (site !== undefined) {
     return site === "same-origin";
   }
-  return publicOrigin !== undefined && c.req.header("Origin") === publicOrigin;
+  return c.req.header("Origin") === publicOrigin;
 }

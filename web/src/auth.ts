@@ -18,11 +18,6 @@ export type Auth = {
   start(): Promise<void>;
   /** Calls api.github.com as the signed-in user. `path` is relative to it, such as `user`. */
   github(path: string, init?: RequestInit): Promise<Response>;
-  /**
-   * Calls the relay's own `path`, such as `api/pending`, with the signed-in user's token, for it to ask GitHub who
-   * the user is and what they may do. Left out where there is no relay.
-   */
-  relay?(path: string, init?: RequestInit): Promise<Response>;
   /** Whether the sign-out went through. */
   signOut(): Promise<boolean>;
 };
@@ -162,18 +157,6 @@ export function createAuth(): Auth {
         return send(path, init, token.value);
       }
       return response;
-    },
-
-    async relay(path, init) {
-      if (!token || token.expiresAt <= Date.now()) {
-        await refresh();
-      }
-      if (!token) {
-        throw new Error("Not signed in");
-      }
-      const headers = new Headers(init?.headers);
-      headers.set("Authorization", `Bearer ${token.value}`);
-      return fetch(path, { ...init, headers });
     },
 
     async signOut() {
