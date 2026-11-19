@@ -6,6 +6,7 @@ import {
   clearNotificationHistory,
   createNotifier,
   DEFAULT_SETTINGS,
+  lookingAtPage,
   MAX_NOTIFICATION_HISTORY,
   MAX_SEEN,
   NOTIFICATION_HISTORY_KEY,
@@ -29,7 +30,9 @@ const merged: Notice = {
   url: "https://github.com/octo/app/pull/7",
 };
 
-function setUp(options: { hidden?: string[]; settings?: Partial<typeof DEFAULT_SETTINGS> } = {}) {
+function setUp(
+  options: { hidden?: string[]; settings?: Partial<typeof DEFAULT_SETTINGS>; watching?: () => boolean } = {},
+) {
   const shown: {
     title: string;
     body: string;
@@ -47,6 +50,7 @@ function setUp(options: { hidden?: string[]; settings?: Partial<typeof DEFAULT_S
     open: (url) => opened.push(url),
     hidden: () => new Set(options.hidden ?? []),
     settings: () => ({ ...DEFAULT_SETTINGS, ...options.settings }),
+    watching: options.watching ?? (() => false),
   });
   return { notifier, shown, opened };
 }
@@ -105,7 +109,7 @@ test("the browser's notifications are used only once allowed", () => {
     }
   }
   vi.stubGlobal("Notification", FakeNotification);
-  const notifier = createNotifier({ settings: () => DEFAULT_SETTINGS });
+  const notifier = createNotifier({ settings: () => DEFAULT_SETTINGS, watching: () => false });
   notifier.notify(merged);
   expect(made).toEqual([]);
 
@@ -186,4 +190,37 @@ test("notification history tolerates unavailable or corrupt storage and can be c
   expect(readNotificationHistory()).toEqual([]);
   expect(addNotificationHistory(merged)).toEqual([merged]);
   get.mockRestore();
+});
+
+test("nothing shows while the user looks at the dashboard, and the notice doesn't show later either", () => {
+  let looking = true;
+  const { notifier, shown } = setUp({ watching: () => looking });
+  notifier.notify(merged);
+  expect(shown).toEqual([]);
+  looking = false;
+  notifier.notify(merged);
+  expect(shown).toEqual([]);
+  notifier.notify({ ...merged, key: "merged:octo/app#8" });
+  expect(shown.map(({ tag }) => tag)).toEqual(["merged:octo/app#8"]);
+});
+
+test("the test notification shows while the user looks at the dashboard", () => {
+  const { notifier, shown } = setUp({ watching: () => true });
+  notifier.test();
+  expect(shown.map(({ tag }) => tag)).toEqual(["test"]);
+});
+
+test("the page is looked at only when its tab shows and its window has the focus", () => {
+  const cases: [DocumentVisibilityState, boolean, boolean][] = [
+    ["visible", true, true],
+    ["visible", false, false],
+    ["hidden", true, false],
+    ["hidden", false, false],
+  ];
+  for (const [visibility, focus, expected] of cases) {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue(visibility);
+    vi.spyOn(document, "hasFocus").mockReturnValue(focus);
+    expect(lookingAtPage()).toBe(expected);
+  }
+  vi.restoreAllMocks();
 });
