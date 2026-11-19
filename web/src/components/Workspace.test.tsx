@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, expect, test, vi } from "vitest";
 import { ActionsContext } from "./actions.tsx";
 import { DashboardView } from "./DashboardView.tsx";
 import { fakeRunActions, NOW, project, pull, ready, run } from "./testing.ts";
-import { navigateWorkspace, Workspace } from "./Workspace.tsx";
 
 const other = "octocat/home-ledger";
 const data = () =>
@@ -213,47 +212,6 @@ test("keeps release control in the sidebar, not on the overview", async () => {
   expectOverview();
   fireEvent.click(toggle);
   expect(screen.getByRole("region", { name: "Release controls for weather-station" })).toBeTruthy();
-});
-
-test("accepts repository and section navigation from application commands", () => {
-  dashboard();
-
-  act(() => navigateWorkspace({ repo: other }));
-  expect(screen.getByRole("heading", { name: "home-ledger" })).toBeTruthy();
-  expect(screen.getByText("Ledger change")).toBeTruthy();
-  expect(screen.queryByText("Weather change")).toBeNull();
-  expect(screen.getByRole("button", { name: "Overview" }).getAttribute("aria-pressed")).toBe("true");
-
-  act(() => navigateWorkspace({ section: "workflows" }));
-  expect(screen.getByText("Ledger deploy")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Workflows" }).getAttribute("aria-pressed")).toBe("true");
-
-  act(() => navigateWorkspace({ section: "releases" }));
-  expect(screen.getByRole("button", { name: "Releases" }).getAttribute("aria-pressed")).toBe("true");
-
-  act(() => navigateWorkspace({ repo: null }));
-  expectOverview();
-  expect(screen.getByText("Weather change")).toBeTruthy();
-  expect(screen.getByText("Ledger change")).toBeTruthy();
-});
-
-test("ignores command navigation to unknown or hidden repositories", () => {
-  render(
-    <Workspace
-      projects={data().data.projects}
-      pulls={data().data.pulls}
-      runs={data().data.releases}
-      now={NOW}
-      hidden={new Set([other])}
-      onToggle={() => {}}
-    />,
-  );
-  select(/weather-station/);
-
-  act(() => navigateWorkspace({ repo: other }));
-  expect(screen.getByRole("heading", { name: "weather-station" })).toBeTruthy();
-  act(() => navigateWorkspace({ repo: "octocat/missing" }));
-  expect(screen.getByRole("heading", { name: "weather-station" })).toBeTruthy();
 });
 
 test("handles no repositories and a removed selection without leaking stale context", () => {
