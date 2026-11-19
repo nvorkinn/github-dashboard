@@ -70,7 +70,7 @@ test("hides the selected repository, returns to overview, and refreshes when sho
   dashboard(data(), refresh);
   select(/weather-station/);
   fireEvent.click(screen.getByRole("button", { name: "Hide weather-station" }));
-  expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+  expectOverview();
   expect(screen.queryByText("Weather change")).toBeNull();
   expect(screen.queryByText("Weather deploy")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show weather-station" }));
@@ -118,8 +118,8 @@ test("shows honest job inspection and log links, plus approval and failed workfl
   expect(screen.getByText("Job details & logs")).toBeTruthy();
   expect(screen.getByRole("link", { name: "Logs on GitHub for Deploy" }).getAttribute("target")).toBe("_blank");
   expect(screen.getByText("production waits for its required reviewers")).toBeTruthy();
-  const summary = screen.getByRole("region", { name: "Dashboard summary" });
-  expect(within(summary).getByText("NEEDS ATTENTION").nextElementSibling?.textContent).toBe("1");
+  const sections = screen.getByRole("navigation", { name: "Workspace sections" });
+  expect(within(sections).getByRole("button", { name: "Needs attention" }).textContent).toContain("1");
 });
 
 test("focuses the attention view on blocked pull requests and workflows", () => {
@@ -144,33 +144,14 @@ test("focuses the attention view on blocked pull requests and workflows", () => 
   expect(screen.queryByText("Previous deploy")).toBeNull();
 });
 
-test("uses summary metrics to open focused operational views", () => {
-  dashboard(
-    ready({
-      projects: [project()],
-      pulls: [
-        pull({ number: 1, title: "Ready change", checks: [{ name: "test", state: "passed", url: undefined }] }),
-        pull({ number: 2, title: "Broken change", mergeState: "conflicts" }),
-      ],
-      releases: [run({ title: "Active deploy", state: "running", finishedAt: undefined })],
-    }),
-  );
-
-  fireEvent.click(screen.getByRole("button", { name: "Show 1 pull requests ready to merge" }));
-  expect(screen.getByText("Ready change")).toBeTruthy();
-  expect(screen.queryByText("Broken change")).toBeNull();
-
-  fireEvent.click(screen.getByRole("button", { name: "Show 1 items needing attention" }));
-  expect(screen.getByText("Broken change")).toBeTruthy();
-  expect(screen.queryByText("Ready change")).toBeNull();
-
-  fireEvent.click(screen.getByRole("button", { name: "Show 1 active workflows" }));
-  expect(screen.getByText("Active deploy")).toBeTruthy();
-  expect(screen.queryByText("Broken change")).toBeNull();
-
-  fireEvent.click(screen.getByRole("button", { name: "Show 2 open pull requests" }));
-  expect(screen.getByText("Ready change")).toBeTruthy();
-  expect(screen.getByText("Broken change")).toBeTruthy();
+test("shows no page header or summary cards on the overview", () => {
+  dashboard();
+  expect(screen.queryByRole("region", { name: "Dashboard summary" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Overview" })).toBeNull();
+  expect(screen.queryByText("Operational status across every visible repository.")).toBeNull();
+  select(/weather-station/);
+  expect(screen.getByRole("heading", { name: "weather-station" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Dashboard summary" })).toBeNull();
 });
 
 test("shows up to three workflows on the overview and exposes the complete workflow view", () => {
@@ -229,7 +210,7 @@ test("keeps release control in the sidebar, not on the overview", async () => {
   );
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   // Still the overview: release control doesn't change what is selected.
-  expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+  expectOverview();
   fireEvent.click(toggle);
   expect(screen.getByRole("region", { name: "Release controls for weather-station" })).toBeTruthy();
 });
@@ -251,7 +232,7 @@ test("accepts repository and section navigation from application commands", () =
   expect(screen.getByRole("button", { name: "Releases" }).getAttribute("aria-pressed")).toBe("true");
 
   act(() => navigateWorkspace({ repo: null }));
-  expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+  expectOverview();
   expect(screen.getByText("Weather change")).toBeTruthy();
   expect(screen.getByText("Ledger change")).toBeTruthy();
 });
@@ -279,7 +260,7 @@ test("handles no repositories and a removed selection without leaking stale cont
   const view = dashboard();
   select(/weather-station/);
   view.rerender(<DashboardView state={ready()} now={NOW} refresh={() => {}} />);
-  expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+  expectOverview();
   expect(screen.getByText("No open pull requests")).toBeTruthy();
   expect(screen.getByText("Nothing running")).toBeTruthy();
   expect(screen.getByText("No repositories")).toBeTruthy();
@@ -308,3 +289,12 @@ test("folds the repository sidebar to a rail and remembers it across reloads", (
   expect(localStorage.getItem("github-dashboard:sidebar")).toBeNull();
   expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
 });
+
+function expectOverview() {
+  const sidebar = screen.getByRole("complementary", { name: "Repository navigation" });
+  expect(
+    within(sidebar)
+      .getByRole("button", { name: /Overview/ })
+      .getAttribute("aria-current"),
+  ).toBe("page");
+}
