@@ -134,7 +134,15 @@
 }
 .pull-review button:hover:not(:disabled),
 .pull-review .button:hover {
-  border-color: #9380c4;
+  background-color: color-mix(in srgb, var(--text) 12%, transparent);
+}
+/* The main action is filled in the review's purple rather than the page's blue. */
+.pull-review button.primary:not(:disabled) {
+  color: #fff;
+  background-color: #7357c4;
+}
+.pull-review button.primary:hover:not(:disabled) {
+  background-color: #8164d4;
 }
 .pull-review button:disabled {
   opacity: 0.42;

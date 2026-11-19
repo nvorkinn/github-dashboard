@@ -129,7 +129,7 @@ export function ConfirmButton({
     );
   }
   return (
-    <button type="button" class="action" disabled={disabled} onClick={() => setAsking(true)}>
+    <button type="button" class="action primary" disabled={disabled} onClick={() => setAsking(true)}>
       {label}
     </button>
   );
