@@ -186,6 +186,7 @@ export async function answerQuery(routes: Routes, query: string): Promise<Respon
       mergeable: one.mergeable == null ? "UNKNOWN" : one.mergeable ? "MERGEABLE" : "CONFLICTING",
       mergeStateStatus: one.mergeable_state === "draft" ? "BLOCKED" : (upper(one.mergeable_state) ?? "UNKNOWN"),
       autoMergeRequest: one.auto_merge ? { enabledAt: "2026-11-02T09:00:00Z" } : null,
+      commits: { totalCount: one.commits ?? 1 },
       author: one.user && {
         __typename: bot ? "Bot" : "User",
         login: bot ? one.user.login.slice(0, -"[bot]".length) : one.user.login,

@@ -150,7 +150,7 @@ test.each([
 test("a pull request is read with its merge state and checks", async () => {
   const routes = account("octo/app");
   withPull(routes, "octo/app", 12, {
-    pull: { mergeable_state: "blocked", auto_merge: { merge_method: "squash" }, draft: true },
+    pull: { mergeable_state: "blocked", auto_merge: { merge_method: "squash" }, draft: true, commits: 3 },
     checkRuns: [{ name: "test", status: "in_progress", conclusion: null, html_url: "https://github.com/r/1" }],
     statuses: [{ context: "ci/build", state: "success", target_url: null }],
   });
@@ -176,6 +176,7 @@ test("a pull request is read with its merge state and checks", async () => {
         { name: "ci/build", state: "passed", url: undefined },
       ],
       nodeId: "PR_node12",
+      commits: 3,
     },
   ]);
   // All of it through GraphQL: nothing is read pull request by pull request.

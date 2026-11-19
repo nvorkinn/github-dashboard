@@ -46,6 +46,8 @@ export type PullRequest = {
   checks: Check[];
   /** GitHub's global id for it, which its GraphQL API (auto-merge) asks for. */
   nodeId: string;
+  /** How many commits it has, when GitHub said. */
+  commits?: number | undefined;
 };
 
 export type Unreleased = {

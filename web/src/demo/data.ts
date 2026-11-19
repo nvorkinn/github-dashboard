@@ -207,6 +207,7 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
       autoMerge: false,
       checks: [],
       nodeId: `PR_demo_${repo}_${number}`,
+      commits: ((number * 7) % 9) + 1,
       ...fields,
     };
   }
