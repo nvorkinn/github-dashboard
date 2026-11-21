@@ -1,19 +1,30 @@
 version: 2
+
+# One daily PR for the whole project: every entry below feeds the `dependencies` multi-ecosystem group, which sets the
+# schedule and the commit message for all of them, and `patterns: ["*"]` puts each of an entry's dependencies in it,
+# major updates included. Security updates are opened separately by GitHub and are not affected by the schedule.
+multi-ecosystem-groups:
+  dependencies:
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "chore(deps)"
+
 updates:
   # package.json and package-lock.json.
   - package-ecosystem: "npm"
     directory: "/"
-    schedule:
-      interval: "daily"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
   # The Dockerfile's Node base image. Its major moves with .node-version, by hand, so the image and CI run the same Node.
   - package-ecosystem: "docker"
     directory: "/"
-    schedule:
-      interval: "daily"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
     ignore:
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "dependencies"
