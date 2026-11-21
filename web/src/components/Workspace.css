@@ -888,6 +888,8 @@ body:has(.workspace) {
   background: transparent;
 }
 
+/* Only ready (green) and attention (red) rows get an edge bar. In-progress rows have no tone, so no bar and a plain
+   number: purple would read as GitHub's "merged". */
 .workspace .pull.pull-folded::before {
   position: absolute;
   inset: 0.55rem auto 0.55rem 0;
@@ -900,10 +902,6 @@ body:has(.workspace) {
 
 .workspace .pull-ready {
   --row-tone: var(--done);
-}
-
-.workspace .pull-progress {
-  --row-tone: #986cff;
 }
 
 .workspace .pull-attention {
