@@ -81,7 +81,8 @@ test("a hidden project takes its pull requests and runs off the page, until it i
   });
   const view = render(<DashboardView state={state} now={NOW} refresh={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Hide home-ledger" }));
-  expect(screen.queryByText("Goes")).toBeNull();
+  const shownPulls = () => screen.getByRole("region", { name: /Open pull requests/ });
+  expect(within(shownPulls()).queryByText("Goes")).toBeNull();
   expect(screen.queryByRole("link", { name: "v9.9.9" })).toBeNull();
   expect(screen.getByText("Stays")).toBeTruthy();
   expect(screen.getByRole("heading", { level: 2, name: "Open pull requests 1" })).toBeTruthy();
@@ -91,12 +92,55 @@ test("a hidden project takes its pull requests and runs off the page, until it i
   // The browser remembers it for the next visit.
   view.unmount();
   render(<DashboardView state={state} now={NOW} refresh={() => {}} />);
-  expect(screen.queryByText("Goes")).toBeNull();
+  expect(within(shownPulls()).queryByText("Goes")).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Show home-ledger" }));
   expect(screen.getByText("Goes")).toBeTruthy();
   expect(screen.getByRole("link", { name: "v9.9.9" })).toBeTruthy();
   expect(JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) ?? "")).toEqual([]);
+});
+
+test("a hidden project's pull requests are listed bare under the shown ones: number, title and a link", () => {
+  const ledger = "octocat/home-ledger";
+  localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([ledger, "octocat/quiet"]));
+  const state = ready({
+    pulls: [pull({ title: "Stays" }), pull({ repo: ledger, number: 2, title: "Still full" })],
+    projects: [
+      project(),
+      // Read bare: those are shown, not the full ones still there from before it was hidden.
+      project({
+        repo: ledger,
+        name: "home-ledger",
+        barePulls: [{ number: 5, title: "Bare one", url: "https://github.com/octocat/home-ledger/pull/5" }],
+      }),
+      project({ repo: "octocat/quiet", name: "quiet", barePulls: [] }),
+    ],
+  });
+  render(<DashboardView state={state} now={NOW} refresh={() => {}} />);
+  const hidden = screen.getByText("Hidden projects").closest("details") as HTMLElement;
+  expect(within(hidden).getByRole("link", { name: "#5 Bare one" }).getAttribute("href")).toBe(
+    "https://github.com/octocat/home-ledger/pull/5",
+  );
+  expect(within(hidden).queryByText("Still full")).toBeNull();
+  // A hidden project without any isn't named.
+  expect(within(hidden).queryByRole("region", { name: "quiet" })).toBeNull();
+  expect(within(hidden).getByText("1")).toBeTruthy();
+});
+
+test("a project just hidden lists its full pull requests bare until they are read bare", () => {
+  const ledger = "octocat/home-ledger";
+  localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([ledger]));
+  const state = ready({
+    pulls: [pull({ repo: ledger, number: 2, title: "Still full" })],
+    projects: [project(), project({ repo: ledger, name: "home-ledger" })],
+  });
+  render(<DashboardView state={state} now={NOW} refresh={() => {}} />);
+  expect(screen.getByRole("link", { name: "#2 Still full" })).toBeTruthy();
+});
+
+test("no hidden project with pull requests, no list of them", () => {
+  render(<DashboardView state={ready({ projects: [project()] })} now={NOW} refresh={() => {}} />);
+  expect(screen.queryByText("Hidden projects")).toBeNull();
 });
 
 test("what is kept under the key but is no list of names hides nothing", () => {

@@ -83,7 +83,15 @@ export type Project = {
   autoMergeAllowed: boolean;
   /** The id of its active Promote workflow (`PROMOTE_WORKFLOW`), when it has one. */
   promoteWorkflow: number | undefined;
+  /**
+   * Of a hidden project only: its open pull requests, bare (number, title, link), newest first. Read with the list of
+   * projects, so they are only as fresh as the last read of everything. Undefined while not read yet.
+   */
+  barePulls?: BarePull[] | undefined;
 };
+
+/** A pull request of a hidden project: no more than names it and leads to it on GitHub. */
+export type BarePull = Pick<PullRequest, "number" | "title" | "url">;
 
 /** The ways GitHub merges a pull request. */
 export type MergeMethod = "merge" | "squash" | "rebase";

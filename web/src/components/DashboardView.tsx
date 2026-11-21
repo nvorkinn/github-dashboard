@@ -122,6 +122,17 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
   // A hidden project's pull requests and runs go with it.
   const pulls = data.pulls.filter((pull) => !hidden.has(pull.repo));
   const releases = data.releases.filter((run) => !hidden.has(run.repo));
+  // What little is read of them: until the next read of everything, one just hidden still has its full ones.
+  const hiddenPulls = data.projects
+    .filter((project) => hidden.has(project.repo))
+    .map((project) => ({
+      project,
+      pulls:
+        project.barePulls ??
+        data.pulls
+          .filter((pull) => pull.repo === project.repo)
+          .map(({ number, title, url }) => ({ number, title, url })),
+    }));
   return (
     <>
       {state.problem && (
@@ -130,7 +141,15 @@ export function DashboardView({ state, now, refresh }: { state: DashboardState; 
         </p>
       )}
       <PendingProvider pulls={pulls}>
-        <Workspace projects={data.projects} pulls={pulls} runs={releases} now={now} hidden={hidden} onToggle={toggle} />
+        <Workspace
+          projects={data.projects}
+          pulls={pulls}
+          runs={releases}
+          now={now}
+          hidden={hidden}
+          onToggle={toggle}
+          hiddenPulls={hiddenPulls}
+        />
       </PendingProvider>
     </>
   );

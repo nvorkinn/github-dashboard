@@ -276,6 +276,20 @@ export async function answerQuery(routes: Routes, query: string): Promise<Respon
         return { pullRequest: { state: upper(one.state), ...(await nodeOf(`${owner}/${name}`, one)) } };
       });
     }
+    for (const [, alias, owner, name] of query.matchAll(
+      /^\s*(h\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ pullRequests\(/gm,
+    )) {
+      await field(alias ?? "", async () => {
+        const open: Json[] | undefined = await get(`repos/${owner}/${name}/pulls`);
+        if (open === undefined) {
+          errors.push({ type: "NOT_FOUND", path: [alias], message: "Could not resolve to a Repository" });
+          return null;
+        }
+        return {
+          pullRequests: { nodes: open.map((one) => ({ number: one.number, title: one.title, url: one.html_url })) },
+        };
+      });
+    }
     for (const [, alias, owner, name, tag, branch] of query.matchAll(
       /^\s*(c\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ ref\(qualifiedName: "refs\/tags\/([^"]+)"\) \{ compare\(headRef: "([^"]+)"\)/gm,
     )) {
