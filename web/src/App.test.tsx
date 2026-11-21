@@ -95,6 +95,24 @@ test("says so when the relay can't be reached", async () => {
   expect(screen.queryByRole("link", { name: "Sign in with GitHub" })).toBeNull();
 });
 
+test("tries the relay again when the tab becomes active", async () => {
+  let reachable = false;
+  stubBackend((call) => {
+    if (!reachable) {
+      throw new TypeError("network");
+    }
+    return signedIn(call);
+  });
+  render(<App dashboard={fakeDashboard()} auth={createAuth()} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("Can't reach the sign-in service");
+  reachable = true;
+  // The listener goes on after the render settles, so keep coming back until it has.
+  await waitFor(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+  });
+});
+
 test("says so when GitHub doesn't tell who is signed in", async () => {
   stubBackend((call) =>
     call.url === "https://api.github.com/user" ? new Response(null, { status: 500 }) : signedIn(call),
