@@ -57,6 +57,8 @@ export type GitHubApp = {
    * it went. `cursor` is the `next` of the page before.
    */
   deliveries(cursor?: string): Promise<{ deliveries: unknown[]; next: string | undefined }>;
+  /** Asks GitHub to send the delivery with this id (from `deliveries`) again, as the app. */
+  redeliver(id: string): Promise<void>;
 };
 
 export type GraphQLAnswer = { data: Record<string, unknown>; errors: { type?: string; path?: unknown[] }[] };
@@ -205,13 +207,39 @@ export function createGitHubApp(options: {
         await response.body?.cancel().catch(() => {});
         throw new AppError(response.status, `HTTP ${response.status}`);
       }
-      const page: unknown = await response.json().catch(() => undefined);
+      const page = deliveryPage(await response.text().catch(() => ""));
       if (!Array.isArray(page)) {
         throw new AppError(502, "not a list");
       }
       const link = /<([^>]+)>;\s*rel="next"/.exec(response.headers.get("link") ?? "")?.[1];
       const next = link ? (new URL(link).searchParams.get("cursor") ?? undefined) : undefined;
       return { deliveries: page, next };
+    },
+
+    async redeliver(id) {
+      if (!/^\d{1,30}$/.test(id)) {
+        throw new AppError(400, "not a delivery id");
+      }
+      let response: Response;
+      try {
+        response = await fetcher(`${API}/app/hook/deliveries/${id}/attempts`, {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${await appToken()}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "github-dashboard-relay",
+          },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+      } catch (error) {
+        throw new AppError(0, error instanceof Error ? error.name : "request failed");
+      }
+      // GitHub answers 202 and sends it shortly; what it says beside that isn't needed.
+      await response.body?.cancel().catch(() => {});
+      if (!response.ok) {
+        throw new AppError(response.status, `HTTP ${response.status}`);
+      }
     },
 
     async repositories() {
@@ -241,4 +269,16 @@ export function createGitHubApp(options: {
       return found;
     },
   };
+}
+
+/**
+ * A page of the delivery log, with each delivery's `id` as text: GitHub's ids are past what a JavaScript number holds
+ * exactly, and the id is what a redelivery names. Undefined when it isn't JSON.
+ */
+export function deliveryPage(body: string): unknown {
+  try {
+    return JSON.parse(body.replace(/"id"\s*:\s*(\d+)/g, '"id":"$1"'));
+  } catch {
+    return undefined;
+  }
 }
