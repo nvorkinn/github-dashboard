@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { authRoutes } from "./auth.ts";
 import type { AppConfig, AuthConfig, TelegramConfig } from "./config.ts";
-import { logDeliveries } from "./deliveries.ts";
+import { watchDeliveries } from "./deliveries.ts";
 import type { Hub } from "./events.ts";
 import { createHub, eventStream } from "./events.ts";
 import { createGitHubApp } from "./github_app.ts";
@@ -98,9 +98,10 @@ export function createApp(options: {
         closing: options.closing,
       })
     : undefined;
-  // How GitHub saw the webhooks it sent, for the telemetry: only where it can be asked, as the app.
-  if (githubApp && options.telemetry && options.webhookSecret) {
-    logDeliveries({ app: githubApp, telemetry: options.telemetry, closing: options.closing });
+  // GitHub's own log of the webhooks it sent: what failed is asked for again, and with telemetry all of it is logged.
+  // Only where it can be asked, as the app.
+  if (githubApp && options.webhookSecret) {
+    watchDeliveries({ app: githubApp, telemetry: options.telemetry, closing: options.closing });
   }
   const telegram = options.telegram
     ? telegramNotifier({

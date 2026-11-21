@@ -138,6 +138,12 @@ On the GitHub App's page, under Webhook:
 
 GitHub Apps always send their webhooks as JSON, which is the only form the relay reads.
 
+GitHub doesn't send a webhook again when the relay couldn't take it, as while it restarts for a deploy, or when the
+proxy in front of it answers an error. So the relay reads the app's delivery log (`GET /app/hook/deliveries`, as the
+app) a minute after it starts and then every hour, and asks GitHub to send each failed delivery of the last six
+hours again, once (`POST /app/hook/deliveries/{id}/attempts`). A delivery that a later attempt got through for
+isn't asked for. This needs the app's key and the webhook secret, and nothing more of the app's settings.
+
 Under "Subscribe to events", tick the events below. GitHub only offers an event once the app has the permission it
 goes with, and a permission added later has to be accepted on the app's installation before its events arrive.
 
@@ -322,17 +328,19 @@ took to open. The page's own calls go from the browser to api.github.com and are
 
 A request the relay sends also says what it was for, as `purpose`, where that is more than its path says:
 `workflows.start`, `workflows.hourly`, `workflows.daily` and `workflows.push` for the workflow files, `runs.recheck`,
-`runs.reconcile` and `runs.<webhook>` for release runs, `merge_states.push` for merge states, and `deliveries.hourly` (below). Besides the
+`runs.reconcile` and `runs.<webhook>` for release runs, `merge_states.push` for merge states, and `deliveries.hourly`
+and `deliveries.redeliver` for the delivery log (below and in "Push"). Besides the
 requests there are these lines:
 
-| `telemetry`               | When                                        | What it says                                                                                                                                     |
-| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `webhook`                 | A signed webhook arrived                    | Its kind, action, delivery id, size, repository, pull request, head commit, run, how many pages were open, and the notice it made, if any        |
-| `webhook_delivery`        | Hourly, for each delivery not logged before | GitHub's own account of it, from the app's delivery log: delivery id, kind, when it was sent, how long the relay took (`ms`), status, redelivery |
-| `webhook_deliveries_read` | After each hourly read of the delivery log  | Pages read, deliveries seen, logged and skipped (no guid), and whether it reached one logged before                                              |
-| `graphql_cost`            | A relay GraphQL query answered              | Its purpose, what it cost in points and what is left                                                                                             |
-| `stream_opened`           | A page connected to `/api/events`           | How many pages are now connected                                                                                                                 |
-| `stream_closed`           | It went away                                | How long it was open, and per event name how many were sent and how many bytes                                                                   |
+| `telemetry`               | When                                         | What it says                                                                                                                                     |
+| ------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `webhook`                 | A signed webhook arrived                     | Its kind, action, delivery id, size, repository, pull request, head commit, run, how many pages were open, and the notice it made, if any        |
+| `webhook_delivery`        | Hourly, for each delivery not logged before  | GitHub's own account of it, from the app's delivery log: delivery id, kind, when it was sent, how long the relay took (`ms`), status, redelivery |
+| `webhook_deliveries_read` | After each hourly read of the delivery log   | Pages read, deliveries seen, logged, skipped (no id or guid) and asked to be sent again, and whether it reached one logged before                |
+| `webhook_redelivery`      | A failed delivery was asked to be sent again | Its delivery id, and `error` if GitHub refused                                                                                                   |
+| `graphql_cost`            | A relay GraphQL query answered               | Its purpose, what it cost in points and what is left                                                                                             |
+| `stream_opened`           | A page connected to `/api/events`            | How many pages are now connected                                                                                                                 |
+| `stream_closed`           | It went away                                 | How long it was open, and per event name how many were sent and how many bytes                                                                   |
 
 A `webhook` and its `webhook_delivery` share the delivery id, which tells how late a webhook arrived and which never
 did; the pages get it too, as `delivery` on the `change` (see "The event stream"). The deliveries are read only with

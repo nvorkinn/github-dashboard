@@ -10,7 +10,8 @@ export function blob(text: string) {
  * can be changed between reads. A path nothing is said of fails with 404. `calls` are the paths read, in order.
  * A GraphQL query is answered by `routes.graphql`, a function of the query and its variables that gives the data or
  * a status to fail with; its call is `graphql`. The app's webhook deliveries are `routes.deliveries`: the pages in
- * order, each a list, the cursor of the next being its index; its call is `deliveries`.
+ * order, each a list, the cursor of the next being its index; its call is `deliveries`. A redelivery's call is
+ * `redeliver <id>`; `routes.redeliver` as a number fails it with that status.
  */
 export function fakeApp(
   repositories: { repo: string; defaultBranch?: string; pushedAt?: string }[],
@@ -52,6 +53,13 @@ export function fakeApp(
       const pages = (routes.deliveries as unknown[][] | undefined) ?? [];
       const index = cursor === undefined ? 0 : Number(cursor);
       return { deliveries: pages[index] ?? [], next: index + 1 < pages.length ? String(index + 1) : undefined };
+    },
+    redeliver: async (id: string) => {
+      calls.push(`redeliver ${id}`);
+      const refused = routes.redeliver;
+      if (typeof refused === "number") {
+        throw new AppError(refused, `HTTP ${refused}`);
+      }
     },
   };
   return { app, calls, routes, repositories };

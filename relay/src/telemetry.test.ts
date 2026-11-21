@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { webhookSignature } from "./crypto.ts";
-import { logDeliveries } from "./deliveries.ts";
+import { watchDeliveries } from "./deliveries.ts";
 import { type Change, createHub } from "./events.ts";
 import { createGitHubApp } from "./github_app.ts";
 import { createTelemetry, telemetryEnabled, withPurpose } from "./telemetry.ts";
@@ -208,8 +208,8 @@ test("GitHub's webhook deliveries are logged once each, read an hour apart", asy
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   const { lines, telemetry } = recorder();
   const delivery = (id: number) => ({
-    // An id too large for a JavaScript number is still logged: deliveries are told apart by their guid.
-    id: id === 2 ? 2 ** 60 : id,
+    // An id too large for a JavaScript number comes as text (see `deliveryPage`).
+    id: id === 2 ? "1152921504606846976" : id,
     guid: `g-${id}`,
     event: "push",
     action: null,
@@ -219,7 +219,7 @@ test("GitHub's webhook deliveries are logged once each, read an hour apart", asy
     redelivery: id === 3,
   });
   const { app, routes, calls } = fakeApp([], { deliveries: [[delivery(3), delivery(2)], [delivery(1)]] });
-  logDeliveries({ app, telemetry });
+  watchDeliveries({ app, telemetry });
   await vi.advanceTimersByTimeAsync(60_000);
   await settle();
   const deliveries = () => lines.filter((line) => line.telemetry === "webhook_delivery");
