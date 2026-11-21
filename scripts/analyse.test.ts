@@ -152,3 +152,23 @@ test("reads a VictoriaLogs record whose fields were parsed out and whose _msg is
     expect.objectContaining({ telemetry: "http_out", path: "/app/hook/deliveries", status: 200, ms: 285 }),
   ]);
 });
+
+test("the rate-limit counter is read as its highest in each hour, as tabs report it interleaved", () => {
+  const request = (minutes: number, used: number) =>
+    JSON.stringify({
+      ts: new Date(Date.UTC(2026, 10, 16, 8, minutes)).toISOString(),
+      telemetry: "page_request",
+      tab: "t",
+      method: "POST",
+      path: "/graphql",
+      status: 200,
+      rateResource: "graphql",
+      rateRemaining: 5000 - used,
+      rateUsed: used,
+    });
+  // Two tabs whose lines come in interleaved: adding up the counter's rises would count 530 used.
+  const report = analyse(
+    parseLines([request(0, 300), request(1, 100), request(2, 350), request(3, 120), request(4, 400)].join("\n")),
+  );
+  expect(report).toContain("| page | graphql | 4600 | 400 | 400 |");
+});

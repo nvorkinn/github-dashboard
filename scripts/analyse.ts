@@ -181,19 +181,27 @@ export function analyse(lines: Line[]): string {
   const rated = all.filter((call) => num(call.line.rateRemaining) !== undefined);
   out.push(
     table(
-      ["From", "Resource", "Lowest remaining", "Used per hour (from the counter)"],
+      ["From", "Resource", "Lowest remaining", "Counter, typical hour", "Counter, highest"],
       [...group(rated, (call) => `${call.from}\t${str(call.line.rateResource) ?? "?"}`)].map(([key, items]) => {
         const [from, resource] = key.split("\t");
         const remaining = items.map((call) => num(call.line.rateRemaining) ?? 0);
-        // The counter goes back to 0 each hour: the sum of its rises is what was used.
-        let used = 0;
-        let previous: number | undefined;
+        // The counter is the whole account's, other clients included, and goes back to 0 an hour after its first
+        // use. Lines from several tabs come in interleaved, so its rises can't be added up: the highest it read in
+        // each clock hour is taken instead (an hour that a reset falls in reads low).
+        const highest = new Map<string, number>();
         for (const call of items) {
-          const now = num(call.line.rateUsed);
-          if (now !== undefined && previous !== undefined && now > previous) used += now - previous;
-          if (now !== undefined) previous = now;
+          const used = num(call.line.rateUsed);
+          const hour = call.line.ts.slice(0, 13);
+          if (used !== undefined) highest.set(hour, Math.max(highest.get(hour) ?? 0, used));
         }
-        return [from, resource, Math.min(...remaining), (used / hours).toFixed(0)];
+        const hourly = [...highest.values()];
+        return [
+          from,
+          resource,
+          Math.min(...remaining),
+          percentile(hourly, 50),
+          hourly.length ? Math.max(...hourly) : undefined,
+        ];
       }),
     ),
   );
