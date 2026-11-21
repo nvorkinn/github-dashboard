@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { Project, PullRequest, ReleaseRun } from "../model.ts";
+import type { BarePull, Project, PullRequest, ReleaseRun } from "../model.ts";
 import { summarize } from "../model.ts";
 import { useActions } from "./actions.tsx";
 import { ExternalLink } from "./ExternalLink.tsx";
@@ -129,6 +129,7 @@ export function Workspace({
   now,
   hidden,
   onToggle,
+  hiddenPulls = [],
 }: {
   projects: Project[];
   pulls: PullRequest[];
@@ -136,6 +137,8 @@ export function Workspace({
   now: number;
   hidden: ReadonlySet<string>;
   onToggle: (repo: string) => void;
+  /** The hidden projects' open pull requests, bare, by project. */
+  hiddenPulls?: HiddenPulls[];
 }) {
   const [scope, setScope] = useState<Scope>(undefined);
   const [tab, setTab] = useState<WorkspaceTab>("all");
@@ -412,13 +415,16 @@ export function Workspace({
           <div class={activeTab === "all" ? "workspace-content" : "workspace-content workspace-content-focused"}>
             {activeTab === "all" && (
               <>
-                <PullList
-                  key={`overview:${currentScope ?? "all"}`}
-                  pulls={visiblePulls}
-                  now={now}
-                  compact
-                  showRepository={selected === undefined}
-                />
+                <div class="workspace-pull-column">
+                  <PullList
+                    key={`overview:${currentScope ?? "all"}`}
+                    pulls={visiblePulls}
+                    now={now}
+                    compact
+                    showRepository={selected === undefined}
+                  />
+                  {!selected && <HiddenPullList groups={hiddenPulls} />}
+                </div>
                 <div class="workspace-operations">
                   <ReleaseList runs={overviewRuns} now={now} inspect />
                   {visibleRuns.length > overviewRuns.length && (
@@ -430,13 +436,16 @@ export function Workspace({
               </>
             )}
             {activeTab === "pulls" && (
-              <PullList
-                key={`pulls:${currentScope ?? "all"}`}
-                pulls={visiblePulls}
-                now={now}
-                compact
-                showRepository={selected === undefined}
-              />
+              <>
+                <PullList
+                  key={`pulls:${currentScope ?? "all"}`}
+                  pulls={visiblePulls}
+                  now={now}
+                  compact
+                  showRepository={selected === undefined}
+                />
+                {!selected && <HiddenPullList groups={hiddenPulls} />}
+              </>
             )}
             {activeTab === "workflows" && <ReleaseList runs={visibleRuns} now={now} inspect />}
             {activeTab === "releases" && <ReleasePanel projects={selected ? [selected] : shown} now={now} />}
@@ -456,6 +465,42 @@ export function Workspace({
         )}
       </div>
     </div>
+  );
+}
+
+/** A hidden project's open pull requests, bare. */
+export type HiddenPulls = { project: Project; pulls: BarePull[] };
+
+/**
+ * The hidden projects' open pull requests, folded away under the shown ones: number, title and a link to GitHub,
+ * nothing more, as nothing more of them is read. Nothing when they have none.
+ */
+function HiddenPullList({ groups }: { groups: HiddenPulls[] }) {
+  const some = groups.filter((group) => group.pulls.length > 0);
+  if (some.length === 0) {
+    return null;
+  }
+  const count = some.reduce((sum, group) => sum + group.pulls.length, 0);
+  return (
+    <details class="hidden-pulls">
+      <summary>
+        Hidden projects <span class="count">{count}</span>
+      </summary>
+      {some.map(({ project, pulls }) => (
+        <section key={project.repo} aria-label={project.name}>
+          <h3 title={project.repo}>{project.name}</h3>
+          <ul>
+            {pulls.map((pull) => (
+              <li key={pull.number}>
+                <ExternalLink href={pull.url}>
+                  <span class="hidden-pull-number">#{pull.number}</span> {pull.title}
+                </ExternalLink>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </details>
   );
 }
 

@@ -7,7 +7,9 @@
  *
  * - every repository the signed-in user reaches through the app: what a project's row shows, nothing more;
  * - of each project that isn't hidden: its open pull requests with their checks, and what its default branch has
- *   that its latest release hasn't.
+ *   that its latest release hasn't;
+ * - of each hidden project: its open pull requests, bare (number, title, link). They go with the first page of the
+ *   list, whose rate-limit cost they don't raise: GitHub charges a hundred lists as one point.
  *
  * Release runs aren't read here: the relay keeps them and tells the page (see dashboard.ts).
  *
@@ -16,7 +18,7 @@
  * missing, so only such a read takes more than one round of requests.
  */
 import type { Auth } from "../auth.ts";
-import type { DashboardData, PullRequest, Unreleased } from "../model.ts";
+import type { BarePull, DashboardData, PullRequest, Unreleased } from "../model.ts";
 import { createApi, GitHubError, limiter, MAX_PARALLEL, type QueryAnswer, sendQuery } from "./api.ts";
 import {
   type GqlPull,
@@ -40,6 +42,8 @@ import { comparisonField, type GqlComparison, unreleasedFrom } from "./unrelease
 // the way a read of changes reads it.
 export const REPOS_PER_PAGE = 100;
 export const PULLS_PER_REPO = 50;
+// How many of a hidden project's pull requests are read: the newest, as nothing more of them is shown.
+export const BARE_PULLS_PER_REPO = 50;
 // How many projects one request asks about. GitHub answers a query's fields one after another, each project taking
 // about a tenth of a second, so a read sends its requests side by side: a few in each is several times faster than
 // all in one.
@@ -83,6 +87,7 @@ type GqlRepo = {
 type GqlDetails = {
   pullRequests: { pageInfo: { hasNextPage: boolean }; nodes: (GqlPull | null)[] };
 };
+type GqlBare = { pullRequests: { nodes: (BarePull | null)[] } };
 
 const LISTED = `fragment Listed on Repository {
   nameWithOwner name url isPrivate pushedAt
@@ -106,6 +111,8 @@ export type Asked = {
   list: { after: string | undefined } | undefined;
   repos: string[];
   compares: CompareAsk[];
+  /** The hidden projects whose bare pull requests are asked for. */
+  bare?: string[] | undefined;
 };
 
 /** A string as GraphQL writes one, which is as JSON does. */
@@ -119,8 +126,8 @@ function repository(repo: string): string {
 }
 
 /**
- * The query for `asked`. Each project is the field `r<n>` and each comparison `c<n>`, numbered as they are in
- * `asked`.
+ * The query for `asked`. Each project is the field `r<n>`, each comparison `c<n>` and each hidden project `h<n>`,
+ * numbered as they are in `asked`.
  */
 export function queryFor(asked: Asked): string {
   const fields: string[] = [];
@@ -138,17 +145,22 @@ export function queryFor(asked: Asked): string {
   asked.compares.forEach(({ repo, tag, branch }, index) => {
     fields.push(`c${index}: ${comparisonField(repo, tag, branch)}`);
   });
+  (asked.bare ?? []).forEach((repo, index) => {
+    fields.push(
+      `h${index}: ${repository(repo)} { pullRequests(first: ${BARE_PULLS_PER_REPO}, states: OPEN, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number title url } } }`,
+    );
+  });
   const fragments = [...(asked.list ? [LISTED] : []), ...(asked.repos.length > 0 ? [PULLS, PULL] : [])];
   return [`query {\n  ${fields.join("\n  ")}\n}`, ...fragments].join("\n");
 }
 
-/** `asked` as the requests to send side by side: the list, then a few projects in each. */
+/** `asked` as the requests to send side by side: the list (with the hidden projects), then a few projects in each. */
 export function split(asked: Asked): Asked[] {
   const nothing: Asked = { list: undefined, repos: [], compares: [] };
   const chunks = <T>(all: T[], size: number): T[][] =>
     Array.from({ length: Math.ceil(all.length / size) }, (_, index) => all.slice(index * size, (index + 1) * size));
   return [
-    ...(asked.list ? [{ ...nothing, list: asked.list }] : []),
+    ...(asked.list ? [{ ...nothing, list: asked.list, ...(asked.bare?.length ? { bare: asked.bare } : {}) }] : []),
     ...chunks(asked.repos, REPOS_PER_REQUEST).map((repos) => ({ ...nothing, repos })),
     ...chunks(asked.compares, REPOS_PER_REQUEST).map((compares) => ({ ...nothing, compares })),
   ];
@@ -160,7 +172,8 @@ export function split(asked: Asked): Asked[] {
  * limit, a sign-in GitHub no longer accepts or a failing network is thrown instead, as every other call would fail
  * the same way.
  *
- * Of a hidden project only its row is read: it has no pull requests here. The release runs and each project's
+ * Of a hidden project only its row and its bare pull requests (`barePulls`) are read: it has no pull requests here.
+ * Its bare ones that GitHub wouldn't say stay as they were in `previous`. The release runs and each project's
  * Promote workflow stay as they are in `previous`: they are the relay's to say.
  */
 export async function readEverything(auth: Auth, options: EverythingOptions = {}): Promise<EverythingResult> {
@@ -171,6 +184,7 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
   const listed = new Map<string, GqlRepo>();
   let list: Asked["list"] = { after: undefined };
   const details = new Map<string, GqlDetails | undefined>();
+  const bare = new Map<string, BarePull[]>();
   // The projects GitHub wouldn't say everything of.
   const troubled = new Set<string>();
 
@@ -229,10 +243,23 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
         comparisons.set(compareKey(compare), unreleasedFrom(data[`c${index}`] as GqlComparison, compare.branch));
       }
     });
+    (asked.bare ?? []).forEach((repo, index) => {
+      const nodes = (data[`h${index}`] as GqlBare | null | undefined)?.pullRequests?.nodes;
+      if (!refusedFields.has(`h${index}`) && Array.isArray(nodes)) {
+        bare.set(
+          repo,
+          nodes.filter((pull) => pull !== null).map(({ number, title, url }) => ({ number, title, url })),
+        );
+      }
+    });
   }
 
+  // Asked once, with the list's first page; of a project the last read didn't list, which may be gone, only on a read
+  // that knows none.
+  let bareAsk: string[] | undefined = [...hidden].filter((repo) => shape.length === 0 || shape.includes(repo)).sort();
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const requests = split({ list, repos: repoQueue.take(), compares: compareQueue.take() });
+    const requests = split({ list, repos: repoQueue.take(), compares: compareQueue.take(), bare: bareAsk });
+    bareAsk = undefined;
     if (requests.length === 0) {
       break;
     }
@@ -277,7 +304,11 @@ export async function readEverything(auth: Auth, options: EverythingOptions = {}
       );
       const before = previous?.projects.find(of(repo));
       if (hidden.has(repo)) {
-        return { project: project(raw, latestRelease, settingsOf(raw), before?.promoteWorkflow), pulls: [] };
+        const barePulls = bare.get(repo) ?? before?.barePulls;
+        return {
+          project: { ...project(raw, latestRelease, settingsOf(raw), before?.promoteWorkflow), barePulls },
+          pulls: [],
+        };
       }
       if (troubled.has(repo)) {
         failed.add(repo);

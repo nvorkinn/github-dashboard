@@ -70,7 +70,8 @@ test("hides the selected repository, returns to overview, and refreshes when sho
   select(/weather-station/);
   fireEvent.click(screen.getByRole("button", { name: "Hide weather-station" }));
   expectOverview();
-  expect(screen.queryByText("Weather change")).toBeNull();
+  const shownPulls = screen.getByRole("region", { name: /Open pull requests/ });
+  expect(within(shownPulls).queryByText("Weather change")).toBeNull();
   expect(screen.queryByText("Weather deploy")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show weather-station" }));
   expect(refresh).toHaveBeenCalledOnce();

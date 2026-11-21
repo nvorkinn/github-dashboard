@@ -54,14 +54,14 @@ test("with the shape of the last read everything is asked at once", async () => 
   expect(again.shape).toEqual(first.shape);
 });
 
-test("of a hidden project only its row is read, and one that is new is read in full", async () => {
+test("of a hidden project only its row and bare pull requests are read, and one that is new is read in full", async () => {
   const routes = app();
   withPull(routes, "octo/lib", 7);
   const first = fakeGitHub(routes);
   const { data, shape } = await readEverything(first.auth, { hidden: new Set(["octo/app"]) });
   expect(data.projects.map((one) => one.repo)).toEqual(["octo/app", "octo/lib"]);
   expect(data.pulls.map((one) => one.repo)).toEqual(["octo/lib"]);
-  expect(first.queries.join("\n")).not.toContain('name: "app"');
+  expect(first.queries.join("\n")).not.toContain('name: "app") { ...Pulls');
 
   // A project that wasn't there last time shows on the next read, which asks once more for what is in it.
   Object.assign(routes, { ...account("octo/app", "octo/lib", "octo/new"), ...routes });
@@ -77,6 +77,35 @@ test("of a hidden project only its row is read, and one that is new is read in f
   expect(later.data.pulls.map((one) => one.number).sort()).toEqual([7, 9]);
 });
 
+test("a hidden project's bare pull requests come with the list, and stay as they were when GitHub won't say", async () => {
+  const routes = app();
+  withPull(routes, "octo/lib", 7);
+  const first = fakeGitHub(routes);
+  const { data, shape } = await readEverything(first.auth, { hidden: new Set(["octo/app", "octo/gone"]) });
+  // With the list, in its one request; no more requests than without.
+  expect(first.calls).toEqual(["graphql", "graphql"]);
+  expect(first.queries[0]).toContain('h0: repository(owner: "octo", name: "app") { pullRequests(');
+  expect(first.queries[0]).toContain("nodes { number title url }");
+  const app_ = data.projects.find((one) => one.repo === "octo/app");
+  expect(app_?.barePulls).toEqual([{ number: 1, title: expect.any(String), url: expect.stringContaining("/pull/1") }]);
+  expect(data.projects.find((one) => one.repo === "octo/lib")?.barePulls).toBeUndefined();
+  expect(data.pulls.map((one) => one.repo)).toEqual(["octo/lib"]);
+
+  // A hidden project the last read didn't list isn't asked about again.
+  const warm = fakeGitHub(routes);
+  await readEverything(warm.auth, { hidden: new Set(["octo/app", "octo/gone"]), shape, previous: data });
+  expect(warm.queries.join("\n")).not.toContain('name: "gone"');
+
+  // GitHub refusing them leaves them as they were.
+  routes["repos/octo/app/pulls"] = async () => new Response("", { status: 502 });
+  const failing = await readEverything(fakeGitHub(routes).auth, {
+    hidden: new Set(["octo/app"]),
+    shape,
+    previous: data,
+  });
+  expect(failing.data.projects.find((one) => one.repo === "octo/app")?.barePulls).toEqual(app_?.barePulls);
+});
+
 test("a read is split into requests of a few projects each", () => {
   const repos = Array.from({ length: REPOS_PER_REQUEST * 2 + 1 }, (_, index) => `octo/r${index}`);
   const compares = [{ repo: "octo/r0", tag: "v1.0.0", branch: "main" }];
@@ -88,6 +117,9 @@ test("a read is split into requests of a few projects each", () => {
     [false, 1, 0],
     [false, 0, 1],
   ]);
+  // A hidden project's bare pull requests go with the list.
+  expect(split({ list: { after: undefined }, repos, compares: [], bare: ["octo/h"] })[0]?.bare).toEqual(["octo/h"]);
+  expect(split({ list: { after: undefined }, repos, compares: [] }).some((part) => part.bare)).toBe(false);
   expect(split({ list: undefined, repos: [], compares: [] })).toEqual([]);
 });
 

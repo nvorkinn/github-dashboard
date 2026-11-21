@@ -774,10 +774,58 @@ body:has(.workspace) {
   align-items: start;
 }
 
+/* The hidden projects' pull requests: folded, quiet, one line each. */
+.hidden-pulls {
+  font-size: 0.85rem;
+  color: var(--quiet);
+}
+
+.hidden-pulls summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.hidden-pulls section {
+  margin-top: 0.6rem;
+}
+
+.hidden-pulls h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.hidden-pulls ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hidden-pulls li {
+  padding: 0.15rem 0;
+  overflow-wrap: anywhere;
+}
+
+.hidden-pulls a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.hidden-pulls a:hover {
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.hidden-pull-number {
+  color: var(--quiet);
+  font-variant-numeric: tabular-nums;
+}
+
 .workspace-content-focused {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.workspace-pull-column,
 .workspace-operations,
 .workspace-attention-view {
   display: grid;
@@ -1298,6 +1346,10 @@ body:has(.workspace) {
   }
 
   .workspace .workspace-operations > * + * {
+    margin-top: 0.75rem;
+  }
+
+  .workspace .workspace-pull-column + .workspace-operations {
     margin-top: 0.75rem;
   }
 
