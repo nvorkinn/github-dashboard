@@ -54,6 +54,28 @@ export function App({
     void auth.start();
   }, [auth]);
 
+  // When the relay couldn't be reached, ask again once the user is back on the tab or the network is, rather than
+  // waiting for a reload.
+  const unavailable = state.status === "unavailable";
+  useEffect(() => {
+    if (!unavailable) {
+      return;
+    }
+    const retry = () => {
+      if (document.visibilityState === "visible") {
+        void auth.start();
+      }
+    };
+    document.addEventListener("visibilitychange", retry);
+    window.addEventListener("focus", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      document.removeEventListener("visibilitychange", retry);
+      window.removeEventListener("focus", retry);
+      window.removeEventListener("online", retry);
+    };
+  }, [unavailable, auth]);
+
   // The dashboard reads as the signed-in user, so it runs exactly as long as there is one.
   useEffect(() => {
     if (!signedIn) {
@@ -107,7 +129,7 @@ export function App({
             )}
             {state.status === "unavailable" && (
               <p role="alert" class="problem">
-                Can't reach the sign-in service. Reload to try again.
+                Can't reach the sign-in service. It tries again when you come back to this tab.
               </p>
             )}
           </main>
