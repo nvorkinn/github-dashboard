@@ -19,9 +19,9 @@
     "@octokit/auth-app": "8.3.1",
     "@octokit/request": "10.0.16",
     "diff2html": "3.4.56",
-    "dompurify": "3.4.18",
+    "dompurify": "3.5.0",
     "highlight.js": "11.12.0",
-    "hono": "4.13.19",
+    "hono": "4.13.20",
     "marked": "18.2.1",
     "material-icon-theme": "5.40.0",
     "preact": "11.2.0"
