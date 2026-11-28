@@ -11,8 +11,12 @@ const PULL = `repos/${REPO}/pulls/1`;
 function setUp(routes: Routes, settings: { mergeMethod?: MergeMethod; autoMergeAllowed?: boolean } = {}) {
   const github = fakeGitHub(routes);
   const dashboard = fakeDashboard(ready({ projects: [project(settings)] }));
-  return { ...github, dashboard, actions: createPullActions(github.auth, dashboard) };
+  // No real waiting between asking how a merge went.
+  return { ...github, dashboard, actions: createPullActions(github.auth, dashboard, async () => {}) };
 }
+
+/** GitHub's answer to an asynchronous merge that went through at once. */
+const mergedNow = { status: "merged", details: { message: "Pull request merged.", sha: "merged" } };
 
 /** A GraphQL answer: what GitHub sends with a 200 whether the mutation went through or not. */
 const graphql = (errors?: string[]) => () =>
@@ -105,7 +109,7 @@ function cleanStatus(checkRuns: unknown[], pullFields: Record<string, unknown> =
     // The mutation is refused; a query, of the pull request as it is now, is answered from the routes below.
     "POST graphql": (_path: string, body: { query: string }) =>
       body.query.startsWith("query") ? answerQuery(routes, body.query) : refused(),
-    [`PUT ${PULL}/merge`]: { sha: "merged", merged: true, message: "Pull Request successfully merged" },
+    [`PUT ${PULL}/merge-async`]: mergedNow,
     [`repos/${REPO}/pulls`]: [],
   };
   withPull(routes, REPO, 1, { pull: pullFields, checkRuns });
@@ -120,7 +124,11 @@ test("when the base branch requires nothing, auto-merge merges now: at the head 
   await expect(actions.setAutoMerge(pull({ sha: "old" }), true)).resolves.toEqual({ merged: true });
   expect(writes(requests)).toEqual([
     expect.objectContaining({ method: "POST", path: "graphql" }),
-    { method: "PUT", path: `${PULL}/merge`, body: { merge_method: "rebase", sha: "sha1" } },
+    {
+      method: "PUT",
+      path: `${PULL}/merge-async`,
+      body: { merge_method: "rebase", merge_action: "direct_merge", sha: "sha1" },
+    },
   ]);
   expect(calls).toContain(`graphql ${REPO}#1`);
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "push", repo: REPO });
@@ -144,27 +152,59 @@ test("when the base branch requires nothing, a pull request that closed meanwhil
   expect(writes(requests)).toHaveLength(1);
 });
 
-test("merging merges the head the page showed, with the repository's method", async () => {
-  const { actions, requests, dashboard } = setUp(
-    { [`PUT ${PULL}/merge`]: { merged: true } },
-    { mergeMethod: "squash" },
-  );
+test("merging merges the head the page showed, with the repository's method, through the asynchronous merge", async () => {
+  const { actions, requests, dashboard } = setUp({ [`PUT ${PULL}/merge-async`]: mergedNow }, { mergeMethod: "squash" });
   await actions.merge(pull({ sha: "abc1234" }));
   expect(requests).toEqual([
-    { method: "PUT", path: `${PULL}/merge`, body: { merge_method: "squash", sha: "abc1234" } },
+    {
+      method: "PUT",
+      path: `${PULL}/merge-async`,
+      body: { merge_method: "squash", merge_action: "direct_merge", sha: "abc1234" },
+    },
   ]);
   // Its base moved, so the repository's pull requests are all read again.
   expect(dashboard.changed).toHaveBeenCalledWith({ kind: "push", repo: REPO });
 });
 
+test("a merge that runs in the background is followed until it is through", async () => {
+  const pending = { status: "pending", details: { message: "Merge request is in progress.", uuid: "u-1" } };
+  let asked = 0;
+  const { actions, requests, dashboard } = setUp({
+    [`PUT ${PULL}/merge-async`]: () => Response.json(pending, { status: 202 }),
+    [`${PULL}/merge-async/u-1`]: () => Response.json(++asked < 3 ? pending : mergedNow),
+  });
+  await actions.merge(pull());
+  expect(requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+    `PUT ${PULL}/merge-async`,
+    `GET ${PULL}/merge-async/u-1`,
+    `GET ${PULL}/merge-async/u-1`,
+    `GET ${PULL}/merge-async/u-1`,
+  ]);
+  expect(dashboard.changed).toHaveBeenCalledWith({ kind: "push", repo: REPO });
+});
+
+test("a merge already asked for is followed rather than refused", async () => {
+  const { actions } = setUp({
+    [`PUT ${PULL}/merge-async`]: () => Response.json({ status: "pending", details: { uuid: "u-2" } }, { status: 409 }),
+    [`${PULL}/merge-async/u-2`]: mergedNow,
+  });
+  await expect(actions.merge(pull())).resolves.toBeUndefined();
+});
+
+test("a background merge that fails says GitHub's reason", async () => {
+  const { actions } = setUp({
+    [`PUT ${PULL}/merge-async`]: () => Response.json({ status: "pending", details: { uuid: "u-3" } }, { status: 202 }),
+    [`${PULL}/merge-async/u-3`]: { status: "failed", details: { message: 'Required status check "test" is failing' } },
+  });
+  await expect(actions.merge(pull())).rejects.toThrow('GitHub refused: Required status check "test" is failing.');
+});
+
 test("a merge GitHub refuses says GitHub's reason, and is not tried again", async () => {
   const { actions, requests, dashboard } = setUp({
-    [`PUT ${PULL}/merge`]: () =>
-      Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 }),
+    [`PUT ${PULL}/merge-async`]: () =>
+      Response.json({ status: "failed", details: { message: "Pull request is in draft state." } }, { status: 400 }),
   });
-  await expect(actions.merge(pull())).rejects.toThrow(
-    "GitHub refused: Head branch was modified. Review and try the merge again.",
-  );
+  await expect(actions.merge(pull())).rejects.toThrow("GitHub refused: Pull request is in draft state.");
   expect(requests).toHaveLength(1);
   expect(dashboard.changed).not.toHaveBeenCalled();
 });

@@ -651,3 +651,58 @@ test("folds a compact list's filters behind a button that says when one is on", 
   fireEvent.change(screen.getByRole("combobox", { name: /Author/ }), { target: { value: "hubot" } });
   expect(screen.getByRole("button", { name: "Filters · on" })).toBeTruthy();
 });
+
+const bottom = pull({ number: 1, head: "store", base: "main" });
+const middle = pull({ number: 2, head: "screen", base: "store" });
+
+function compactWithActions(pulls: PullRequest[]) {
+  return render(
+    <ActionsContext.Provider value={{ pulls: fakeActions().actions }}>
+      <PullList now={NOW} pulls={pulls} compact />
+    </ActionsContext.Provider>,
+  );
+}
+
+test("draws a stack together, bottom first, with how many of it are ready", () => {
+  compactWithActions([middle, pull({ number: 9, head: "other" }), bottom]);
+  const stack = screen.getByRole("list", { name: /^Stack of 2/ });
+  expect(
+    within(stack)
+      .getAllByRole("listitem")
+      .map((item) => item.querySelector(".number")?.textContent),
+  ).toEqual(["#1", "#2"]);
+  expect(screen.getByText("into")).toBeTruthy();
+  expect(screen.getByText("all ready")).toBeTruthy();
+});
+
+test("one stacked on another's branch waits for it: no Merge, and not ready to merge", () => {
+  compactWithActions([bottom, middle]);
+  // Merging it would only fold it into #1's branch; only #1 can be merged, or have auto-merge turned on.
+  expect(screen.queryByRole("group", { name: "Actions for #2 in weather-station" })).toBeNull();
+  expect(buttons()).toEqual(["Filters", "Save view", "Merge", "Auto-merge"]);
+  expect(screen.getByText("After #1")).toBeTruthy();
+  expect(columnOf(middle, { under: bottom, below: [bottom], position: 2, size: 2, into: "main", native: false })).toBe(
+    "progress",
+  );
+});
+
+test("in a GitHub stack, one whose stack under it is ready merges with it", () => {
+  const stack = { number: 4, size: 2 };
+  compactWithActions([
+    { ...bottom, stack: { ...stack, position: 1 } },
+    { ...middle, stack: { ...stack, position: 2 } },
+  ]);
+  const upper = screen.getByRole("group", { name: "Actions for #2 in weather-station" });
+  const merge = within(upper).getByRole("button", { name: "Merge 2" });
+  expect(merge.getAttribute("title")).toBe("Merges #1, #2, bottom first");
+  expect(screen.queryByText("After #1")).toBeNull();
+  cleanup();
+
+  // Not while the one under it isn't ready.
+  compactWithActions([
+    { ...bottom, stack: { ...stack, position: 1 }, mergeState: "blocked" },
+    { ...middle, stack: { ...stack, position: 2 } },
+  ]);
+  expect(screen.queryByRole("button", { name: /^Merge/ })).toBeNull();
+  expect(screen.getByText("After #1")).toBeTruthy();
+});

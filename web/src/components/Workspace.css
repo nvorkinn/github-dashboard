@@ -1021,6 +1021,90 @@ body:has(.workspace) {
   align-items: flex-end;
 }
 
+/* A stack of pull requests: one line naming it, then its rows bottom first, joined by a rail with a numbered dot for
+   each in the colour of its own state (as though the ones under it were in), so how far it can go in reads at once. */
+.workspace .cards > li.pull-stack {
+  padding: 0;
+}
+
+.pull-stack-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.75rem;
+  padding: 0.55rem 0.75rem 0 0.9rem;
+  color: #77869c;
+  font-size: 0.62rem;
+}
+
+.pull-stack-name {
+  color: #b7c4d8;
+  font-weight: 700;
+}
+
+.pull-stack-head code {
+  color: #8998ad;
+  font-size: inherit;
+}
+
+.pull-stack-ready {
+  color: var(--done);
+}
+
+.pull-stack-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace .pull-stack-list > .pull.pull-folded {
+  --rail-top: 1.15rem;
+  padding-left: 2.6rem;
+  background: linear-gradient(#33445e, #33445e) no-repeat 1.5rem 0 / 2px 100%;
+}
+
+.workspace .pull-stack-list > .pull:first-child {
+  background-position-y: var(--rail-top);
+}
+
+.workspace .pull-stack-list > .pull:last-child {
+  background-size: 2px var(--rail-top);
+}
+
+.workspace .pull-stack-list > .pull:first-child:last-child {
+  background: none;
+}
+
+.pull-stack-dot {
+  position: absolute;
+  top: calc(var(--rail-top, 1.15rem) - 0.5rem);
+  left: calc(1.5rem + 1px - 0.5rem);
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  color: #c9d5e6;
+  font-size: 0.56rem;
+  font-weight: 700;
+  line-height: 1;
+  background: #0f1828;
+  border: 2px solid var(--stack-tone, #4b5d78);
+  border-radius: 50%;
+}
+
+.pull-stack-dot.stack-ready {
+  --stack-tone: var(--done);
+}
+
+.pull-stack-dot.stack-attention {
+  --stack-tone: var(--failed);
+}
+
+/* Out of its stack (the rest filtered away), the dot sits in the row's own padding. */
+.workspace .cards > .pull > .pull-stack-dot {
+  display: none;
+}
+
 .workspace .chip,
 .workspace .badge {
   font-size: 0.64rem;

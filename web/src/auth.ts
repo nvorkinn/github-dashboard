@@ -116,7 +116,8 @@ export function createAuth(): Auth {
     headers.set("Authorization", `Bearer ${accessToken}`);
     // A caller may ask for another media type, such as a file's raw bytes.
     if (!headers.has("Accept")) headers.set("Accept", "application/vnd.github+json");
-    headers.set("X-GitHub-Api-Version", GITHUB_API_VERSION);
+    // A caller may also ask for a newer version, for an endpoint only that version has.
+    if (!headers.has("X-GitHub-Api-Version")) headers.set("X-GitHub-Api-Version", GITHUB_API_VERSION);
     return recorded(path, init, () => fetch(new URL(path, "https://api.github.com/"), { ...init, headers }));
   }
 

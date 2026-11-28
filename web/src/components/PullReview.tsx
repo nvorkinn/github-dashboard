@@ -623,7 +623,11 @@ export function PullReview({
           <span class="review-merge">
             <ConfirmButton
               label="Merge"
-              confirmLabel="Confirm merge"
+              // In a GitHub stack, the open pull requests under it merge with it.
+              confirmLabel={(pull.stack?.position ?? 1) > 1 ? "Confirm merge with those under it" : "Confirm merge"}
+              title={
+                (pull.stack?.position ?? 1) > 1 ? "Merges the open pull requests under it in its stack too" : undefined
+              }
               busyLabel="Merging…"
               busy={action.busy === "merge"}
               disabled={
