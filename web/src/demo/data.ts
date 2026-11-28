@@ -321,8 +321,30 @@ export function sampleData(at: { base: number; frame: number; frameAt: number })
         ["hardware-in-the-loop", "queued"],
       ]),
     }),
+    // A GitHub stack of three: #343 is based on #341, which is based on #338.
+    pull("garden-sensors", 341, "Store calibration per bed on the gateway", "octocat", {
+      head: "octocat/calibration-store",
+      base: "octocat/per-bed-calibration",
+      stack: { number: 4, size: 3, position: 2 },
+      opened: 40 * HOUR,
+      updated: 3 * HOUR,
+      checks: checksOf("garden-sensors", 341, passed("build firmware", "unit tests", "gateway tests")),
+    }),
+    pull("garden-sensors", 343, "Show each bed's calibration in the app", "octocat", {
+      head: "octocat/calibration-screen",
+      base: "octocat/calibration-store",
+      stack: { number: 4, size: 3, position: 3 },
+      opened: 26 * HOUR,
+      updated: 25 * MINUTE,
+      mergeState: "blocked",
+      checks: checksOf("garden-sensors", 343, [
+        ...passed("build firmware", "unit tests"),
+        ["gateway tests", "running"],
+      ]),
+    }),
     pull("garden-sensors", 338, "Calibrate soil moisture probes per bed", "octocat", {
       head: "octocat/per-bed-calibration",
+      stack: { number: 4, size: 3, position: 1 },
       opened: 2 * DAY,
       updated: 4 * HOUR,
       checks: checksOf(

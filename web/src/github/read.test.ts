@@ -5,7 +5,7 @@ import type { DashboardData } from "../model.ts";
 import { createApi, GitHubError } from "./api.ts";
 import type { Change } from "./events.ts";
 import { readEverything } from "./graphql.ts";
-import { checks, mergeMethod, type Plan, planFor, readChanged } from "./read.ts";
+import { checks, mergeMethod, type Plan, planFor, pullFrom, readChanged } from "./read.ts";
 import { account, answerQuery, fakeGitHub, type Routes, repo, withPull } from "./testing.ts";
 
 function read(routes: Record<string, unknown>, previous?: DashboardData) {
@@ -574,4 +574,28 @@ test("with the relay telling merge states, a push reads only the latest release,
   expect(
     planFor([{ kind: "push", repo: "octo/app", sha: "main1" }], before, new Set(), { mergeStatesFromRelay: true }),
   ).toEqual(new Map([["octo/app", { pulls: new Set(), latestRelease: true }]]));
+});
+
+test("a pull request in a GitHub stack keeps its place in it; one outside a stack has none", () => {
+  const gql = {
+    id: "PR_1",
+    number: 343,
+    title: "Show each bed's calibration",
+    url: "https://github.com/octo/app/pull/343",
+    isDraft: false,
+    headRefName: "calibration-screen",
+    baseRefName: "calibration-store",
+    headRefOid: "abc",
+    createdAt: "2026-11-01T00:00:00Z",
+    updatedAt: "2026-11-01T00:00:00Z",
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    autoMergeRequest: null,
+    commits: { totalCount: 1 },
+    author: { __typename: "User", login: "octocat" },
+    statusCheckRollup: null,
+  };
+  const stacked = pullFrom("octo/app", { ...gql, stackEntry: { position: 3, stack: { number: 7, size: 3 } } });
+  expect(stacked.stack).toEqual({ number: 7, size: 3, position: 3 });
+  expect(pullFrom("octo/app", { ...gql, stackEntry: null }).stack).toBeUndefined();
 });

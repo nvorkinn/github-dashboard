@@ -48,7 +48,15 @@ export type PullRequest = {
   nodeId: string;
   /** How many commits it has, when GitHub said. */
   commits?: number | undefined;
+  /**
+   * Its place in a GitHub stack of pull requests, when it is in one: `position` 1 is the one into the stack's base
+   * branch, 2 the one on top of it, and so on. Merging one merges every open one under it as well.
+   */
+  stack?: PullStackEntry | undefined;
 };
+
+/** Where a pull request sits in a GitHub stack: the stack's number in its repository, its size, and the place. */
+export type PullStackEntry = { number: number; size: number; position: number };
 
 export type Unreleased = {
   /** How many commits the default branch is ahead of the release. */

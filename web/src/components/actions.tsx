@@ -80,9 +80,12 @@ export function ConfirmButton({
   busy,
   disabled,
   onConfirm,
+  title,
 }: {
   label: string;
   confirmLabel: string;
+  /** Says more of what it does, on hover. */
+  title?: string | undefined;
   busyLabel: string;
   busy: boolean;
   disabled: boolean;
@@ -129,7 +132,7 @@ export function ConfirmButton({
     );
   }
   return (
-    <button type="button" class="action primary" disabled={disabled} onClick={() => setAsking(true)}>
+    <button type="button" class="action primary" title={title} disabled={disabled} onClick={() => setAsking(true)}>
       {label}
     </button>
   );

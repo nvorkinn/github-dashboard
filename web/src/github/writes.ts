@@ -33,18 +33,26 @@ class Uncertain extends Error {
  * through. A refusal is an `ActionError` in GitHub's own words where it gives some; `needs` names the permissions
  * the app needs for it, for when GitHub says the app isn't allowed.
  */
-export async function send(auth: Auth, path: string, method: string, body: unknown, needs: string): Promise<Response> {
+export async function send(
+  auth: Auth,
+  path: string,
+  method: string,
+  body: unknown,
+  needs: string,
+  options: { headers?: Record<string, string>; answers?: number[] } = {},
+): Promise<Response> {
   let response: Response;
   try {
     response = await auth.github(path, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...options.headers },
       body: JSON.stringify(body),
     });
   } catch (error) {
     throw new Uncertain(error);
   }
-  if (!response.ok) {
+  // Statuses the caller reads the answer of itself, rather than taking as a refusal.
+  if (!response.ok && !options.answers?.includes(response.status)) {
     const retry = await retryAt(response.clone());
     if (retry === undefined && response.status >= 500) {
       throw new Uncertain(new GitHubError(path, response.status, undefined));
@@ -59,8 +67,12 @@ async function refusal(path: string, response: Response, retry: number | undefin
   if (retry !== undefined || response.status === 401) {
     return describe(new GitHubError(path, response.status, retry));
   }
-  const body = (await response.json().catch(() => undefined)) as { message?: unknown } | undefined;
-  const message = typeof body?.message === "string" ? body.message : "";
+  const body = (await response.json().catch(() => undefined)) as
+    | { message?: unknown; details?: { message?: unknown } }
+    | undefined;
+  // The asynchronous merge says why in `details`.
+  const said = body?.message ?? body?.details?.message;
+  const message = typeof said === "string" ? said : "";
   if (response.status === 403 && /not accessible by integration/i.test(message)) {
     return `The GitHub App isn't allowed to do this. It needs ${needs} with write access.`;
   }

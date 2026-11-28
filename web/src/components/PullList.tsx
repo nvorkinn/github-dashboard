@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import type { Check, CheckState, PullActions, PullRequest } from "../model.ts";
 import { isDependabot, summarize } from "../model.ts";
+import { findStacks, groupStacks, type StackPlace } from "../stacks.ts";
 import { Ago } from "./Ago.tsx";
 import { AutoMergeButton, ConfirmButton, useAction, useActions } from "./actions.tsx";
 import { type BackgroundEntry, type BackgroundWhat, keyOf, useBackground } from "./background.tsx";
@@ -143,12 +144,21 @@ function savedViewLabel(view: Pick<SavedPullView, "status" | "author">): string 
   return view.author === "all" ? "All pull requests" : `By ${view.author}`;
 }
 
-export function columnOf(pull: PullRequest): PullColumn {
+/**
+ * Its column. One stacked on another open pull request is ready only in a GitHub stack, where it merges together with
+ * the ones under it, and only when they are all ready too; otherwise the one under it has to merge first.
+ */
+/** Whether a pull request in this place in a stack can be merged now, as far as the ones under it go. */
+function mergesNow(place: StackPlace | undefined): boolean {
+  return !place?.under || (place.native && place.below.every((one) => columnOf(one) === "ready"));
+}
+
+export function columnOf(pull: PullRequest, place?: StackPlace): PullColumn {
   const checks = summarize(pull.checks);
   if (checks === "failed" || pull.mergeState === "conflicts" || pull.mergeState === "behind") {
     return "attention";
   }
-  if (!pull.draft && pull.mergeState === "clean" && (checks === "passed" || checks === "none")) {
+  if (!pull.draft && pull.mergeState === "clean" && (checks === "passed" || checks === "none") && mergesNow(place)) {
     return "ready";
   }
   return "progress";
@@ -178,12 +188,15 @@ export function PullList({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const controlsId = useId();
   const sorted = sortPulls(pulls, order);
+  const stacks = findStacks(pulls);
+  const placeOf = (pull: PullRequest) => stacks.get(`${pull.repo}#${pull.number}`);
+  const column = (pull: PullRequest) => columnOf(pull, placeOf(pull));
   const authors = [...new Set(pulls.map((pull) => pull.author))].sort((a, b) => a.localeCompare(b));
   const effectiveAuthor = author === "all" || authors.includes(author) ? author : "all";
   const filtered = compact
     ? sorted.filter(
         (pull) =>
-          (status === "all" || columnOf(pull) === status) &&
+          (status === "all" || column(pull) === status) &&
           (effectiveAuthor === "all" || pull.author === effectiveAuthor),
       )
     : sorted;
@@ -243,7 +256,7 @@ export function PullList({
                   <option value="all">All statuses ({pulls.length})</option>
                   {COLUMNS.map(({ value, label }) => (
                     <option key={value} value={value}>
-                      {label} ({pulls.filter((pull) => columnOf(pull) === value).length})
+                      {label} ({pulls.filter((pull) => column(pull) === value).length})
                     </option>
                   ))}
                 </select>
@@ -328,21 +341,34 @@ export function PullList({
           <p class="empty">No pull requests match these filters</p>
         ) : (
           <ul class="cards pull-queue" aria-labelledby="pulls-heading">
-            {filtered.map((pull) => (
-              <PullRow
-                key={`${pull.repo}#${pull.number}`}
-                pull={pull}
-                reviewPulls={filtered}
-                now={now}
-                showRepository={showRepository}
-              />
-            ))}
+            {groupStacks(filtered, stacks).map((group) =>
+              "pull" in group ? (
+                <PullRow
+                  key={`${group.pull.repo}#${group.pull.number}`}
+                  pull={group.pull}
+                  place={placeOf(group.pull)}
+                  reviewPulls={filtered}
+                  now={now}
+                  showRepository={showRepository}
+                />
+              ) : (
+                <PullStack
+                  key={`stack:${group.stack[0]?.repo}#${group.stack[0]?.number}`}
+                  stack={group.stack}
+                  into={group.into}
+                  placeOf={placeOf}
+                  reviewPulls={filtered}
+                  now={now}
+                  showRepository={showRepository}
+                />
+              ),
+            )}
           </ul>
         )
       ) : (
         <div class="board">
           {COLUMNS.map(({ value, label }) => {
-            const these = sorted.filter((pull) => columnOf(pull) === value);
+            const these = sorted.filter((pull) => column(pull) === value);
             return (
               <div key={value} class={`board-column column-${value}`}>
                 <h3 id={`column-${value}`}>
@@ -353,7 +379,13 @@ export function PullList({
                 ) : (
                   <ul class="cards" aria-labelledby={`column-${value}`}>
                     {these.map((pull) => (
-                      <PullRow key={`${pull.repo}#${pull.number}`} pull={pull} reviewPulls={sorted} now={now} />
+                      <PullRow
+                        key={`${pull.repo}#${pull.number}`}
+                        pull={pull}
+                        place={placeOf(pull)}
+                        reviewPulls={sorted}
+                        now={now}
+                      />
                     ))}
                   </ul>
                 )}
@@ -363,6 +395,63 @@ export function PullList({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Pull requests stacked one on another, bottom first: the order they merge in. A rail down their left joins them, with
+ * a dot for each in its state's colour, so how far the stack can go in at once reads at a glance.
+ */
+function PullStack({
+  stack,
+  into,
+  placeOf,
+  reviewPulls,
+  now,
+  showRepository,
+}: {
+  stack: PullRequest[];
+  into: string;
+  placeOf: (pull: PullRequest) => StackPlace | undefined;
+  reviewPulls: PullRequest[];
+  now: number;
+  showRepository: boolean;
+}) {
+  const id = useId();
+  const size = placeOf(stack[0] as PullRequest)?.size ?? stack.length;
+  // How many can merge one after the other from the bottom, each ready against the one under it: the first that isn't
+  // holds up the rest.
+  const notReady = stack.findIndex((pull) => columnOf(pull) !== "ready");
+  const ready = notReady === -1 ? stack.length : notReady;
+  return (
+    <li class="pull-stack">
+      <p class="pull-stack-head" id={id}>
+        <span class="pull-stack-name">Stack of {size}</span>
+        <span>
+          into <code>{into}</code>
+        </span>
+        {showRepository && (
+          <span class="pull-compact-repo" title={stack[0]?.repo}>
+            {shortName(stack[0]?.repo ?? "")}
+          </span>
+        )}
+        <span class={ready > 0 ? "pull-stack-ready" : undefined}>
+          {ready === stack.length ? "all ready" : `${ready} of ${stack.length} ready`}
+        </span>
+      </p>
+      <ol class="pull-stack-list" aria-labelledby={id}>
+        {stack.map((pull) => (
+          <PullRow
+            key={`${pull.repo}#${pull.number}`}
+            pull={pull}
+            place={placeOf(pull)}
+            reviewPulls={reviewPulls}
+            now={now}
+            showRepository={false}
+          />
+        ))}
+      </ol>
+    </li>
   );
 }
 
@@ -408,11 +497,14 @@ function stillShown(done: Done | undefined, pull: PullRequest): Done | undefined
  */
 export function PullRow({
   pull: read,
+  place,
   reviewPulls,
   now,
   showRepository = false,
 }: {
   pull: PullRequest;
+  /** Where it sits in a stack of pull requests, when it is in one. */
+  place?: StackPlace | undefined;
   reviewPulls?: PullRequest[];
   now: number;
   showRepository?: boolean;
@@ -445,7 +537,15 @@ export function PullRow({
       ? { ...read, autoMerge: done.what === "autoMergeOn" }
       : read;
   return (
-    <li class={`${unfolded ? "pull pull-folded pull-unfolded" : "pull pull-folded"} pull-${columnOf(pull)}`}>
+    <li class={`${unfolded ? "pull pull-folded pull-unfolded" : "pull pull-folded"} pull-${columnOf(pull, place)}`}>
+      {place && (
+        <span
+          class={`pull-stack-dot stack-${columnOf(pull)}`}
+          title={`${place.position} of ${place.size} in its stack`}
+        >
+          {place.position}
+        </span>
+      )}
       <div class="pull-main">
         <div class="pull-head">
           <span class="repo-label" title={pull.repo}>
@@ -513,7 +613,7 @@ export function PullRow({
             Updating branch
           </span>
         ) : (
-          <MergeState pull={pull} />
+          <MergeState pull={pull} under={mergesNow(place) ? undefined : place?.under} />
         )}
         {pull.autoMerge && <span class="badge badge-accent">Auto-merge</span>}
         {done?.what === "rebaseAsked" && <span class="badge">Rebase requested</span>}
@@ -522,6 +622,8 @@ export function PullRow({
       <Checks checks={pull.checks} />
       <PullButtons
         pull={pull}
+        stacked={place?.under !== undefined}
+        mergesWith={place?.native && mergesNow(place) ? place.below : []}
         actions={
           done?.what === "merged" || (inBackground?.status === "running" && inBackground.what !== "rebase")
             ? undefined
@@ -566,6 +668,8 @@ export function PullRow({
  */
 function PullButtons({
   pull,
+  stacked = false,
+  mergesWith = [],
   actions,
   updated,
   rebaseAsked = false,
@@ -576,6 +680,13 @@ function PullButtons({
   backgroundProblem,
 }: {
   pull: PullRequest;
+  /**
+   * It is based on another open pull request. Merging it now would only fold it into that one's branch, so it can't
+   * be merged, nor have auto-merge turned on, until that one is in and GitHub moves it onto the branch under.
+   */
+  stacked?: boolean;
+  /** In a GitHub stack, the open pull requests under it that merge with it, all ready to. */
+  mergesWith?: PullRequest[];
   actions: PullActions | undefined;
   updated: boolean;
   /** Dependabot was asked to rebase it, and hasn't pushed the rebase yet. */
@@ -595,9 +706,11 @@ function PullButtons({
   const action = useAction();
   const { problem, run } = action;
   const busy = action.busy ?? running;
-  const canMerge = actions !== undefined && pull.mergeState === "clean" && !pull.draft;
+  const canMerge =
+    actions !== undefined && (!stacked || mergesWith.length > 0) && pull.mergeState === "clean" && !pull.draft;
+  const together = mergesWith.length + 1;
   const canUpdate = actions !== undefined && pull.mergeState === "behind" && !updated;
-  const canAutoMerge = actions !== undefined && (pull.autoMerge || !pull.draft);
+  const canAutoMerge = actions !== undefined && (pull.autoMerge || (!pull.draft && !stacked));
   const canRebase = actions !== undefined && onRebase !== undefined && isDependabot(pull) && !rebaseAsked;
   if (!onReview && !canMerge && !canUpdate && !canAutoMerge && !canRebase) {
     return null;
@@ -614,8 +727,13 @@ function PullButtons({
         )}
         {actions && canMerge && (
           <ConfirmButton
-            label="Merge"
-            confirmLabel="Confirm merge"
+            label={together > 1 ? `Merge ${together}` : "Merge"}
+            confirmLabel={together > 1 ? `Confirm merge of ${together}` : "Confirm merge"}
+            title={
+              together > 1
+                ? `Merges ${[...mergesWith, pull].map((one) => `#${one.number}`).join(", ")}, bottom first`
+                : undefined
+            }
             busyLabel="Merging…"
             busy={busy === "merge"}
             disabled={busy !== undefined}
@@ -689,9 +807,19 @@ const MERGE_LOOKS: Record<PullRequest["mergeState"], { tone: Tone; icon: Tone | 
   unknown: { tone: "queued", icon: "queued", label: "Merge state unknown" },
 };
 
-function MergeState({ pull }: { pull: PullRequest }) {
+function MergeState({ pull, under }: { pull: PullRequest; under?: PullRequest | undefined }) {
+  const actionable = pull.mergeState === "conflicts" || pull.mergeState === "behind";
+  // One stacked on another waits for that one, whatever GitHub says of merging it into that one's branch.
+  if (under && !actionable) {
+    return (
+      <span class="chip tone-queued" title={`Based on #${under.number}, which merges first`}>
+        <ToneIcon tone="queued" />
+        After #{under.number}
+      </span>
+    );
+  }
   // A draft can't be merged whatever GitHub says of its branch, so only what its author can act on is shown.
-  if (pull.draft && pull.mergeState !== "conflicts" && pull.mergeState !== "behind") {
+  if (pull.draft && !actionable) {
     return null;
   }
   const look = MERGE_LOOKS[pull.mergeState];

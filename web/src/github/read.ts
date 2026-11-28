@@ -443,6 +443,7 @@ export type GqlPull = {
   mergeStateStatus: string;
   autoMergeRequest: object | null;
   commits: { totalCount: number };
+  stackEntry?: { position: number; stack: { number: number; size: number } | null } | null;
   author: GqlActor;
   statusCheckRollup: { contexts: { pageInfo: { hasNextPage: boolean }; nodes: (GqlContext | null)[] } } | null;
 };
@@ -453,6 +454,7 @@ export const PULL = `fragment Pull on PullRequest {
   mergeable mergeStateStatus
   autoMergeRequest { enabledAt }
   commits { totalCount }
+  stackEntry { position stack { number size } }
   author { __typename login avatarUrl }
   statusCheckRollup { contexts(first: ${CHECKS_PER_PULL}) {
     pageInfo { hasNextPage }
@@ -581,7 +583,11 @@ export function pullFrom(repo: string, pull: GqlPull): PullRequest {
       statuses.push({ context: context.context, state, target_url: context.targetUrl });
     }
   }
-  return pullOf(repo, raw, checkRuns, statuses);
+  const read = pullOf(repo, raw, checkRuns, statuses);
+  const stack = pull.stackEntry?.stack;
+  return stack && pull.stackEntry
+    ? { ...read, stack: { number: stack.number, size: stack.size, position: pull.stackEntry.position } }
+    : read;
 }
 
 function lower(word: string | null | undefined): string | null {
